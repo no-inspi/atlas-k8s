@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/no-inspi/cluster-atlas/internal/model"
-	"github.com/no-inspi/cluster-atlas/internal/stream"
+	"github.com/no-inspi/atlas-k8s/internal/model"
+	"github.com/no-inspi/atlas-k8s/internal/stream"
 )
 
 // fakeSink garde l'état final et le journal des événements.

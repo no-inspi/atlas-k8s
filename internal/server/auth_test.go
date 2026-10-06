@@ -19,11 +19,11 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
-	"github.com/no-inspi/cluster-atlas/internal/access"
-	"github.com/no-inspi/cluster-atlas/internal/auth"
-	"github.com/no-inspi/cluster-atlas/internal/auth/authtest"
-	"github.com/no-inspi/cluster-atlas/internal/model"
-	"github.com/no-inspi/cluster-atlas/internal/stream"
+	"github.com/no-inspi/atlas-k8s/internal/access"
+	"github.com/no-inspi/atlas-k8s/internal/auth"
+	"github.com/no-inspi/atlas-k8s/internal/auth/authtest"
+	"github.com/no-inspi/atlas-k8s/internal/model"
+	"github.com/no-inspi/atlas-k8s/internal/stream"
 )
 
 // Politique de test : le groupe oidc:dev ne voit que production.

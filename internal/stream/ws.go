@@ -10,7 +10,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/no-inspi/cluster-atlas/internal/model"
+	"github.com/no-inspi/atlas-k8s/internal/model"
 )
 
 const (

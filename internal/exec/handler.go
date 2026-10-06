@@ -15,8 +15,8 @@ import (
 	"github.com/coder/websocket"
 	"github.com/go-chi/chi/v5"
 
-	"github.com/no-inspi/cluster-atlas/internal/access"
-	"github.com/no-inspi/cluster-atlas/internal/audit"
+	"github.com/no-inspi/atlas-k8s/internal/access"
+	"github.com/no-inspi/atlas-k8s/internal/audit"
 )
 
 type Options struct {

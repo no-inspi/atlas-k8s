@@ -8,7 +8,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned/typed/metrics/v1beta1"
 
-	"github.com/no-inspi/cluster-atlas/internal/model"
+	"github.com/no-inspi/atlas-k8s/internal/model"
 )
 
 // MetricsSink reçoit les instantanés ; *stream.Hub l'implémente.

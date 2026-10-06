@@ -13,8 +13,8 @@ import (
 	"k8s.io/client-go/rest"
 	k8stesting "k8s.io/client-go/testing"
 
-	"github.com/no-inspi/cluster-atlas/internal/model"
-	"github.com/no-inspi/cluster-atlas/internal/stream"
+	"github.com/no-inspi/atlas-k8s/internal/model"
+	"github.com/no-inspi/atlas-k8s/internal/stream"
 )
 
 // policy : alice (groupe oidc:sre) voit tout ; bob (oidc:dev) ne voit que production.

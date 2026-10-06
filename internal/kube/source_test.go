@@ -15,8 +15,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/no-inspi/cluster-atlas/internal/model"
-	"github.com/no-inspi/cluster-atlas/internal/stream"
+	"github.com/no-inspi/atlas-k8s/internal/model"
+	"github.com/no-inspi/atlas-k8s/internal/stream"
 )
 
 type sink struct {

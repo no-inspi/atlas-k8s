@@ -10,8 +10,8 @@ import (
 	"k8s.io/client-go/tools/remotecommand"
 	utilexec "k8s.io/client-go/util/exec"
 
-	"github.com/no-inspi/cluster-atlas/internal/access"
-	"github.com/no-inspi/cluster-atlas/internal/exec"
+	"github.com/no-inspi/atlas-k8s/internal/access"
+	"github.com/no-inspi/atlas-k8s/internal/exec"
 )
 
 // Exec ouvre pods/exec au nom de l'utilisateur : protocole WebSocket

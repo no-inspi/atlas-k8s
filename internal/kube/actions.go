@@ -16,8 +16,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/no-inspi/cluster-atlas/internal/access"
-	"github.com/no-inspi/cluster-atlas/internal/actions"
+	"github.com/no-inspi/atlas-k8s/internal/access"
+	"github.com/no-inspi/atlas-k8s/internal/actions"
 )
 
 // Actions applique les actions d'exploitation au nom de l'utilisateur.

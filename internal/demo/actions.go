@@ -9,8 +9,8 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/no-inspi/cluster-atlas/internal/access"
-	"github.com/no-inspi/cluster-atlas/internal/actions"
+	"github.com/no-inspi/atlas-k8s/internal/access"
+	"github.com/no-inspi/atlas-k8s/internal/actions"
 )
 
 // Les actions de l'inspecteur agissent sur le cluster simulé.

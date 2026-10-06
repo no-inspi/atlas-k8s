@@ -7,7 +7,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/no-inspi/cluster-atlas/internal/stream"
+	"github.com/no-inspi/atlas-k8s/internal/stream"
 )
 
 // MetricsHandler expose les métriques du backend. Il est servi sur un port à

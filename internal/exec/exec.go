@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/no-inspi/cluster-atlas/internal/access"
+	"github.com/no-inspi/atlas-k8s/internal/access"
 )
 
 // Size est la taille du terminal du navigateur.

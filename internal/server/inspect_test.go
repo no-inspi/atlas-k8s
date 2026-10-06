@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/no-inspi/cluster-atlas/internal/demo"
-	"github.com/no-inspi/cluster-atlas/internal/model"
-	"github.com/no-inspi/cluster-atlas/internal/stream"
+	"github.com/no-inspi/atlas-k8s/internal/demo"
+	"github.com/no-inspi/atlas-k8s/internal/model"
+	"github.com/no-inspi/atlas-k8s/internal/stream"
 )
 
 // Les routes de l'inspecteur, servies par le simulateur (mode démo).

@@ -17,14 +17,14 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/no-inspi/cluster-atlas/internal/access"
-	"github.com/no-inspi/cluster-atlas/internal/actions"
-	"github.com/no-inspi/cluster-atlas/internal/audit"
-	"github.com/no-inspi/cluster-atlas/internal/auth"
-	"github.com/no-inspi/cluster-atlas/internal/exec"
-	"github.com/no-inspi/cluster-atlas/internal/inspect"
-	"github.com/no-inspi/cluster-atlas/internal/logs"
-	"github.com/no-inspi/cluster-atlas/internal/stream"
+	"github.com/no-inspi/atlas-k8s/internal/access"
+	"github.com/no-inspi/atlas-k8s/internal/actions"
+	"github.com/no-inspi/atlas-k8s/internal/audit"
+	"github.com/no-inspi/atlas-k8s/internal/auth"
+	"github.com/no-inspi/atlas-k8s/internal/exec"
+	"github.com/no-inspi/atlas-k8s/internal/inspect"
+	"github.com/no-inspi/atlas-k8s/internal/logs"
+	"github.com/no-inspi/atlas-k8s/internal/stream"
 )
 
 type Config struct {

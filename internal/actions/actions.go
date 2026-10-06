@@ -7,7 +7,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/no-inspi/cluster-atlas/internal/access"
+	"github.com/no-inspi/atlas-k8s/internal/access"
 )
 
 type PodRef struct {

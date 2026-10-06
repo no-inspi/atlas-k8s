@@ -9,7 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/no-inspi/cluster-atlas/internal/model"
+	"github.com/no-inspi/atlas-k8s/internal/model"
 )
 
 func rl(cpu, mem string) corev1.ResourceList {

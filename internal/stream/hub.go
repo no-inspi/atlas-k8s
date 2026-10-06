@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/no-inspi/cluster-atlas/internal/model"
+	"github.com/no-inspi/atlas-k8s/internal/model"
 )
 
 type Kind string

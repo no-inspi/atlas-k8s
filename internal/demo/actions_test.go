@@ -9,9 +9,9 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
-	"github.com/no-inspi/cluster-atlas/internal/actions"
-	"github.com/no-inspi/cluster-atlas/internal/inspect"
-	"github.com/no-inspi/cluster-atlas/internal/model"
+	"github.com/no-inspi/atlas-k8s/internal/actions"
+	"github.com/no-inspi/atlas-k8s/internal/inspect"
+	"github.com/no-inspi/atlas-k8s/internal/model"
 )
 
 var _ actions.Backend = (*Sim)(nil)

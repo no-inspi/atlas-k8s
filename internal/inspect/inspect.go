@@ -10,8 +10,8 @@ import (
 	"io"
 	"time"
 
-	"github.com/no-inspi/cluster-atlas/internal/access"
-	"github.com/no-inspi/cluster-atlas/internal/model"
+	"github.com/no-inspi/atlas-k8s/internal/access"
+	"github.com/no-inspi/atlas-k8s/internal/model"
 )
 
 // Ref désigne un objet Kubernetes. Group vaut "" pour le groupe core.

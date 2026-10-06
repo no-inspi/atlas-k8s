@@ -10,7 +10,7 @@ import (
 	appslisters "k8s.io/client-go/listers/apps/v1"
 	"k8s.io/client-go/tools/cache"
 
-	"github.com/no-inspi/cluster-atlas/internal/model"
+	"github.com/no-inspi/atlas-k8s/internal/model"
 )
 
 func controller(kind, name string) []metav1.OwnerReference {

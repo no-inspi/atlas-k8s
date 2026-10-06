@@ -20,14 +20,14 @@ import (
 	"k8s.io/client-go/rest"
 	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 
-	"github.com/no-inspi/cluster-atlas/internal/access"
-	"github.com/no-inspi/cluster-atlas/internal/audit"
-	"github.com/no-inspi/cluster-atlas/internal/auth"
-	"github.com/no-inspi/cluster-atlas/internal/demo"
-	"github.com/no-inspi/cluster-atlas/internal/kube"
-	"github.com/no-inspi/cluster-atlas/internal/server"
-	"github.com/no-inspi/cluster-atlas/internal/stream"
-	"github.com/no-inspi/cluster-atlas/web"
+	"github.com/no-inspi/atlas-k8s/internal/access"
+	"github.com/no-inspi/atlas-k8s/internal/audit"
+	"github.com/no-inspi/atlas-k8s/internal/auth"
+	"github.com/no-inspi/atlas-k8s/internal/demo"
+	"github.com/no-inspi/atlas-k8s/internal/kube"
+	"github.com/no-inspi/atlas-k8s/internal/server"
+	"github.com/no-inspi/atlas-k8s/internal/stream"
+	"github.com/no-inspi/atlas-k8s/web"
 )
 
 // version est injectée au build (-ldflags "-X main.version=…").

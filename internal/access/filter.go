@@ -4,8 +4,8 @@ import (
 	"context"
 	"sync"
 
-	"github.com/no-inspi/cluster-atlas/internal/model"
-	"github.com/no-inspi/cluster-atlas/internal/stream"
+	"github.com/no-inspi/atlas-k8s/internal/model"
+	"github.com/no-inspi/atlas-k8s/internal/stream"
 )
 
 // StreamFilter applique les droits d'un utilisateur au flux : un objet n'est

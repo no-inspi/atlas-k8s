@@ -2,7 +2,7 @@
 clusterName: ""
 
 image:
-  repository: ghcr.io/no-inspi/cluster-atlas
+  repository: ghcr.io/no-inspi/atlas-k8s
   # Vide : appVersion du chart.
   tag: ""
   pullPolicy: IfNotPresent

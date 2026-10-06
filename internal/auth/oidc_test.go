@@ -13,7 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/no-inspi/cluster-atlas/internal/auth/authtest"
+	"github.com/no-inspi/atlas-k8s/internal/auth/authtest"
 )
 
 type fixture struct {

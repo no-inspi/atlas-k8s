@@ -15,7 +15,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/no-inspi/cluster-atlas/internal/model"
+	"github.com/no-inspi/atlas-k8s/internal/model"
 )
 
 func dial(t *testing.T, srv *httptest.Server, query string, hdr http.Header) (*websocket.Conn, *http.Response, error) {

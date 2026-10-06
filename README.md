@@ -75,7 +75,7 @@ Sans `--demo`, atlas lit le cluster de son kubeconfig (ou en in-cluster quand il
 helm install cluster-atlas deploy/helm/cluster-atlas -n cluster-atlas --create-namespace -f values.yaml
 ```
 
-Le chart crée le Deployment (image distroless `ghcr.io/no-inspi/cluster-atlas`, non-root, système de fichiers en lecture seule), le ServiceAccount et son ClusterRole, le Service, le Secret (clé de chiffrement des cookies générée puis conservée aux upgrades), une NetworkPolicy et, au choix, un Ingress ou un HTTPRoute. Valeurs principales :
+Le chart crée le Deployment (image distroless `ghcr.io/no-inspi/atlas-k8s`, non-root, système de fichiers en lecture seule), le ServiceAccount et son ClusterRole, le Service, le Secret (clé de chiffrement des cookies générée puis conservée aux upgrades), une NetworkPolicy et, au choix, un Ingress ou un HTTPRoute. Valeurs principales :
 
 ```yaml
 clusterName: gke-prod-europe-west1

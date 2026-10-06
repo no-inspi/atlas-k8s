@@ -2,7 +2,7 @@
 
 BIN := bin/atlas
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-IMAGE ?= ghcr.io/no-inspi/cluster-atlas
+IMAGE ?= ghcr.io/no-inspi/atlas-k8s
 
 # Réglages locaux du déploiement (registre, contexte, valeurs), hors dépôt.
 -include deploy.local.mk

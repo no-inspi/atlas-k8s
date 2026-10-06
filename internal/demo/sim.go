@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/no-inspi/cluster-atlas/internal/model"
-	"github.com/no-inspi/cluster-atlas/internal/stream"
+	"github.com/no-inspi/atlas-k8s/internal/model"
+	"github.com/no-inspi/atlas-k8s/internal/stream"
 )
 
 // Sink reçoit l'état simulé ; *stream.Hub l'implémente.

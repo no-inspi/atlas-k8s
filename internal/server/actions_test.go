@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/no-inspi/cluster-atlas/internal/audit"
-	"github.com/no-inspi/cluster-atlas/internal/auth"
-	"github.com/no-inspi/cluster-atlas/internal/demo"
-	"github.com/no-inspi/cluster-atlas/internal/model"
-	"github.com/no-inspi/cluster-atlas/internal/stream"
+	"github.com/no-inspi/atlas-k8s/internal/audit"
+	"github.com/no-inspi/atlas-k8s/internal/auth"
+	"github.com/no-inspi/atlas-k8s/internal/demo"
+	"github.com/no-inspi/atlas-k8s/internal/model"
+	"github.com/no-inspi/atlas-k8s/internal/stream"
 )
 
 func actionServer(t *testing.T, features Features) (http.Handler, *bytes.Buffer, []model.Pod, []model.Node) {

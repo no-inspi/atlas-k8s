@@ -5,7 +5,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	appslisters "k8s.io/client-go/listers/apps/v1"
 
-	"github.com/no-inspi/cluster-atlas/internal/model"
+	"github.com/no-inspi/atlas-k8s/internal/model"
 )
 
 // RootOwner remonte au workload racine : Pod › ReplicaSet › Deployment, ou le

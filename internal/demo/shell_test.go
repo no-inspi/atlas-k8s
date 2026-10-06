@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/no-inspi/cluster-atlas/internal/exec"
+	"github.com/no-inspi/atlas-k8s/internal/exec"
 )
 
 // runShell joue une saisie clavier dans le shell simulé et renvoie la sortie.

@@ -1,4 +1,4 @@
-module github.com/no-inspi/cluster-atlas
+module github.com/no-inspi/atlas-k8s
 
 go 1.26.0
 

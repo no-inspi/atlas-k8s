@@ -25,7 +25,7 @@ Référence : `docs/spec.md` (sections API backend, Vue 3D, Performance, Stack) 
 
 ```text
 cluster-atlas/
-├── go.mod                         # module github.com/no-inspi/cluster-atlas
+├── go.mod                         # module github.com/no-inspi/atlas-k8s
 ├── Makefile                       # web, build, test, demo, dev, e2e
 ├── README.md
 ├── cmd/atlas/main.go              # flags, wiring, arrêt propre
@@ -63,7 +63,7 @@ cluster-atlas/
 
 **Files :** `go.mod`, `.gitignore`, `Makefile`, `web/package.json`, `web/vite.config.ts`, `web/tsconfig.json`, `web/index.html`, `web/src/main.tsx`, `web/embed.go`, `web/dist/.gitkeep`
 
-- [ ] `go mod init github.com/no-inspi/cluster-atlas`, `go 1.23` ; deps : `github.com/go-chi/chi/v5`, `github.com/coder/websocket`.
+- [ ] `go mod init github.com/no-inspi/atlas-k8s`, `go 1.23` ; deps : `github.com/go-chi/chi/v5`, `github.com/coder/websocket`.
 - [ ] `web/` : React 18.3, react-dom, three 0.170, @react-three/fiber 8.18, @react-three/drei 9.122, zustand 5, @fontsource/instrument-sans, @fontsource/jetbrains-mono ; dev : typescript 5.9, vite 6, @vitejs/plugin-react 4, vitest 3, jsdom 26, @types/*, @playwright/test.
 - [ ] `vite.config.ts` : proxy `/api` (ws: true), `/healthz` → `http://localhost:8080` ; `build.outDir = dist`, `emptyOutDir: true` ; Vitest en `jsdom`.
 - [ ] `web/embed.go` :
