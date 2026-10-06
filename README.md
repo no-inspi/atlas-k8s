@@ -40,12 +40,57 @@ Sans `--demo`, atlas lit le cluster de son kubeconfig (ou en in-cluster quand il
 | `--cluster-name` | `ATLAS_CLUSTER_NAME` | nom affiché |
 | `--addr` | `ATLAS_ADDR` | adresse d'écoute (`:8080`) |
 
+## Déployer dans un cluster
+
+```sh
+helm install cluster-atlas deploy/helm/cluster-atlas -n cluster-atlas --create-namespace -f values.yaml
+```
+
+Le chart crée le Deployment (image distroless `ghcr.io/no-inspi/cluster-atlas`, non-root, système de fichiers en lecture seule), le ServiceAccount et son ClusterRole, le Service, le Secret (clé de chiffrement des cookies générée puis conservée aux upgrades), une NetworkPolicy et, au choix, un Ingress ou un HTTPRoute. Valeurs principales :
+
+```yaml
+clusterName: gke-prod-europe-west1
+auth:
+  mode: oidc               # none : développement local, refusé si l'application est exposée
+  oidc:
+    issuerURL: https://accounts.google.com
+    clientID: "…"
+    existingSecret: ""     # sinon clientSecret ; clés client-secret et cookie-key
+    groupsPrefix: "oidc:"
+ingress:
+  enabled: true
+  className: nginx
+  host: atlas.example.com
+  certManager:
+    clusterIssuer: letsencrypt
+networkPolicy:
+  allowFrom:               # namespace du contrôleur d'ingress ou de la Gateway
+    - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: ingress-nginx } }
+```
+
+Toutes les options sont commentées dans [`values.yaml`](deploy/helm/cluster-atlas/values.yaml) et typées par `values.schema.json`.
+
+**Droits du ServiceAccount** : lecture de nodes, pods, namespaces, events, Deployments, ReplicaSets, StatefulSets, DaemonSets, Jobs et metrics.k8s.io ; `create` sur `subjectaccessreviews` ; `impersonate` sur users et groups (restreignable par `rbac.impersonate`). Aucun droit d'écriture sur les workloads, ni `pods/exec`, ni secrets, ni configmaps : logs, exec et actions passent toujours par impersonation de l'utilisateur.
+
+**NetworkPolicy** : entrée HTTP seulement depuis `networkPolicy.allowFrom`, métriques depuis `networkPolicy.metricsFrom` ; sortie vers le DNS du cluster, l'API server (IP lues sur l'EndpointSlice `default/kubernetes` à l'installation, ou `networkPolicy.apiServer.cidrs`) et l'issuer OIDC. Après un changement d'IP de l'API server, relancez `helm upgrade`.
+
+**Timeouts WebSocket** : le flux, les logs et le terminal sont des WebSockets de longue durée. Le backend envoie un ping toutes les 30 s, mais gardez des timeouts d'au moins 3 600 s côté proxy :
+
+- **ingress-nginx** : posés automatiquement par le chart quand `ingress.className=nginx` (`nginx.ingress.kubernetes.io/proxy-read-timeout` et `proxy-send-timeout` à `3600`).
+- **Traefik** : pas de coupure des WebSockets par défaut ; si les `respondingTimeouts` de l'entryPoint ont été réduits, gardez-les à `3600s` ou plus.
+- **GKE Gateway** : ajoutez une `GCPBackendPolicy` sur le Service avec `spec.default.timeoutSec: 3600` ; le HTTPRoute du chart porte déjà `timeouts.request: 3600s`.
+
+**Métriques** : Prometheus sur le port `9090` (`/metrics`), séparé du port public pour que l'Ingress ne les expose pas ; `metrics.serviceMonitor.enabled=true` crée un ServiceMonitor.
+
+Sur kind, `make helm-kind` construit l'image, la charge dans le cluster et installe le chart (sans OIDC jusqu'au jalon 4, donc sans exposition : `kubectl -n cluster-atlas port-forward svc/cluster-atlas 8080`).
+
 ## Tests
 
 ```sh
 make test        # go vet + go test -race, puis Vitest
 make e2e         # Playwright contre le binaire en mode démo (installe d'abord : cd web && npx playwright install chromium)
 make test-integration  # sur kind : un pod créé ou supprimé est diffusé en moins de 2 s
+make scan        # image + Trivy (échoue sur une vulnérabilité critique)
 ```
 
 ## Architecture
@@ -63,7 +108,8 @@ internal/model/    modèle réduit envoyé au front (Node, Pod, Workload, Metric
 internal/stream/   hub snapshot + deltas, handler WebSocket
 internal/kube/     informers, conversions, displayStatus, metrics-server
 internal/demo/     cluster simulé
-internal/server/   routeur HTTP, CSP, SPA
+internal/server/   routeur HTTP, CSP, SPA, métriques
+deploy/helm/       chart Helm et ses tests (helm template)
 web/src/api/       types du protocole, client de stream
 web/src/store/     état normalisé, bandeau d'événements
 web/src/scene/     ville, bâtiments, robots, sélection, postures, disposition
@@ -76,7 +122,7 @@ web/src/ui/        barre du haut, stats, filtres, inspecteur
 | --- | --- | --- |
 | 1 | Squelette, binaire unique, scène 3D, mode démo | fait |
 | 2 | Informers, `displayStatus`, flux branché sur un cluster kind | fait |
-| 3 | Image, chart Helm, déploiement in-cluster | à venir |
+| 3 | Image, chart Helm, déploiement in-cluster | fait |
 | 4 | OIDC, sessions, impersonation, filtrage par droits | à venir |
 | 5 | Inspecteur : logs, YAML, événements | à venir |
 | 6 | Terminal et actions, audit | à venir |
@@ -93,3 +139,9 @@ Choix du jalon 2 ([plan](docs/superpowers/plans/2026-10-06-jalon-2-lecture-clust
 - ArgoCD : l'application vient de l'annotation `argocd.argoproj.io/tracking-id` ou du label `argocd.argoproj.io/instance`. Le statut de sync demanderait la lecture des `Application`, absente du ClusterRole de la spec : l'inspecteur affiche « Géré par ArgoCD ».
 - Le propriétaire racine d'un pod de CronJob est son Job (les CronJobs ne sont pas dans le ClusterRole).
 - Un node est dessiné en bâtiment GPU s'il a de la ressource `nvidia.com/gpu` ou le taint `nvidia.com/gpu`.
+
+Choix du jalon 3 ([plan](docs/superpowers/plans/2026-10-06-jalon-3-chart-helm.md)) :
+
+- Par défaut, `ingress.enabled: false` : un `helm install` sans configuration OIDC n'expose rien.
+- `/metrics` est servi sur un port dédié (9090) plutôt que sur le port public.
+- La clé de cookie est le base64 de 32 octets aléatoires (elle passe en variable d'environnement).

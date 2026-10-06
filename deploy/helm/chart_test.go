@@ -3,6 +3,7 @@ package helm
 
 import (
 	"bytes"
+	"encoding/base64"
 	"os/exec"
 	"strings"
 	"testing"
@@ -240,6 +241,18 @@ func TestNetworkPolicy(t *testing.T) {
 	none := find(mustRender(t, "--set", "auth.mode=none"), "NetworkPolicy")
 	if n := len(get(none, "spec.egress").([]any)); n != 2 {
 		t.Errorf("sans OIDC, pas de sortie vers l'issuer : %d règles", n)
+	}
+}
+
+func TestCookieKeyIsBase64Text(t *testing.T) {
+	sec := find(mustRender(t, oidc...), "Secret")
+	raw, err := base64.StdEncoding.DecodeString(get(sec, "data.cookie-key").(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := base64.StdEncoding.DecodeString(string(raw))
+	if err != nil || len(key) != 32 {
+		t.Errorf("cookie-key doit être le base64 de 32 octets (passé en variable d'environnement) : %q", raw)
 	}
 }
 

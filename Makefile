@@ -1,4 +1,4 @@
-.PHONY: image image-push scan web build test test-go test-web demo dev e2e embed-dir clean kind-up kind-down scenarios run-kind test-integration
+.PHONY: helm-kind image image-push scan web build test test-go test-web demo dev e2e embed-dir clean kind-up kind-down scenarios run-kind test-integration
 
 BIN := bin/atlas
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -71,3 +71,11 @@ image-push:
 
 scan: image
 	trivy image --severity CRITICAL --exit-code 1 --ignore-unfixed $(IMAGE):$(VERSION)
+
+# Installe le chart sur le cluster kind avec l'image locale (sans OIDC : pas d'exposition).
+helm-kind: image
+	kind load docker-image $(IMAGE):$(VERSION) --name atlas
+	helm upgrade --install cluster-atlas deploy/helm/cluster-atlas --kube-context $(KIND_CTX) \
+	  -n cluster-atlas --create-namespace --wait --timeout 3m \
+	  --set image.tag=$(VERSION) --set image.pullPolicy=Never \
+	  --set auth.mode=none --set clusterName=kind-atlas
