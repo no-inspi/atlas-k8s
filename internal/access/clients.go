@@ -12,6 +12,8 @@ import (
 type ClientSource interface {
 	Kube(u User) (kubernetes.Interface, error)
 	Dynamic(u User) (dynamic.Interface, error)
+	// Config : configuration REST (pour l'exec, qui ouvre ses propres connexions).
+	Config(u User) (*rest.Config, error)
 }
 
 // Clients fournit, par utilisateur, des clients Kubernetes qui envoient
@@ -42,6 +44,8 @@ func (c *Clients) Dynamic(u User) (dynamic.Interface, error) {
 	uc, err := c.get(u)
 	return uc.dyn, err
 }
+
+func (c *Clients) Config(u User) (*rest.Config, error) { return c.configFor(u), nil }
 
 func (c *Clients) get(u User) (userClients, error) {
 	k := u.key()
@@ -79,7 +83,9 @@ func (c *Clients) configFor(u User) *rest.Config {
 type Static struct {
 	K kubernetes.Interface
 	D dynamic.Interface
+	C *rest.Config
 }
 
 func (s Static) Kube(User) (kubernetes.Interface, error) { return s.K, nil }
 func (s Static) Dynamic(User) (dynamic.Interface, error) { return s.D, nil }
+func (s Static) Config(User) (*rest.Config, error)       { return s.C, nil }
