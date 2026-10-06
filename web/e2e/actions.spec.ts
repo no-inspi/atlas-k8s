@@ -4,7 +4,7 @@ import { snapshot, waitForPod } from './helpers'
 // Terminal et actions en mode démo (shell simulé, cluster simulé).
 
 test('terminal : commandes, Ctrl+C, flèches ignorées, exit', async ({ page }) => {
-  const api = await waitForPod(page, (p) => p.owner.name === 'api-gateway' && p.displayStatus === 'Running')
+  const api = await waitForPod(page, (p) => p.owner.name === 'api-gateway' && p.namespace === 'production' && p.displayStatus === 'Running')
   await page.goto(`/pods/production/${api.name}`)
   const panel = page.locator('aside.panel')
   await panel.getByRole('tab', { name: 'Terminal' }).click()
