@@ -12,6 +12,7 @@ export default defineConfig({
       '/healthz': backend,
     },
   },
-  build: { outDir: 'dist', emptyOutDir: true, chunkSizeWarningLimit: 1500 },
+  // assetsInlineLimit: 0 : aucun asset en data:, la CSP n'autorise que 'self' pour les polices.
+  build: { outDir: 'dist', emptyOutDir: true, assetsInlineLimit: 0, chunkSizeWarningLimit: 1500 },
   test: { environment: 'jsdom', globals: true, include: ['src/**/*.test.ts'] },
 })

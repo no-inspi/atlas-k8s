@@ -44,7 +44,8 @@ export interface CityLayout {
 const CELL = 0.95 // pas entre deux robots
 const BUILDING_DEPTH = 1.6 // fond de parcelle occupé par le bâtiment
 const ALLEY = 1.9 // allée entre deux parcelles
-const DISTRICT_PAD = 1.2 // marge intérieure d'un quartier (libellé compris)
+const DISTRICT_PAD = 1.2 // marge intérieure d'un quartier
+const LABEL_STRIP = 1.0 // bande à l'avant du quartier pour son nom (jamais masquée par un bâtiment)
 const DISTRICT_GAP = 2.4 // rue entre deux quartiers
 const MIN_PLOT = 4.1
 
@@ -95,7 +96,7 @@ export function layoutCity(nodes: Node[], geo: PlotGeometry): CityLayout {
       style: styleOf(members),
       label: `${pool} · ${sample.instanceType}`,
       width: cols * pitchX - ALLEY + 2 * DISTRICT_PAD,
-      depth: rows * pitchZ - ALLEY + 2 * DISTRICT_PAD + 0.6,
+      depth: rows * pitchZ - ALLEY + 2 * DISTRICT_PAD + LABEL_STRIP,
     }
   })
 
@@ -128,7 +129,7 @@ export function layoutCity(nodes: Node[], geo: PlotGeometry): CityLayout {
     p.members.forEach((n, i) => {
       plots.set(n.name, {
         x: dx + DISTRICT_PAD + (i % p.cols) * pitchX + geo.width / 2,
-        z: dz + DISTRICT_PAD + 0.6 + Math.floor(i / p.cols) * pitchZ + geo.depth / 2,
+        z: dz + DISTRICT_PAD + Math.floor(i / p.cols) * pitchZ + geo.depth / 2,
       })
     })
   }
