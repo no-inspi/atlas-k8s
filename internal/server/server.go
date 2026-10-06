@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -17,6 +18,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/no-inspi/cluster-atlas/internal/access"
+	"github.com/no-inspi/cluster-atlas/internal/actions"
+	"github.com/no-inspi/cluster-atlas/internal/audit"
 	"github.com/no-inspi/cluster-atlas/internal/auth"
 	"github.com/no-inspi/cluster-atlas/internal/inspect"
 	"github.com/no-inspi/cluster-atlas/internal/logs"
@@ -39,6 +42,18 @@ type Config struct {
 	Kube kubernetes.Interface
 	// Inspect répond à l'inspecteur (propriétaires, YAML, événements, logs).
 	Inspect inspect.Backend
+	// Actions applique les actions d'exploitation ; Audit les journalise.
+	Actions  actions.Backend
+	Audit    *audit.Logger
+	Features Features
+}
+
+// Features : options du chart (features.exec, features.actions).
+type Features struct {
+	ActionsEnabled       bool
+	ExecEnabled          bool
+	ExecDeniedNamespaces []string
+	ExecIdleTimeout      time.Duration
 }
 
 // csp interdit tout script et toute police externes : le front est servi
@@ -85,6 +100,15 @@ func New(cfg Config, hub *stream.Hub, log *slog.Logger) http.Handler {
 			r.Get("/yaml/{group}/{version}/{kind}/{ns}/{name}", s.yaml)
 			r.Handle("/namespaces/{ns}/pods/{pod}/logs", logs.Handler(cfg.Inspect, s.session, logs.Options{}, log))
 		}
+		// Console en lecture seule (features.actions.enabled=false) : routes absentes.
+		if cfg.Actions != nil && cfg.Features.ActionsEnabled {
+			r.Delete("/namespaces/{ns}/pods/{pod}", s.deletePod)
+			r.Patch("/namespaces/{ns}/{kind}/{name}/scale", s.scale)
+			r.Post("/namespaces/{ns}/{kind}/{name}/restart", s.restart)
+			r.Post("/nodes/{node}/cordon", s.cordon(true))
+			r.Post("/nodes/{node}/uncordon", s.cordon(false))
+			r.Post("/nodes/{node}/drain", s.drain)
+		}
 		r.NotFound(func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "route inconnue", http.StatusNotFound) })
 	})
 
@@ -125,6 +149,114 @@ func (s *server) me(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"user": u.Name, "groups": groups, "cluster": s.cfg.ClusterName, "demo": s.cfg.Demo,
 		"authenticated": s.cfg.Auth != nil,
+		"features": map[string]any{
+			"actions": s.cfg.Actions != nil && s.cfg.Features.ActionsEnabled,
+			"exec":    s.cfg.Features.ExecEnabled, "execDeniedNamespaces": nonNil(s.cfg.Features.ExecDeniedNamespaces),
+		},
+	})
+}
+
+func nonNil(xs []string) []string {
+	if xs == nil {
+		return []string{}
+	}
+	return xs
+}
+
+// act exécute une action, la journalise (audit) et répond : 200 avec le
+// résultat, ou l'erreur de l'API server telle quelle.
+func (s *server) act(w http.ResponseWriter, r *http.Request, e audit.Entry, run func(u access.User) (any, error)) {
+	u := s.user(r)
+	e.User, e.Groups = u.Name, u.Groups
+	start := time.Now()
+	res, err := run(u)
+	e.Duration = time.Since(start)
+	if s.cfg.Audit != nil {
+		s.cfg.Audit.Record(e, err)
+	}
+	if err != nil {
+		apiError(w, err)
+		return
+	}
+	if res == nil {
+		res = map[string]bool{"ok": true}
+	}
+	writeJSON(w, res)
+}
+
+func (s *server) deletePod(w http.ResponseWriter, r *http.Request) {
+	ns, name := chi.URLParam(r, "ns"), chi.URLParam(r, "pod")
+	s.act(w, r, audit.Entry{Verb: "delete", Resource: "pods", Namespace: ns, Name: name}, func(u access.User) (any, error) {
+		return nil, s.cfg.Actions.DeletePod(r.Context(), u, ns, name)
+	})
+}
+
+func badRequest(w http.ResponseWriter, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusBadRequest)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+func (s *server) scale(w http.ResponseWriter, r *http.Request) {
+	ns, resource, name := chi.URLParam(r, "ns"), chi.URLParam(r, "kind"), chi.URLParam(r, "name")
+	kind, ok := actions.ScalableKinds[resource]
+	if !ok {
+		badRequest(w, "scale possible seulement sur deployments et statefulsets")
+		return
+	}
+	var body struct {
+		Replicas *int32 `json:"replicas"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil || body.Replicas == nil ||
+		*body.Replicas < 0 || *body.Replicas > 1000 {
+		badRequest(w, `corps attendu : {"replicas": 0 à 1000}`)
+		return
+	}
+	n := *body.Replicas
+	s.act(w, r, audit.Entry{Verb: "scale", Resource: resource, Namespace: ns, Name: name, Detail: map[string]any{"replicas": n}},
+		func(u access.User) (any, error) { return nil, s.cfg.Actions.Scale(r.Context(), u, ns, kind, name, n) })
+}
+
+func (s *server) restart(w http.ResponseWriter, r *http.Request) {
+	ns, resource, name := chi.URLParam(r, "ns"), chi.URLParam(r, "kind"), chi.URLParam(r, "name")
+	kind, ok := actions.RestartableKinds[resource]
+	if !ok {
+		badRequest(w, "rollout restart possible seulement sur deployments, statefulsets et daemonsets")
+		return
+	}
+	s.act(w, r, audit.Entry{Verb: "restart", Resource: resource, Namespace: ns, Name: name},
+		func(u access.User) (any, error) { return nil, s.cfg.Actions.Restart(r.Context(), u, ns, kind, name) })
+}
+
+func (s *server) cordon(unschedulable bool) http.HandlerFunc {
+	verb := "uncordon"
+	if unschedulable {
+		verb = "cordon"
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		node := chi.URLParam(r, "node")
+		s.act(w, r, audit.Entry{Verb: verb, Resource: "nodes", Name: node},
+			func(u access.User) (any, error) {
+				return nil, s.cfg.Actions.SetUnschedulable(r.Context(), u, node, unschedulable)
+			})
+	}
+}
+
+// drain : ?dryRun=true renvoie le récapitulatif (lecture, pas d'audit).
+func (s *server) drain(w http.ResponseWriter, r *http.Request) {
+	node := chi.URLParam(r, "node")
+	if r.URL.Query().Get("dryRun") == "true" {
+		plan, err := s.cfg.Actions.DrainPlan(r.Context(), s.user(r), node)
+		if err != nil {
+			apiError(w, err)
+			return
+		}
+		writeJSON(w, plan)
+		return
+	}
+	s.act(w, r, audit.Entry{Verb: "drain", Resource: "nodes", Name: node}, func(u access.User) (any, error) {
+		res, err := s.cfg.Actions.Drain(r.Context(), u, node)
+		return res, err
 	})
 }
 
@@ -142,7 +274,7 @@ func apiError(w http.ResponseWriter, err error) {
 	code := http.StatusInternalServerError
 	var st apierrors.APIStatus
 	switch {
-	case errors.Is(err, inspect.ErrUnsupportedKind):
+	case errors.Is(err, inspect.ErrUnsupportedKind), errors.Is(err, actions.ErrUnsupportedKind):
 		code = http.StatusBadRequest
 	case errors.As(err, &st) && st.Status().Code != 0:
 		code = int(st.Status().Code)
