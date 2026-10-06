@@ -20,7 +20,7 @@ var static = fstest.MapFS{
 
 func newTest(fs fstest.MapFS) (http.Handler, *stream.Hub) {
 	hub := stream.NewHub(stream.Options{})
-	h := New(Config{ClusterName: "kind-atlas", Demo: true, Static: fs}, hub, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	h := New(Config{ClusterName: "kind-atlas", Demo: true, User: "demo", Static: fs}, hub, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	return h, hub
 }
 
@@ -48,7 +48,7 @@ func TestMe(t *testing.T) {
 	h, _ := newTest(static)
 	rec := get(h, "/api/me")
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"cluster":"kind-atlas"`) ||
-		!strings.Contains(rec.Body.String(), `"demo":true`) {
+		!strings.Contains(rec.Body.String(), `"demo":true`) || !strings.Contains(rec.Body.String(), `"user":"demo"`) {
 		t.Errorf("/api/me = %d %s", rec.Code, rec.Body)
 	}
 	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {

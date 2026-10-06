@@ -19,7 +19,8 @@ import (
 type Config struct {
 	ClusterName string
 	Demo        bool
-	Static      fs.FS // contenu de web/dist
+	User        string // utilisateur affiché tant que l'OIDC n'est pas en place (jalon 4)
+	Static      fs.FS  // contenu de web/dist
 }
 
 // csp interdit tout script, style ou police externe : le front est servi
@@ -43,7 +44,7 @@ func New(cfg Config, hub *stream.Hub, log *slog.Logger) http.Handler {
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/me", func(w http.ResponseWriter, _ *http.Request) {
 			// Au jalon 4, l'utilisateur et ses groupes viendront de la session OIDC.
-			writeJSON(w, map[string]any{"user": "demo", "groups": []string{"demo"}, "cluster": cfg.ClusterName, "demo": cfg.Demo})
+			writeJSON(w, map[string]any{"user": cfg.User, "groups": []string{}, "cluster": cfg.ClusterName, "demo": cfg.Demo})
 		})
 		r.Handle("/stream", stream.Handler(hub, log))
 		r.NotFound(func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "route inconnue", http.StatusNotFound) })

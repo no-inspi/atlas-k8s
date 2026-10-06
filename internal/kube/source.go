@@ -441,3 +441,12 @@ func slimContainers(cs []corev1.Container) {
 		cs[i] = corev1.Container{Name: c.Name, Image: c.Image, Resources: c.Resources, RestartPolicy: c.RestartPolicy}
 	}
 }
+
+// PodUID retrouve l'UID d'un pod dans le cache (pour les métriques).
+func (s *Source) PodUID(namespace, name string) (string, bool) {
+	p, err := s.pods.Pods(namespace).Get(name)
+	if err != nil {
+		return "", false
+	}
+	return string(p.UID), true
+}
