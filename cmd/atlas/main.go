@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
@@ -101,6 +102,7 @@ func run() error {
 		cfg.User = "demo"
 		sim := demo.New(hub, demo.Options{Seed: uint64(time.Now().UnixNano())})
 		hub.MarkReady()
+		cfg.Inspect = sim
 		go sim.Run(ctx)
 	} else {
 		rc, err := kube.RestConfig(f.kubeconfig, f.kubeContext)
@@ -124,8 +126,18 @@ func run() error {
 		default:
 			return fmt.Errorf("--auth-mode inconnu %q (oidc | none)", f.authMode)
 		}
-		if err := startClusterSource(ctx, f, rc, client, hub, log); err != nil {
+		src, err := startClusterSource(ctx, f, rc, client, hub, log)
+		if err != nil {
 			return err
+		}
+		if cfg.Auth != nil {
+			cfg.Inspect = kube.NewInspector(cfg.Clients, src, cfg.Reviewer.Allowed)
+		} else {
+			dyn, err := dynamic.NewForConfig(rc)
+			if err != nil {
+				return err
+			}
+			cfg.Inspect = kube.NewInspector(access.Static{K: client, D: dyn}, src, nil)
 		}
 	}
 	go hub.Run(ctx)
@@ -176,10 +188,10 @@ func newAuth(ctx context.Context, o oidcFlags, log *slog.Logger) (*auth.Auth, er
 }
 
 // startClusterSource branche les informers et metrics-server sur le hub.
-func startClusterSource(ctx context.Context, f flags, rc *rest.Config, client kubernetes.Interface, hub *stream.Hub, log *slog.Logger) error {
+func startClusterSource(ctx context.Context, f flags, rc *rest.Config, client kubernetes.Interface, hub *stream.Hub, log *slog.Logger) (*kube.Source, error) {
 	mc, err := metricsclient.NewForConfig(rc)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	src := kube.NewSource(client, hub, kube.Options{Node: kube.NodeOptions{PoolLabel: f.poolLabel}, Log: log})
 	go func() {
@@ -198,5 +210,5 @@ func startClusterSource(ctx context.Context, f flags, rc *rest.Config, client ku
 		}
 		kube.NewMetricsPoller(mc.MetricsV1beta1(), hub, src.PodUID, log).Run(ctx)
 	}()
-	return nil
+	return src, nil
 }

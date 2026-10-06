@@ -13,10 +13,13 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/no-inspi/cluster-atlas/internal/access"
 	"github.com/no-inspi/cluster-atlas/internal/auth"
+	"github.com/no-inspi/cluster-atlas/internal/inspect"
+	"github.com/no-inspi/cluster-atlas/internal/logs"
 	"github.com/no-inspi/cluster-atlas/internal/stream"
 )
 
@@ -34,6 +37,8 @@ type Config struct {
 	// Kube : client du backend, utilisé sans authentification (auth none) ;
 	// nil en démo.
 	Kube kubernetes.Interface
+	// Inspect répond à l'inspecteur (propriétaires, YAML, événements, logs).
+	Inspect inspect.Backend
 }
 
 // csp interdit tout script, style ou police externe : le front est servi
@@ -72,6 +77,12 @@ func New(cfg Config, hub *stream.Hub, log *slog.Logger) http.Handler {
 		r.Get("/me", s.me)
 		r.Handle("/stream", stream.Handler(hub, log, s.streamClient))
 		r.Post("/access-review", s.accessReview)
+		if cfg.Inspect != nil {
+			r.Get("/namespaces/{ns}/pods/{pod}/owner", s.owner)
+			r.Get("/namespaces/{ns}/pods/{pod}/events", s.events)
+			r.Get("/yaml/{group}/{version}/{kind}/{ns}/{name}", s.yaml)
+			r.Handle("/namespaces/{ns}/pods/{pod}/logs", logs.Handler(cfg.Inspect, s.session, logs.Options{}, log))
+		}
 		r.NotFound(func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "route inconnue", http.StatusNotFound) })
 	})
 
@@ -113,6 +124,65 @@ func (s *server) me(w http.ResponseWriter, r *http.Request) {
 		"user": u.Name, "groups": groups, "cluster": s.cfg.ClusterName, "demo": s.cfg.Demo,
 		"authenticated": s.cfg.Auth != nil,
 	})
+}
+
+// session : utilisateur et test d'expiration, pour les WebSockets longs.
+func (s *server) session(r *http.Request) (access.User, func() bool) {
+	sess := auth.FromContext(r.Context())
+	if s.cfg.Auth == nil || sess == nil {
+		return s.user(r), nil
+	}
+	return s.user(r), func() bool { return s.cfg.Auth.Expired(sess) }
+}
+
+// apiError transmet l'erreur de l'API server telle quelle (code et message).
+func apiError(w http.ResponseWriter, err error) {
+	code := http.StatusInternalServerError
+	var st apierrors.APIStatus
+	switch {
+	case errors.Is(err, inspect.ErrUnsupportedKind):
+		code = http.StatusBadRequest
+	case errors.As(err, &st) && st.Status().Code != 0:
+		code = int(st.Status().Code)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+}
+
+func (s *server) owner(w http.ResponseWriter, r *http.Request) {
+	chain, err := s.cfg.Inspect.Owners(r.Context(), s.user(r), chi.URLParam(r, "ns"), chi.URLParam(r, "pod"))
+	if err != nil {
+		apiError(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"chain": chain})
+}
+
+func (s *server) events(w http.ResponseWriter, r *http.Request) {
+	evs, err := s.cfg.Inspect.Events(r.Context(), s.user(r), chi.URLParam(r, "ns"), chi.URLParam(r, "pod"))
+	if err != nil {
+		apiError(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"events": evs})
+}
+
+// yaml : /api/yaml/{group}/{version}/{kind}/{ns}/{name}, « core » pour le groupe vide.
+func (s *server) yaml(w http.ResponseWriter, r *http.Request) {
+	group := chi.URLParam(r, "group")
+	if group == "core" {
+		group = ""
+	}
+	doc, err := s.cfg.Inspect.YAML(r.Context(), s.user(r), inspect.Ref{
+		Group: group, Version: chi.URLParam(r, "version"), Kind: chi.URLParam(r, "kind"),
+		Namespace: chi.URLParam(r, "ns"), Name: chi.URLParam(r, "name"),
+	})
+	if err != nil {
+		apiError(w, err)
+		return
+	}
+	writeJSON(w, doc)
 }
 
 func (s *server) streamClient(r *http.Request) (stream.Client, error) {
