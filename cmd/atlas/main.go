@@ -21,6 +21,7 @@ import (
 	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 
 	"github.com/no-inspi/cluster-atlas/internal/access"
+	"github.com/no-inspi/cluster-atlas/internal/audit"
 	"github.com/no-inspi/cluster-atlas/internal/auth"
 	"github.com/no-inspi/cluster-atlas/internal/demo"
 	"github.com/no-inspi/cluster-atlas/internal/kube"
@@ -50,6 +51,7 @@ type flags struct {
 	addr, metricsAddr, clusterName, authMode, kubeconfig, kubeContext, poolLabel string
 	demo                                                                         bool
 	oidc                                                                         oidcFlags
+	features                                                                     server.Features
 }
 
 type oidcFlags struct {
@@ -80,7 +82,14 @@ func parseFlags() flags {
 	flag.StringVar(&o.scopes, "oidc-scopes", env("ATLAS_OIDC_SCOPES", "openid,email,profile"), "scopes OIDC, séparés par des virgules")
 	ttl, _ := time.ParseDuration(env("ATLAS_SESSION_TTL", "8h"))
 	flag.DurationVar(&o.sessionTTL, "session-ttl", ttl, "durée de vie d'une session")
+	ft := &f.features
+	flag.BoolVar(&ft.ExecEnabled, "exec", env("ATLAS_EXEC_ENABLED", "true") == "true", "terminal dans les containers")
+	denied := flag.String("exec-denied-namespaces", env("ATLAS_EXEC_DENIED_NAMESPACES", "kube-system"), "namespaces interdits au terminal, séparés par des virgules")
+	idle, _ := time.ParseDuration(env("ATLAS_EXEC_IDLE_TIMEOUT", "15m"))
+	flag.DurationVar(&ft.ExecIdleTimeout, "exec-idle-timeout", idle, "fermeture d'un terminal inactif")
+	flag.BoolVar(&ft.ActionsEnabled, "actions", env("ATLAS_ACTIONS_ENABLED", "true") == "true", "actions d'exploitation (false : console en lecture seule)")
 	flag.Parse()
+	ft.ExecDeniedNamespaces = splitList(*denied)
 	return f
 }
 
@@ -96,13 +105,14 @@ func run() error {
 	defer stop()
 
 	hub := stream.NewHub(stream.Options{BaseRev: stream.TimeBaseRev()})
-	cfg := server.Config{ClusterName: f.clusterName, Demo: f.demo, Static: static}
+	cfg := server.Config{ClusterName: f.clusterName, Demo: f.demo, Static: static,
+		Audit: audit.New(os.Stdout), Features: f.features}
 
 	if f.demo {
 		cfg.User = "demo"
 		sim := demo.New(hub, demo.Options{Seed: uint64(time.Now().UnixNano())})
 		hub.MarkReady()
-		cfg.Inspect = sim
+		cfg.Inspect, cfg.Actions, cfg.Exec = sim, sim, sim
 		go sim.Run(ctx)
 	} else {
 		rc, err := kube.RestConfig(f.kubeconfig, f.kubeContext)
@@ -130,15 +140,19 @@ func run() error {
 		if err != nil {
 			return err
 		}
+		var clients access.ClientSource = cfg.Clients
+		var authorize kube.Authorize
 		if cfg.Auth != nil {
-			cfg.Inspect = kube.NewInspector(cfg.Clients, src, cfg.Reviewer.Allowed)
+			authorize = cfg.Reviewer.Allowed
 		} else {
 			dyn, err := dynamic.NewForConfig(rc)
 			if err != nil {
 				return err
 			}
-			cfg.Inspect = kube.NewInspector(access.Static{K: client, D: dyn}, src, nil)
+			clients = access.Static{K: client, D: dyn, C: rc}
 		}
+		cfg.Inspect = kube.NewInspector(clients, src, authorize)
+		cfg.Actions, cfg.Exec = kube.NewActions(clients), kube.NewExec(clients)
 	}
 	go hub.Run(ctx)
 
@@ -166,6 +180,17 @@ func run() error {
 	return srv.Shutdown(shutdown)
 }
 
+// splitList découpe une liste séparée par des virgules, sans éléments vides.
+func splitList(s string) []string {
+	var out []string
+	for _, x := range strings.Split(s, ",") {
+		if x = strings.TrimSpace(x); x != "" {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
 func newAuth(ctx context.Context, o oidcFlags, log *slog.Logger) (*auth.Auth, error) {
 	if o.issuer == "" || o.clientID == "" {
 		return nil, errors.New("auth-mode=oidc : --oidc-issuer-url et --oidc-client-id sont requis (ou --auth-mode=none en développement)")
@@ -174,12 +199,7 @@ func newAuth(ctx context.Context, o oidcFlags, log *slog.Logger) (*auth.Auth, er
 	if err != nil {
 		return nil, fmt.Errorf("%w (ATLAS_COOKIE_KEY ; générer avec : openssl rand -base64 32)", err)
 	}
-	var scopes []string
-	for _, sc := range strings.Split(o.scopes, ",") {
-		if sc = strings.TrimSpace(sc); sc != "" {
-			scopes = append(scopes, sc)
-		}
-	}
+	scopes := splitList(o.scopes)
 	return auth.New(ctx, auth.Config{
 		IssuerURL: o.issuer, ClientID: o.clientID, ClientSecret: o.clientSecret, PublicURL: o.publicURL,
 		Scopes: scopes, UsernameClaim: o.usernameClaim, GroupsClaim: o.groupsClaim, GroupsPrefix: o.groupsPrefix,

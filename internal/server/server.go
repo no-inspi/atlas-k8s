@@ -21,6 +21,7 @@ import (
 	"github.com/no-inspi/cluster-atlas/internal/actions"
 	"github.com/no-inspi/cluster-atlas/internal/audit"
 	"github.com/no-inspi/cluster-atlas/internal/auth"
+	"github.com/no-inspi/cluster-atlas/internal/exec"
 	"github.com/no-inspi/cluster-atlas/internal/inspect"
 	"github.com/no-inspi/cluster-atlas/internal/logs"
 	"github.com/no-inspi/cluster-atlas/internal/stream"
@@ -46,6 +47,8 @@ type Config struct {
 	Actions  actions.Backend
 	Audit    *audit.Logger
 	Features Features
+	// Exec ouvre les terminaux (gardé par Features.Exec*).
+	Exec exec.Backend
 }
 
 // Features : options du chart (features.exec, features.actions).
@@ -100,6 +103,11 @@ func New(cfg Config, hub *stream.Hub, log *slog.Logger) http.Handler {
 			r.Get("/yaml/{group}/{version}/{kind}/{ns}/{name}", s.yaml)
 			r.Handle("/namespaces/{ns}/pods/{pod}/logs", logs.Handler(cfg.Inspect, s.session, logs.Options{}, log))
 		}
+		if cfg.Exec != nil {
+			r.Handle("/namespaces/{ns}/pods/{pod}/exec", exec.Handler(cfg.Exec, s.session, exec.Options{
+				Enabled: cfg.Features.ExecEnabled, DeniedNamespaces: cfg.Features.ExecDeniedNamespaces, IdleTimeout: cfg.Features.ExecIdleTimeout,
+			}, cfg.Audit, log))
+		}
 		// Console en lecture seule (features.actions.enabled=false) : routes absentes.
 		if cfg.Actions != nil && cfg.Features.ActionsEnabled {
 			r.Delete("/namespaces/{ns}/pods/{pod}", s.deletePod)
@@ -151,7 +159,7 @@ func (s *server) me(w http.ResponseWriter, r *http.Request) {
 		"authenticated": s.cfg.Auth != nil,
 		"features": map[string]any{
 			"actions": s.cfg.Actions != nil && s.cfg.Features.ActionsEnabled,
-			"exec":    s.cfg.Features.ExecEnabled, "execDeniedNamespaces": nonNil(s.cfg.Features.ExecDeniedNamespaces),
+			"exec":    s.cfg.Exec != nil && s.cfg.Features.ExecEnabled, "execDeniedNamespaces": nonNil(s.cfg.Features.ExecDeniedNamespaces),
 		},
 	})
 }
