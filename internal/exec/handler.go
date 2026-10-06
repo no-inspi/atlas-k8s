@@ -90,11 +90,14 @@ func Handler(b Backend, session SessionFunc, opts Options, auditLog *audit.Logge
 		stdin := make(chan []byte, 64)
 		resize := make(chan Size, 1)
 		var lastSize atomic.Pointer[Size]
+		// browserGone : le navigateur a fermé la connexion (onglet fermé, autre pod).
+		var browserGone atomic.Bool
 		go func() {
 			defer close(resize)
 			for {
 				typ, data, err := c.Read(ctx)
 				if err != nil {
+					browserGone.Store(true)
 					cancel()
 					return
 				}
@@ -190,6 +193,10 @@ func Handler(b Backend, session SessionFunc, opts Options, auditLog *audit.Logge
 			return
 		}
 		switch {
+		case browserGone.Load() || ctx.Err() != nil:
+			// Navigateur parti (onglet fermé, autre pod) : fin normale, rien à lui envoyer.
+			auditLog.Record(end, nil)
+			return
 		case runErr == nil:
 			auditLog.Record(end, nil)
 			_ = writeJSON(ctx, c, control{Type: "exit"})

@@ -2,6 +2,7 @@ package demo
 
 import (
 	"context"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/no-inspi/cluster-atlas/internal/actions"
+	"github.com/no-inspi/cluster-atlas/internal/inspect"
 	"github.com/no-inspi/cluster-atlas/internal/model"
 )
 
@@ -134,12 +136,21 @@ func TestDemoRolesSurviveReplacement(t *testing.T) {
 	_ = s.DeletePod(ctx, anyone, "staging", notReady.Name)
 	advance(s, t0, 40*time.Second)
 
-	restarted := false
+	var heir model.Pod
 	for _, p := range podsOf(sink, "production", "payment-worker") {
-		restarted = restarted || p.Restarts > 0
+		if p.Restarts > 0 {
+			heir = p
+		}
 	}
-	if !restarted {
-		t.Error("un replica de payment-worker doit reprendre le rôle de pod qui crashe")
+	if heir.UID == "" {
+		t.Fatal("un replica de payment-worker doit reprendre le rôle de pod qui crashe")
+	}
+	rc, err := s.Logs(ctx, anyone, "production", heir.Name, inspect.LogOptions{Previous: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prev, _ := io.ReadAll(rc); !strings.Contains(string(prev), "connection refused") {
+		t.Errorf("l'instance précédente de l'héritier doit montrer le crash :\n%s", prev)
 	}
 	unready := 0
 	for _, p := range podsOf(sink, "staging", "orders-service") {
@@ -149,5 +160,19 @@ func TestDemoRolesSurviveReplacement(t *testing.T) {
 	}
 	if unready != 1 {
 		t.Errorf("attendu 1 orders-service non ready après remplacement, reçu %d", unready)
+	}
+}
+
+func TestDemoDrainPlanFlagsGPUPods(t *testing.T) {
+	s, sink := start(26)
+	var gpu string
+	for name, n := range sink.nodes {
+		if n.GPU > 0 {
+			gpu = name
+		}
+	}
+	plan, _ := s.DrainPlan(context.Background(), anyone, gpu)
+	if len(plan.Stranded) != 1 || !strings.HasPrefix(plan.Stranded[0].Name, "ml-inference-") {
+		t.Errorf("stranded = %+v", plan.Stranded)
 	}
 }

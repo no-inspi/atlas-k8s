@@ -92,6 +92,10 @@ function DrainDialog({ node, onClose }: { node: string; onClose: () => void }) {
             <h3 className="s-warn">PodDisruptionBudgets qui bloqueraient</h3>
             <ul>{plan.blocking.map((b) => <li key={b.namespace + b.name}>{b.namespace}/{b.name} : {b.disruptionsAllowed} interruption(s) autorisée(s) pour {b.pods.join(', ')}</li>)}</ul>
           </>}
+          {plan.stranded.length > 0 && <>
+            <h3 className="s-warn">Resteront Pending ({plan.stranded.length})</h3>
+            <ul>{plan.stranded.map((p) => <li key={p.namespace + p.name}>{p.namespace}/{p.name} — {p.reason}</li>)}</ul>
+          </>}
           {plan.pdbUnknown && <p className="note">{plan.pdbUnknown}</p>}
           <label className="confirm-name">Tapez <b>{short}</b> pour confirmer
             <input value={typed} onChange={(e) => setTyped(e.target.value)} aria-label="Nom court du node" autoComplete="off" spellCheck={false} />

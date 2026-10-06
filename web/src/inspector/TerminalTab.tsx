@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useState } from 'react'
+import { Suspense, lazy, useCallback, useState } from 'react'
 import type { Pod } from '../api/types'
 import { useCluster } from '../store/cluster'
 import type { TermStatus } from './Terminal'
@@ -16,8 +16,6 @@ export function TerminalTab({ p }: { p: Pod }) {
   const onStatus = useCallback((s: TermStatus) => setStatus(s), [])
   const check = podChecks(p).exec
   const access = useAccess({ exec: check })
-
-  useEffect(() => setContainer(containers[0]?.name ?? ''), [p.uid]) // eslint-disable-line react-hooks/exhaustive-deps
 
   let blocked = ''
   if (features && !features.exec) blocked = 'Le terminal est désactivé sur cette installation.'

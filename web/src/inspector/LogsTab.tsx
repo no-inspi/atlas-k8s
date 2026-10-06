@@ -23,12 +23,6 @@ export function LogsTab({ p }: { p: Pod }) {
   const buffer = useRef(new LogBuffer(5000))
   const scroller = useRef<HTMLDivElement>(null)
 
-  // Le pod change : on revient au container principal et à l'instance courante.
-  useEffect(() => {
-    setContainer(defaultContainer)
-    setPrevious(false)
-  }, [p.uid, defaultContainer])
-
   useEffect(() => {
     buffer.current.clear()
     setVersion((v) => v + 1)

@@ -208,7 +208,8 @@ func (s *Sim) startInstantly(p *simPod) {
 		s.setStatus(p, "Running")
 	}
 	if p.crash {
-		// Le pod a déjà redémarré : son instance précédente a des logs.
+		// Le pod a déjà redémarré : son instance précédente a des logs, crash compris.
+		s.crashLines(p)
 		p.prevLogs = append([]logLine(nil), p.logs...)
 		s.setStatus(p, "CrashLoopBackOff")
 	}

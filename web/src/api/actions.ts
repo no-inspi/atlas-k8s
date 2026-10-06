@@ -32,6 +32,8 @@ export interface DrainPlan {
   evict: PodRef[]
   ignored: (PodRef & { reason: string })[]
   blocking: { namespace: string; name: string; disruptionsAllowed: number; pods: string[] }[]
+  /** Pods évincés sans autre node compatible : ils resteront Pending. */
+  stranded: (PodRef & { reason: string })[]
   pdbUnknown?: string
 }
 export interface DrainResult {

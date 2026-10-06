@@ -232,3 +232,43 @@ func TestDrainEvictsItselfLast(t *testing.T) {
 		return len(order) > 0 && order[len(order)-1] == "web-1"
 	})
 }
+
+func TestDrainPlanWarnsAboutPodsWithNowhereToGo(t *testing.T) {
+	gpuPod := nodePod("prod", "ml-1", "gpu1", ctlRef("ReplicaSet", "ml-7f"), nil)
+	gpuPod.Spec.NodeSelector = map[string]string{"pool": "gpu"}
+	gpuPod.Spec.Tolerations = []corev1.Toleration{{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}}
+	web := nodePod("prod", "web-1", "gpu1", ctlRef("ReplicaSet", "web-7f"), nil)
+	gpuTaint := []corev1.Taint{{Key: "nvidia.com/gpu", Value: "present", Effect: corev1.TaintEffectNoSchedule}}
+	client := fake.NewClientset(gpuPod, web,
+		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "gpu1", Labels: map[string]string{"pool": "gpu"}}, Spec: corev1.NodeSpec{Taints: gpuTaint}},
+		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "gpu2", Labels: map[string]string{"pool": "gpu"}}, Spec: corev1.NodeSpec{Taints: gpuTaint, Unschedulable: true}},
+		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "std1", Labels: map[string]string{"pool": "std"}}},
+	)
+	plan, err := NewActions(access.Static{K: client}).DrainPlan(context.Background(), bob, "gpu1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Stranded) != 1 || plan.Stranded[0].Name != "ml-1" || !strings.Contains(plan.Stranded[0].Reason, "Pending") {
+		t.Errorf("stranded = %+v (web-1 peut aller sur std1, ml-1 n'a aucun node GPU disponible)", plan.Stranded)
+	}
+}
+
+func TestTolerates(t *testing.T) {
+	gpu := corev1.Taint{Key: "nvidia.com/gpu", Value: "present", Effect: corev1.TaintEffectNoSchedule}
+	cases := []struct {
+		tol  corev1.Toleration
+		want bool
+	}{
+		{corev1.Toleration{Operator: corev1.TolerationOpExists}, true},
+		{corev1.Toleration{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpExists}, true},
+		{corev1.Toleration{Key: "nvidia.com/gpu", Value: "present"}, true},
+		{corev1.Toleration{Key: "nvidia.com/gpu", Value: "absent"}, false},
+		{corev1.Toleration{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoExecute}, false},
+		{corev1.Toleration{Key: "autre", Operator: corev1.TolerationOpExists}, false},
+	}
+	for _, c := range cases {
+		if got := tolerates(c.tol, gpu); got != c.want {
+			t.Errorf("%+v : %v, attendu %v", c.tol, got, c.want)
+		}
+	}
+}

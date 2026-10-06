@@ -43,11 +43,13 @@ function Head({ kind, name, badge, badgeClass, color, tabs, onClose }: {
 
 function PodBody({ p }: { p: Pod }) {
   const tab = useCluster((s) => s.inspectorTab)
+  // key : un autre pod repart d'un état neuf (container, filtre), sans ouvrir de
+  // session avec le container du pod précédent.
   switch (tab) {
     case 'logs':
-      return <div className="p-body flush"><LogsTab p={p} /></div>
+      return <div className="p-body flush"><LogsTab key={p.uid} p={p} /></div>
     case 'terminal':
-      return <div className="p-body flush"><TerminalTab p={p} /></div>
+      return <div className="p-body flush"><TerminalTab key={p.uid} p={p} /></div>
     case 'yaml':
       return <div className="p-body flush"><YamlTab p={p} /></div>
     case 'events':

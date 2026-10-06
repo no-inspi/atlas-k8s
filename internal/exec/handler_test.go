@@ -47,7 +47,7 @@ func (b *echoBackend) Exec(ctx context.Context, _ access.User, _, _, _ string, c
 	for {
 		n, err := s.Stdin.Read(buf)
 		if err != nil {
-			return nil
+			return ctx.Err() // comme remotecommand : « context canceled » si le navigateur part
 		}
 		in := string(buf[:n])
 		if strings.TrimSpace(in) == "exit" {
@@ -233,3 +233,30 @@ func TestIdleTimeout(t *testing.T) {
 		t.Errorf("sortie %q, contrôle %+v", out, ctl)
 	}
 }
+
+// Fermer l'onglet du terminal est une fin normale de session, pas un échec.
+func TestBrowserDisconnectIsANormalClose(t *testing.T) {
+	var auditBuf syncBuffer
+	c := dial(t, serve(t, &echoBackend{}, opts, &auditBuf), "prod", "")
+	time.Sleep(50 * time.Millisecond)
+	c.Close(websocket.StatusNormalClosure, "")
+	deadline := time.Now().Add(2 * time.Second)
+	for !strings.Contains(auditBuf.String(), "exec-close") && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if out := auditBuf.String(); !strings.Contains(out, `"verb":"exec-close"`) || strings.Contains(out, `"result":"failure"`) {
+		t.Errorf("audit = %s", out)
+	}
+}
+
+type syncBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+func (s *syncBuffer) String() string { s.mu.Lock(); defer s.mu.Unlock(); return s.b.String() }

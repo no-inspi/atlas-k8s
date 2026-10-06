@@ -73,6 +73,7 @@ func (s *Sim) onTransition(p *simPod, prev, next string) {
 		s.event(p, "Warning", "Failed", "Error: ErrImagePull", "kubelet")
 		s.event(p, "Normal", "BackOff", fmt.Sprintf("Back-off pulling image %q", d.Image), "kubelet")
 	case "Error":
+		s.crashLines(p)
 		p.prevLogs = append([]logLine(nil), p.logs...)
 	case "CrashLoopBackOff":
 		s.event(p, "Warning", "BackOff", fmt.Sprintf("Back-off restarting failed container %s in pod %s_%s", d.Name, p.pod.Name, d.NS), "kubelet")
@@ -164,11 +165,14 @@ func (s *Sim) seedLogs(p *simPod) {
 	for range 20 {
 		s.appendLog(p, s.logText(d))
 	}
-	if p.crash {
-		s.appendLog(p, "ERROR dial tcp 10.60.3.12:5432: connect: connection refused (postgres-payments)")
-		s.appendLog(p, "ERROR failed to init repository: retries exhausted (5/5)")
-		s.appendLog(p, "FATAL panic: cannot start without database connection")
-	}
+}
+
+// crashLines : les dernières lignes d'un container qui crashe, écrites au
+// moment du crash (y compris pour un replica qui vient d'hériter du rôle).
+func (s *Sim) crashLines(p *simPod) {
+	s.appendLog(p, "ERROR dial tcp 10.60.3.12:5432: connect: connection refused (postgres-payments)")
+	s.appendLog(p, "ERROR failed to init repository: retries exhausted (5/5)")
+	s.appendLog(p, "FATAL panic: cannot start without database connection")
 }
 
 // tickLogs fait parler les pods Running.

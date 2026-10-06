@@ -135,7 +135,7 @@ func drainPlan(ctx context.Context, kc kubernetes.Interface, node string) (actio
 	if err != nil {
 		return actions.DrainPlan{}, err
 	}
-	plan := actions.DrainPlan{Node: node, Evict: []actions.PodRef{}, Ignored: []actions.Ignored{}, Blocking: []actions.Blocking{}}
+	plan := actions.DrainPlan{Node: node, Evict: []actions.PodRef{}, Ignored: []actions.Ignored{}, Blocking: []actions.Blocking{}, Stranded: []actions.Ignored{}}
 	evict := map[string][]corev1.Pod{} // par namespace, pour les PDB
 	for _, p := range pods.Items {
 		if p.Spec.NodeName != node { // garde : le field selector suffit sur un vrai API server
@@ -190,7 +190,76 @@ func drainPlan(ctx context.Context, kc kubernetes.Interface, node string) (actio
 	sort.Slice(plan.Blocking, func(i, j int) bool {
 		return plan.Blocking[i].Namespace+plan.Blocking[i].Name < plan.Blocking[j].Namespace+plan.Blocking[j].Name
 	})
+	plan.Stranded = stranded(ctx, kc, node, evict)
 	return plan, nil
+}
+
+// stranded repère les pods évincés qui n'auront aucun autre node compatible
+// (nodeSelector et taints NoSchedule/NoExecute ; affinités et ressources ne
+// sont pas évaluées). Sans droit de lister les nodes, on ne dit rien.
+func stranded(ctx context.Context, kc kubernetes.Interface, drained string, evict map[string][]corev1.Pod) []actions.Ignored {
+	out := []actions.Ignored{}
+	nodes, err := kc.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return out
+	}
+	for _, pods := range evict {
+		for _, p := range pods {
+			if !anyNodeFits(&p, nodes.Items, drained) {
+				out = append(out, actions.Ignored{PodRef: actions.PodRef{Namespace: p.Namespace, Name: p.Name},
+					Reason: "aucun autre node compatible (nodeSelector, taints) : il restera Pending"})
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+func anyNodeFits(p *corev1.Pod, nodes []corev1.Node, drained string) bool {
+	for _, n := range nodes {
+		if n.Name == drained || n.Spec.Unschedulable || !labels.SelectorFromSet(p.Spec.NodeSelector).Matches(labels.Set(n.Labels)) {
+			continue
+		}
+		if toleratesAll(p.Spec.Tolerations, n.Spec.Taints) {
+			return true
+		}
+	}
+	return false
+}
+
+// tolerates suit la règle de Kubernetes : même effet (ou effet vide), puis clé
+// égale avec Exists ou valeur égale ; Exists sans clé tolère tout.
+func tolerates(tol corev1.Toleration, t corev1.Taint) bool {
+	if tol.Effect != "" && tol.Effect != t.Effect {
+		return false
+	}
+	if tol.Key == "" {
+		return tol.Operator == corev1.TolerationOpExists
+	}
+	if tol.Key != t.Key {
+		return false
+	}
+	return tol.Operator == corev1.TolerationOpExists || tol.Value == t.Value
+}
+
+// toleratesAll : chaque taint NoSchedule/NoExecute du node est toléré par le pod.
+func toleratesAll(tols []corev1.Toleration, taints []corev1.Taint) bool {
+	for i := range taints {
+		if taints[i].Effect == corev1.TaintEffectPreferNoSchedule {
+			continue
+		}
+		ok := false
+		for _, tol := range tols {
+			if tolerates(tol, taints[i]) {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // Drain cordonne le node puis évince ses pods en parallèle. Un refus de PDB

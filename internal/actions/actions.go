@@ -38,6 +38,9 @@ type DrainPlan struct {
 	Evict    []PodRef   `json:"evict"`
 	Ignored  []Ignored  `json:"ignored"`
 	Blocking []Blocking `json:"blocking"`
+	// Stranded : pods évincés qui ne trouveront aucun autre node compatible
+	// (nodeSelector, taints) et resteront Pending.
+	Stranded []Ignored `json:"stranded"`
 	// PDBUnknown explique pourquoi les PDB n'ont pas pu être lus.
 	PDBUnknown string `json:"pdbUnknown,omitempty"`
 }

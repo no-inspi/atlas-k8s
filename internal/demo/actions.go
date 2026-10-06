@@ -90,7 +90,7 @@ func (s *Sim) SetUnschedulable(_ context.Context, _ access.User, node string, v 
 }
 
 func (s *Sim) drainPlanLocked(node string) actions.DrainPlan {
-	plan := actions.DrainPlan{Node: node, Evict: []actions.PodRef{}, Ignored: []actions.Ignored{}, Blocking: []actions.Blocking{}}
+	plan := actions.DrainPlan{Node: node, Evict: []actions.PodRef{}, Ignored: []actions.Ignored{}, Blocking: []actions.Blocking{}, Stranded: []actions.Ignored{}}
 	for _, p := range s.pods {
 		if p.pod.NodeName != node || p.pod.DisplayStatus == "Terminating" {
 			continue
@@ -101,6 +101,9 @@ func (s *Sim) drainPlanLocked(node string) actions.DrainPlan {
 			continue
 		}
 		plan.Evict = append(plan.Evict, ref)
+		if p.wl.def.GPU && !s.otherGPUNode(node) {
+			plan.Stranded = append(plan.Stranded, actions.Ignored{PodRef: ref, Reason: "aucun autre node compatible (nodeSelector, taints) : il restera Pending"})
+		}
 	}
 	sort.Slice(plan.Evict, func(i, j int) bool { return plan.Evict[i].Name < plan.Evict[j].Name })
 	return plan
@@ -133,6 +136,15 @@ func (s *Sim) Drain(_ context.Context, _ access.User, node string) (actions.Drai
 		res.Evictions = append(res.Evictions, actions.Eviction{PodRef: ref, Result: "evicted"})
 	}
 	return res, nil
+}
+
+func (s *Sim) otherGPUNode(drained string) bool {
+	for _, n := range s.nodes {
+		if n.node.Name != drained && n.node.GPU > 0 && !n.node.Unschedulable {
+			return true
+		}
+	}
+	return false
 }
 
 /* ---------- rollout restart ---------- */
