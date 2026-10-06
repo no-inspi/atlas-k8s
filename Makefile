@@ -1,4 +1,4 @@
-.PHONY: kind-oidc helm-kind-oidc dev-demo dex-up dex-down run-dev e2e-auth helm-kind image image-push scan web build test test-go test-web demo dev e2e embed-dir clean kind-up kind-down scenarios run-kind test-integration
+.PHONY: load-up load-down kind-oidc helm-kind-oidc dev-demo dex-up dex-down run-dev e2e-auth helm-kind image image-push scan web build test test-go test-web demo dev e2e embed-dir clean kind-up kind-down scenarios run-kind test-integration
 
 BIN := bin/atlas
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -124,3 +124,10 @@ helm-kind-oidc: image
 	helm upgrade --install cluster-atlas deploy/helm/cluster-atlas --kube-context $(KIND_CTX) \
 	  -n cluster-atlas --create-namespace --wait --timeout 3m \
 	  -f hack/oidc/values-kind.yaml --set image.tag=$(VERSION)
+
+# Test de charge : 100 nodes kwok et 3 000 pods (NODES=…, PODS=… pour changer).
+load-up:
+	hack/load/kwok-up.sh
+
+load-down:
+	hack/load/kwok-down.sh
