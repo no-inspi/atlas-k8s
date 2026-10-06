@@ -5,6 +5,7 @@ import { useCluster } from '../store/cluster'
 import { shortNode } from '../store/feed'
 import { age, fmtCpu, fmtMem } from '../ui/format'
 import { Meter, goNode } from './common'
+import { PodActions } from './PodActions'
 
 /** Chaîne de propriétaires du pod (Deployment › ReplicaSet › Pod), lue au nom de l'utilisateur. */
 export function useOwners(p: Pod): Ref[] | null {
@@ -21,6 +22,7 @@ export function useOwners(p: Pod): Ref[] | null {
 export function PodOverview({ p }: { p: Pod }) {
   const { pods, workloads, metrics, openYaml } = useCluster.getState()
   const chain = useOwners(p)
+  const features = useCluster((s) => s.me?.features)
   const siblings = [...pods.values()].filter((q) => q.namespace === p.namespace && q.owner.kind === p.owner.kind && q.owner.name === p.owner.name && q.displayStatus !== 'Terminating')
   const onNodes = [...new Set(siblings.filter((q) => q.nodeName).map((q) => q.nodeName))].sort()
   const waiting = siblings.filter((q) => !q.nodeName).length
@@ -81,6 +83,13 @@ export function PodOverview({ p }: { p: Pod }) {
           <span className="argo">{wl.argocd.syncStatus ? `ArgoCD : ${wl.argocd.syncStatus}` : 'Géré par ArgoCD'}</span>
           <span className="later">application {wl.argocd.application}</span>
         </p>
+      )}
+
+      {features?.actions !== false && (
+        <>
+          <h3>Actions</h3>
+          <PodActions p={p} />
+        </>
       )}
 
       <h3>Ressources</h3>

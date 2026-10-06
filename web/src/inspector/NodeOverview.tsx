@@ -4,6 +4,7 @@ import { postureFor } from '../scene/posture'
 import { useCluster } from '../store/cluster'
 import { age, fmtCpu, fmtMem, pct } from '../ui/format'
 import { BADGE, Meter, goPod } from './common'
+import { NodeActions } from './NodeActions'
 
 export function NodeOverview({ n }: { n: Node }) {
   const { pods, metrics } = useCluster.getState()
@@ -41,6 +42,13 @@ export function NodeOverview({ n }: { n: Node }) {
       <Meter label="Mémoire demandée" value={fmtMem(n.requested.memory)} reference={`sur ${fmtMem(n.allocatable.memory)}`} ratio={pct(n.requested.memory, n.allocatable.memory) / 100} />
       <Meter label="Pods" value={String(onNode.length)} reference={`sur ${allocPods}`} ratio={onNode.length / allocPods} />
       {usage && <p className="note">Usage réel : {fmtCpu(usage.cpu)} CPU, {fmtMem(usage.memory)} (metrics-server).</p>}
+
+      {useCluster.getState().me?.features?.actions !== false && (
+        <>
+          <h3>Actions</h3>
+          <NodeActions n={n} />
+        </>
+      )}
 
       <h3>Pods ({onNode.length})</h3>
       {onNode.length ? (

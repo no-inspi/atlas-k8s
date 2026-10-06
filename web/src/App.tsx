@@ -7,6 +7,7 @@ import { useCluster } from './store/cluster'
 import { Feed, Hint, Legend, Stats, TopBar } from './ui/Hud'
 import { Inspector } from './inspector/Inspector'
 import { syncRoute } from './ui/route'
+import { Toasts } from './ui/Toasts'
 
 export function App() {
   useEffect(() => {
@@ -30,6 +31,7 @@ export function App() {
       </div>
       <Hint />
       <Inspector />
+      <Toasts />
     </>
   )
 }

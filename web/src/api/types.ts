@@ -117,6 +117,7 @@ export interface Me {
   cluster: string
   demo: boolean
   authenticated: boolean
+  features?: { actions: boolean; exec: boolean; execDeniedNamespaces: string[] }
 }
 
 export const workloadKey = (w: Pick<Workload, 'kind' | 'namespace' | 'name'>) => `${w.kind}/${w.namespace}/${w.name}`

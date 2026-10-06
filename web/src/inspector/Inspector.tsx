@@ -8,12 +8,13 @@ import { EventsTab } from './EventsTab'
 import { LogsTab } from './LogsTab'
 import { GhostNode, NodeOverview } from './NodeOverview'
 import { PodOverview } from './PodOverview'
+import { TerminalTab } from './TerminalTab'
 import { YamlTab } from './YamlTab'
 
 // Inspecteur : panneau latéral sur desktop, feuille en bas sur mobile (CSS).
 // Il garde son onglet actif quand on passe d'un pod à l'autre.
 
-const POD_TABS: [InspectorTab, string][] = [['overview', 'Aperçu'], ['logs', 'Logs'], ['yaml', 'YAML'], ['events', 'Événements']]
+const POD_TABS: [InspectorTab, string][] = [['overview', 'Aperçu'], ['logs', 'Logs'], ['terminal', 'Terminal'], ['yaml', 'YAML'], ['events', 'Événements']]
 
 function Head({ kind, name, badge, badgeClass, color, tabs, onClose }: {
   kind: string; name: string; badge: string; badgeClass: string; color?: string; tabs: [InspectorTab, string][]; onClose: () => void
@@ -45,6 +46,8 @@ function PodBody({ p }: { p: Pod }) {
   switch (tab) {
     case 'logs':
       return <div className="p-body flush"><LogsTab p={p} /></div>
+    case 'terminal':
+      return <div className="p-body flush"><TerminalTab p={p} /></div>
     case 'yaml':
       return <div className="p-body flush"><YamlTab p={p} /></div>
     case 'events':
@@ -65,7 +68,7 @@ export function Inspector() {
     const onKey = (e: KeyboardEvent) => {
       // Échap ferme l'inspecteur, sauf depuis un champ (filtre des logs, éditeur).
       const t = e.target as HTMLElement
-      if (e.key === 'Escape' && !t.closest('input, select, textarea, .monaco-host')) useCluster.getState().select(null)
+      if (e.key === 'Escape' && !t.closest('input, select, textarea, .monaco-host, .term-host, .dialog')) useCluster.getState().select(null)
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)

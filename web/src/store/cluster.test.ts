@@ -72,6 +72,15 @@ describe('sélection et filtre', () => {
     expect(s().yamlTarget).toBeNull()
   })
 
+  it('notifie un résultat d’action dans un toast et dans le bandeau', () => {
+    s().notify('Pod api-1 supprimé')
+    s().notify('refusé', 'e')
+    expect(s().toasts.map((t) => t.text)).toEqual(['Pod api-1 supprimé', 'refusé'])
+    expect(s().feed[0]).toEqual(expect.objectContaining({ text: 'refusé', level: 'e' }))
+    s().dismissToast(s().toasts[0].id)
+    expect(s().toasts).toHaveLength(1)
+  })
+
   it('bascule le filtre de namespace', () => {
     s().toggleNsFilter('production')
     expect(s().nsFilter).toBe('production')

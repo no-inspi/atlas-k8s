@@ -180,3 +180,22 @@ h3{font-size:13.5px;font-weight:600;margin:20px 0 8px;color:var(--ink)}
 .monaco-host{flex:1;min-height:0}
 .evt tr.warning td{background:color-mix(in srgb,var(--err) 7%,transparent)}
 .chain .link.cur{font-weight:600}
+
+/* Actions, dialogues, notifications, terminal (jalon 6) */
+.dialog-backdrop{position:fixed;inset:0;z-index:20;background:color-mix(in srgb,var(--ink) 35%,transparent);display:flex;align-items:center;justify-content:center;padding:16px}
+.dialog{background:var(--panel);border:1px solid var(--line);border-radius:14px;width:min(560px,100%);max-height:calc(100% - 32px);display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.25)}
+.dialog h2{font-size:17px;margin:0;padding:16px 18px 8px}
+.dialog-body{padding:0 18px;overflow:auto;font-size:14px}
+.dialog-body h3{margin:14px 0 6px}
+.dialog-body ul{margin:0;padding-left:18px;font-size:13px;font-family:var(--mono)}
+.dialog-actions{display:flex;justify-content:flex-end;gap:8px;padding:14px 18px}
+.confirm-name{display:flex;flex-direction:column;gap:6px;margin:16px 0 4px;font-size:13.5px}
+.confirm-name input{font:inherit;font-family:var(--mono);background:var(--panel-2);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:6px 10px}
+.toasts{position:fixed;right:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 12px);z-index:30;display:flex;flex-direction:column;gap:8px;max-width:min(420px,calc(100% - 24px))}
+.toast{display:flex;align-items:flex-start;gap:10px;background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--ok);border-radius:10px;padding:10px 12px;font-size:13.5px;box-shadow:0 8px 24px rgba(0,0,0,.15)}
+.toast.w{border-left-color:var(--warn)} .toast.e{border-left-color:var(--err)}
+.toast span{flex:1;word-break:break-word}
+.close.small{width:24px;height:24px;font-size:12px}
+.term-host{flex:1;min-height:0;background:var(--code-bg);padding:6px 0 0 8px}
+.term-blocked{flex:1;background:var(--code-bg);color:var(--code-ink);font-family:var(--mono);font-size:12.5px;padding:14px}
+.btn[aria-busy]{opacity:.6}

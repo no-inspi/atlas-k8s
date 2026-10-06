@@ -1,10 +1,16 @@
 import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
 import { workloadKey, type Me, type Message, type Metrics, type Namespace, type Node, type Pod, type Workload } from '../api/types'
-import { feedForNode, feedForPod, type FeedDraft, type FeedItem } from './feed'
+import { feedForNode, feedForPod, type FeedDraft, type FeedItem, type FeedLevel } from './feed'
+
+export interface Toast {
+  id: number
+  text: string
+  level: FeedLevel
+}
 
 export type Selection = { type: 'pod' | 'node'; key: string; name: string } | null
-export type InspectorTab = 'overview' | 'logs' | 'yaml' | 'events'
+export type InspectorTab = 'overview' | 'logs' | 'terminal' | 'yaml' | 'events'
 /** Objet affiché par l'onglet YAML (null : workload racine du pod). */
 export type YamlTarget = { kind: string; name: string } | null
 export type Connection = 'connecting' | 'live' | 'reconnecting'
@@ -32,6 +38,7 @@ export interface ClusterState {
   yamlTarget: YamlTarget
   nsFilter: string | null
   feed: FeedItem[]
+  toasts: Toast[]
 
   applyMessages(msgs: Message[]): void
   setConnection(c: Connection): void
@@ -41,6 +48,9 @@ export interface ClusterState {
   toggleNsFilter(ns: string): void
   setInspectorTab(tab: InspectorTab): void
   openYaml(target: YamlTarget): void
+  /** Résultat d'une action : notification et entrée dans le bandeau d'événements. */
+  notify(text: string, level?: FeedLevel): void
+  dismissToast(id: number): void
   reset(): void
 }
 
@@ -61,6 +71,7 @@ const initial = () => ({
   yamlTarget: null as YamlTarget,
   nsFilter: null,
   feed: [] as FeedItem[],
+  toasts: [] as Toast[],
 })
 
 export const useCluster = create<ClusterState>()(
@@ -141,6 +152,14 @@ export const useCluster = create<ClusterState>()(
     toggleNsFilter: (ns) => set((s) => ({ nsFilter: s.nsFilter === ns ? null : ns })),
     setInspectorTab: (inspectorTab) => set({ inspectorTab }),
     openYaml: (yamlTarget) => set({ inspectorTab: 'yaml', yamlTarget }),
+    notify: (text, level = '') => {
+      const id = ++feedSeq
+      set((s) => ({
+        toasts: [...s.toasts, { id, text, level }].slice(-4),
+        feed: [{ id, at: Date.now(), text, level }, ...s.feed].slice(0, FEED_SIZE),
+      }))
+    },
+    dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 
     reset: () => set(initial()),
   })),

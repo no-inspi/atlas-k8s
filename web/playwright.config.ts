@@ -5,6 +5,9 @@ export default defineConfig({
   testDir: 'e2e',
   testIgnore: 'auth.spec.ts',
   timeout: 30_000,
+  // Un seul cluster simulé partagé : les tests qui agissent (drain, delete) ne
+  // doivent pas courir en parallèle de ceux qui lisent.
+  workers: 1,
   use: {
     baseURL: 'http://localhost:18080',
     // WebGL logiciel en headless.
