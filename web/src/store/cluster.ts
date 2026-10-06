@@ -29,6 +29,7 @@ export interface ClusterState {
 
   applyMessages(msgs: Message[]): void
   setConnection(c: Connection): void
+  resetRev(): void
   setMe(me: Me): void
   select(sel: { type: 'pod' | 'node'; key: string } | null): void
   toggleNsFilter(ns: string): void
@@ -116,6 +117,7 @@ export const useCluster = create<ClusterState>()(
     },
 
     setConnection: (connection) => set({ connection }),
+    resetRev: () => set({ rev: 0 }),
     setMe: (me) => set({ me }),
 
     select(sel) {

@@ -3,6 +3,7 @@ import { defineConfig, devices } from '@playwright/test'
 // E2E en mode démo : le binaire compilé (make build) sert le front et le simulateur.
 export default defineConfig({
   testDir: 'e2e',
+  testIgnore: 'auth.spec.ts',
   timeout: 30_000,
   use: {
     baseURL: 'http://localhost:18080',

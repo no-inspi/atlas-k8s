@@ -10,6 +10,7 @@ export default defineConfig({
     proxy: {
       '/api': { target: backend, ws: true },
       '/healthz': backend,
+      '/auth': backend,
     },
   },
   // assetsInlineLimit: 0 : aucun asset en data:, la CSP n'autorise que 'self' pour les polices.

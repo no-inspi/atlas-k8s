@@ -184,6 +184,32 @@ function NodeOverview({ n }: { n: Node }) {
   )
 }
 
+/** Node que l'utilisateur ne peut pas lister : seuls ses propres pods sont montrés. */
+function GhostNode({ name }: { name: string }) {
+  const { pods } = useCluster.getState()
+  const onNode = [...pods.values()].filter((p) => p.nodeName === name).sort((a, b) => a.name.localeCompare(b.name))
+  const colors = clusterColors(useCluster.getState())
+  return (
+    <div className="p-body">
+      <p className="note" style={{ marginTop: 0 }}>
+        Vous n'avez pas le droit <code>list</code> sur <code>nodes</code> : capacité, conditions et autres pods de ce node ne sont pas affichés.
+      </p>
+      <h3>Vos pods sur ce node ({onNode.length})</h3>
+      <ul className="podlist">
+        {onNode.map((p) => (
+          <li key={p.uid}>
+            <button onClick={goPod(p.uid)}>
+              <i style={{ background: colors.get(p.namespace) }} />
+              <span className="nm">{p.name}</span>
+              <span className={BADGE[postureFor(p).antenna]}>{p.displayStatus}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 export function Inspector() {
   useCluster((s) => s.version)
   useCluster((s) => s.metrics)
@@ -216,12 +242,18 @@ export function Inspector() {
   } else if (selection?.type === 'node') {
     const n = nodes.get(selection.key)
     const ready = n?.conditions.some((c) => c.type === 'Ready' && c.status === 'True')
+    const ghost = !n && [...pods.values()].some((p) => p.nodeName === selection.key)
     content = n ? (
       <>
         <Head kind={`Node · ${n.pool}`} name={n.name}
           badge={`${ready ? 'Ready' : 'NotReady'}${n.unschedulable ? ', SchedulingDisabled' : ''}`}
           badgeClass={!ready ? 's-err' : n.unschedulable ? 's-warn' : 's-ok'} onClose={close} />
         <NodeOverview n={n} />
+      </>
+    ) : ghost ? (
+      <>
+        <Head kind="Node" name={selection.key} badge="Non visible" badgeClass="s-mute" onClose={close} />
+        <GhostNode name={selection.key} />
       </>
     ) : (
       <>

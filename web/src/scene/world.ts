@@ -27,8 +27,8 @@ export class World {
   update(st: Pick<ClusterState, 'version' | 'nodes' | 'pods' | 'namespaces'>): boolean {
     if (st.version === this.version) return false
     this.version = st.version
-    this.nodes = [...st.nodes.values()].sort((a, b) => a.name.localeCompare(b.name))
     this.pods = [...st.pods.values()]
+    this.nodes = [...st.nodes.values(), ...ghostNodes(st.nodes, this.pods)].sort((a, b) => a.name.localeCompare(b.name))
 
     // Taille des parcelles fixée au premier état reçu : pas de redimensionnement en direct.
     if (!this.slots && this.nodes.length) {
@@ -67,6 +67,19 @@ export class World {
       this.targets.set(p.uid, { x: plot.x + local.x, z: plot.z + local.z, onNode: true })
     }
   }
+}
+
+/**
+ * Sans droit de lister les nodes, l'utilisateur connaît quand même leur nom par
+ * ses pods : on dessine un bâtiment anonyme, sans capacité ni détails.
+ */
+export function ghostNodes(known: ReadonlyMap<string, Node>, pods: Pod[]): Node[] {
+  const names = new Set(pods.map((p) => p.nodeName).filter((n) => n && !known.has(n)))
+  return [...names].map((name) => ({
+    name, pool: 'nodes non visibles', instanceType: '', zone: '', spot: false, gpu: 0,
+    allocatable: { cpu: 0, memory: 0 }, requested: { cpu: 0, memory: 0 }, conditions: [], taints: [],
+    unschedulable: false, kubeletVersion: '', createdAt: '', ghost: true,
+  }))
 }
 
 export const world = new World()

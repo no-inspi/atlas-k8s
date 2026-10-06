@@ -30,6 +30,12 @@ export function TopBar() {
         <span>{hms(now)}</span>
         {me?.demo && <span className="sim">Données simulées</span>}
       </div>
+      {me?.authenticated && (
+        <div className="user">
+          <span className="user-name" title={me.groups.join(', ')}>{me.user}</span>
+          <a className="logout" href="/auth/logout">Déconnexion</a>
+        </div>
+      )}
     </header>
   )
 }
@@ -42,6 +48,7 @@ export function Stats() {
   const { nodes, pods } = useCluster.getState()
   const all = [...pods.values()]
   const nodeList = [...nodes.values()]
+  const hasPods = all.some((p) => p.nodeName)
   const ready = nodeList.filter((n) => !n.unschedulable && n.conditions.some((c) => c.type === 'Ready' && c.status === 'True')).length
   const running = all.filter((p) => p.displayStatus === 'Running').length
   const pending = all.filter((p) => PENDING.has(p.displayStatus)).length
@@ -51,7 +58,9 @@ export function Stats() {
 
   return (
     <div className="stats" aria-label="Résumé du cluster">
-      <div className="stat"><span>Nodes prêts</span><strong>{ready}/{nodeList.length}</strong></div>
+      <div className="stat" title={nodeList.length || !hasPods ? undefined : "Vous n'avez pas le droit de lister les nodes"}>
+        <span>Nodes prêts</span><strong>{nodeList.length || !hasPods ? `${ready}/${nodeList.length}` : '—'}</strong>
+      </div>
       <div className="stat"><span>Pods Running</span><strong data-testid="pods-running">{running}/{all.length}</strong></div>
       <div className={`stat ${pending ? 'warn' : ''}`}><span>En attente</span><strong>{pending}</strong></div>
       <div className={`stat ${errors ? 'err' : ''}`}><span>En erreur</span><strong>{errors}</strong></div>

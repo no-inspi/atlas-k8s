@@ -1,0 +1,45 @@
+# Droits des utilisateurs Dex de dev (groupes préfixés « oidc: » par atlas).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: atlas-dev-sre-view
+subjects:
+  - { kind: Group, name: "oidc:sre", apiGroup: rbac.authorization.k8s.io }
+roleRef: { kind: ClusterRole, name: view, apiGroup: rbac.authorization.k8s.io }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: atlas-dev-dev-edit
+  namespace: production
+subjects:
+  - { kind: Group, name: "oidc:dev", apiGroup: rbac.authorization.k8s.io }
+roleRef: { kind: ClusterRole, name: edit, apiGroup: rbac.authorization.k8s.io }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: atlas-dev-dev-edit
+  namespace: staging
+subjects:
+  - { kind: Group, name: "oidc:dev", apiGroup: rbac.authorization.k8s.io }
+roleRef: { kind: ClusterRole, name: edit, apiGroup: rbac.authorization.k8s.io }
+---
+# « view » ne couvre pas les nodes (ressource cluster-scoped) : alice reçoit en
+# plus leur lecture ; bob, sans ce droit, voit des bâtiments anonymes.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: atlas-dev-node-reader
+rules:
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: atlas-dev-sre-nodes
+subjects:
+  - { kind: Group, name: "oidc:sre", apiGroup: rbac.authorization.k8s.io }
+roleRef: { kind: ClusterRole, name: atlas-dev-node-reader, apiGroup: rbac.authorization.k8s.io }

@@ -1,4 +1,4 @@
-.PHONY: helm-kind image image-push scan web build test test-go test-web demo dev e2e embed-dir clean kind-up kind-down scenarios run-kind test-integration
+.PHONY: dev-demo dex-up dex-down run-dev e2e-auth helm-kind image image-push scan web build test test-go test-web demo dev e2e embed-dir clean kind-up kind-down scenarios run-kind test-integration
 
 BIN := bin/atlas
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -28,9 +28,42 @@ demo: build
 	$(BIN) --demo
 
 # Backend démo sur :8080 et Vite (HMR) sur :5173, qui proxifie /api.
-dev: embed-dir
+dev-demo: embed-dir
 	go build -o $(BIN) ./cmd/atlas
 	$(BIN) --demo & PID=$$!; trap "kill $$PID" EXIT INT TERM; cd web && npm run dev
+
+# --- Développement avec authentification (kind + Dex) ----------------------
+# make kind-up scenarios une fois, puis make dev : http://localhost:5173,
+# alice@example.com ou bob@example.com, mot de passe « password ».
+
+DEX_IMAGE := ghcr.io/dexidp/dex:v2.45.0
+# Clé de dev, publique et sans valeur : ne jamais la réutiliser ailleurs.
+DEV_COOKIE_KEY := ZGV2LWNvb2tpZS1rZXktbm90LWZvci1wcm9kLTAwMDA=
+OIDC_DEV_FLAGS = --auth-mode=oidc --context $(KIND_CTX) --cluster-name kind-atlas \
+	--oidc-issuer-url http://localhost:5556/dex --oidc-client-id cluster-atlas \
+	--oidc-client-secret dev-secret-not-for-production --oidc-scopes openid,email,profile,groups
+
+dex-up:
+	kubectl --context $(KIND_CTX) apply -f hack/dev-rbac.yaml
+	docker rm -f atlas-dex >/dev/null 2>&1 || true
+	docker run -d --name atlas-dex -p 5556:5556 -v $(CURDIR)/hack/dex/config.yaml:/etc/dex/config.yaml:ro \
+	  $(DEX_IMAGE) dex serve /etc/dex/config.yaml
+	@until curl -sf http://localhost:5556/dex/.well-known/openid-configuration >/dev/null; do sleep 1; done
+
+dex-down:
+	docker rm -f atlas-dex
+
+dev: embed-dir dex-up
+	go build -o $(BIN) ./cmd/atlas
+	ATLAS_COOKIE_KEY=$(DEV_COOKIE_KEY) $(BIN) $(OIDC_DEV_FLAGS) --public-url http://localhost:5173 & PID=$$!; \
+	  trap "kill $$PID" EXIT INT TERM; cd web && npm run dev
+
+# Binaire compilé en mode OIDC sur :8080 (utilisé par make e2e-auth).
+run-dev: build dex-up
+	ATLAS_COOKIE_KEY=$(DEV_COOKIE_KEY) $(BIN) $(OIDC_DEV_FLAGS) --public-url http://localhost:8080
+
+e2e-auth: build dex-up
+	cd web && npx playwright test -c playwright.auth.config.ts
 
 e2e: build
 	cd web && npx playwright test

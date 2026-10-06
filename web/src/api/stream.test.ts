@@ -6,10 +6,10 @@ class FakeWS {
   static all: FakeWS[] = []
   onopen: (() => void) | null = null
   onmessage: ((e: { data: string }) => void) | null = null
-  onclose: (() => void) | null = null
+  onclose: ((e: { code: number }) => void) | null = null
   closed = false
   constructor(public url: string) { FakeWS.all.push(this) }
-  close() { this.closed = true; this.onclose?.() }
+  close() { this.closed = true; this.onclose?.({ code: 1000 }) }
   emit(m: unknown) { this.onmessage?.({ data: JSON.stringify(m) }) }
 }
 
@@ -19,10 +19,12 @@ beforeEach(() => {
   vi.useFakeTimers()
 })
 
-const opts = () => ({
+const opts = (extra = {}) => ({
   WebSocket: FakeWS as unknown as typeof WebSocket,
   schedule: (f: () => void) => setTimeout(f, 0),
   location: { protocol: 'https:', host: 'atlas.example.com' } as Location,
+  checkSession: () => Promise.resolve(),
+  ...extra,
 })
 
 describe('streamURL', () => {
@@ -53,7 +55,7 @@ describe('connectStream', () => {
     FakeWS.all[0].emit({ type: 'snapshot', rev: 7 })
     vi.runOnlyPendingTimers()
 
-    FakeWS.all[0].onclose?.()
+    FakeWS.all[0].onclose?.({ code: 1006 })
     expect(useCluster.getState().connection).toBe('reconnecting')
     vi.advanceTimersByTime(499)
     expect(FakeWS.all).toHaveLength(1)
@@ -61,11 +63,29 @@ describe('connectStream', () => {
     expect(FakeWS.all).toHaveLength(2)
     expect(FakeWS.all[1].url).toBe('wss://atlas.example.com/api/stream?rev=7')
 
-    FakeWS.all[1].onclose?.()
+    FakeWS.all[1].onclose?.({ code: 1006 })
     vi.advanceTimersByTime(999)
     expect(FakeWS.all).toHaveLength(2)
     vi.advanceTimersByTime(1)
     expect(FakeWS.all).toHaveLength(3)
+  })
+
+  it('repart d’un snapshot complet quand les droits changent (4000)', () => {
+    connectStream(opts())
+    FakeWS.all[0].emit({ type: 'snapshot', rev: 7 })
+    vi.runOnlyPendingTimers()
+    FakeWS.all[0].onclose?.({ code: 4000 })
+    vi.advanceTimersByTime(0)
+    expect(FakeWS.all[1].url).toBe('wss://atlas.example.com/api/stream')
+  })
+
+  it('renvoie vers la connexion quand la session expire (4401)', () => {
+    const login = vi.fn()
+    connectStream(opts({ login }))
+    FakeWS.all[0].onclose?.({ code: 4401 })
+    expect(login).toHaveBeenCalled()
+    vi.advanceTimersByTime(10_000)
+    expect(FakeWS.all).toHaveLength(1)
   })
 
   it('s’arrête proprement', () => {

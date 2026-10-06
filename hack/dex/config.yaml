@@ -1,0 +1,32 @@
+# Dex de développement : deux utilisateurs, mot de passe « password ».
+#   alice@example.com, groupe sre → view sur tout le cluster
+#   bob@example.com,   groupe dev → edit dans production et staging seulement
+issuer: http://localhost:5556/dex
+storage:
+  type: memory
+web:
+  http: 0.0.0.0:5556
+oauth2:
+  skipApprovalScreen: true
+enablePasswordDB: true
+staticClients:
+  - id: cluster-atlas
+    name: Cluster Atlas
+    secret: dev-secret-not-for-production
+    redirectURIs:
+      - http://localhost:5173/auth/callback
+      - http://localhost:8080/auth/callback
+staticPasswords:
+  - email: alice@example.com
+    # bcrypt de « password »
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: alice
+    emailVerified: true
+    userID: 7a1f0c2e-9a3b-4d2e-8f61-0c1d2e3f4a5b
+    groups: [sre]
+  - email: bob@example.com
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: bob
+    emailVerified: true
+    userID: 3c9e7d1a-5b2f-4e8c-a0d4-6f7e8a9b0c1d
+    groups: [dev]

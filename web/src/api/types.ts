@@ -34,6 +34,8 @@ export interface Node {
   unschedulable: boolean
   kubeletVersion: string
   createdAt: string
+  /** Node que l'utilisateur ne peut pas lister, connu par le nodeName de ses pods. */
+  ghost?: boolean
 }
 
 export interface ContainerStatus {
@@ -114,6 +116,7 @@ export interface Me {
   groups: string[]
   cluster: string
   demo: boolean
+  authenticated: boolean
 }
 
 export const workloadKey = (w: Pick<Workload, 'kind' | 'namespace' | 'name'>) => `${w.kind}/${w.namespace}/${w.name}`

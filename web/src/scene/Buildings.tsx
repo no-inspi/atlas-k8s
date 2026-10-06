@@ -137,7 +137,8 @@ export function Buildings({ theme }: { theme: Theme }) {
     nodes.forEach((n, ni) => {
       const plot = layout.plots.get(n.name)!
       const style = nodeStyle(n)
-      const ready = isReady(n)
+      // Un node anonyme n'a pas de conditions connues : pas d'alerte, juste grisé.
+      const ready = isReady(n) || !!n.ghost
       const load = Math.min(1, n.requested.cpu / Math.max(1, n.allocatable.cpu))
       const bz = plot.z - g.depth / 2 + 0.5
       const fan = (fans.current.get(n.name) ?? 0) + Math.min(delta, 0.05) * (2 + load * 18)
@@ -182,7 +183,7 @@ export function Buildings({ theme }: { theme: Theme }) {
       parts.current.get('platform')!.setColor(ni, color)
 
       color.copy(palette.house)
-      if (!ready) color.lerp(GREY, 0.6)
+      if (!ready || n.ghost) color.lerp(GREY, 0.6)
       parts.current.get('wall')!.setColor(ni, color)
 
       color.copy(WINDOW_OFF)
