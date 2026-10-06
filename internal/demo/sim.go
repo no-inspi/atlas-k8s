@@ -468,7 +468,10 @@ func (s *Sim) schedule() {
 	}
 }
 
-type usage struct{ cpu, mem int64; gpu int }
+type usage struct {
+	cpu, mem int64
+	gpu      int
+}
 
 func (s *Sim) usageOf(n *simNode) usage {
 	var u usage
