@@ -64,7 +64,10 @@ type Pod struct {
 	NodeName  string `json:"nodeName"`
 	Phase     string `json:"phase"`
 	// DisplayStatus est le statut tel que l'afficherait `kubectl get pods`.
-	DisplayStatus string            `json:"displayStatus"`
+	DisplayStatus string `json:"displayStatus"`
+	// StatusMessage explique un état bloqué, par exemple le message de la
+	// condition PodScheduled=False (« 0/6 nodes are available: … »).
+	StatusMessage string            `json:"statusMessage,omitempty"`
 	Ready         bool              `json:"ready"`
 	Restarts      int32             `json:"restarts"`
 	Containers    []ContainerStatus `json:"containers"`
