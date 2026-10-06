@@ -41,9 +41,11 @@ type Config struct {
 	Inspect inspect.Backend
 }
 
-// csp interdit tout script, style ou police externe : le front est servi
-// entièrement par le backend.
-const csp = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; " +
+// csp interdit tout script et toute police externes : le front est servi
+// entièrement par le backend. Les styles en ligne sont autorisés pour Monaco
+// (onglet YAML), qui crée ses balises <style> sans prise en charge de nonce ;
+// les scripts, eux, restent limités à 'self'.
+const csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; " +
 	"font-src 'self'; connect-src 'self'; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 
 type server struct {

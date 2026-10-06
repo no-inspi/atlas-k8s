@@ -14,6 +14,7 @@ export default defineConfig({
     },
   },
   // assetsInlineLimit: 0 : aucun asset en data:, la CSP n'autorise que 'self' pour les polices.
-  build: { outDir: 'dist', emptyOutDir: true, assetsInlineLimit: 0, chunkSizeWarningLimit: 1500 },
+  // Le plus gros morceau (~2,8 Mo) est Monaco, chargé seulement à l'ouverture de l'onglet YAML.
+  build: { outDir: 'dist', emptyOutDir: true, assetsInlineLimit: 0, chunkSizeWarningLimit: 3000 },
   test: { environment: 'jsdom', globals: true, include: ['src/**/*.test.ts'] },
 })

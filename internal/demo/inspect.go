@@ -93,9 +93,14 @@ func (s *Sim) backdate(p *simPod) {
 			e.Count = max(1, p.pod.Restarts)
 		}
 	}
-	for i := range p.logs {
-		p.logs[i].at = s.now.Add(-time.Duration(len(p.logs)-i) * 3 * time.Second)
+	spread := func(lines []logLine, end time.Time) {
+		for i := range lines {
+			lines[i].at = end.Add(-time.Duration(len(lines)-i) * 3 * time.Second)
+		}
 	}
+	spread(p.logs, s.now)
+	// L'instance précédente s'est arrêtée avant le dernier redémarrage.
+	spread(p.prevLogs, s.now.Add(-secs(backoffSec)))
 }
 
 /* ---------- logs ---------- */

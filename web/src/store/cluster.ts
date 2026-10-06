@@ -4,6 +4,9 @@ import { workloadKey, type Me, type Message, type Metrics, type Namespace, type 
 import { feedForNode, feedForPod, type FeedDraft, type FeedItem } from './feed'
 
 export type Selection = { type: 'pod' | 'node'; key: string; name: string } | null
+export type InspectorTab = 'overview' | 'logs' | 'yaml' | 'events'
+/** Objet affiché par l'onglet YAML (null : workload racine du pod). */
+export type YamlTarget = { kind: string; name: string } | null
 export type Connection = 'connecting' | 'live' | 'reconnecting'
 
 const FEED_SIZE = 5
@@ -24,6 +27,9 @@ export interface ClusterState {
   metrics: Metrics
   me: Me | null
   selection: Selection
+  /** Onglet actif, conservé quand on passe d'un pod à l'autre. */
+  inspectorTab: InspectorTab
+  yamlTarget: YamlTarget
   nsFilter: string | null
   feed: FeedItem[]
 
@@ -33,6 +39,8 @@ export interface ClusterState {
   setMe(me: Me): void
   select(sel: { type: 'pod' | 'node'; key: string } | null): void
   toggleNsFilter(ns: string): void
+  setInspectorTab(tab: InspectorTab): void
+  openYaml(target: YamlTarget): void
   reset(): void
 }
 
@@ -49,6 +57,8 @@ const initial = () => ({
   metrics: { pods: {}, nodes: {} } as Metrics,
   me: null,
   selection: null as Selection,
+  inspectorTab: 'overview' as InspectorTab,
+  yamlTarget: null as YamlTarget,
   nsFilter: null,
   feed: [] as FeedItem[],
 })
@@ -124,10 +134,13 @@ export const useCluster = create<ClusterState>()(
       if (!sel) return set({ selection: null })
       const { pods, nodes } = get()
       const name = sel.type === 'pod' ? pods.get(sel.key)?.name : nodes.get(sel.key)?.name
-      set({ selection: { ...sel, name: name ?? sel.key } })
+      // Le YAML choisi via la chaîne de propriétaires ne survit pas au changement de pod.
+      set({ selection: { ...sel, name: name ?? sel.key }, yamlTarget: null })
     },
 
     toggleNsFilter: (ns) => set((s) => ({ nsFilter: s.nsFilter === ns ? null : ns })),
+    setInspectorTab: (inspectorTab) => set({ inspectorTab }),
+    openYaml: (yamlTarget) => set({ inspectorTab: 'yaml', yamlTarget }),
 
     reset: () => set(initial()),
   })),

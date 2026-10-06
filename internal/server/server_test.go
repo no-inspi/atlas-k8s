@@ -65,7 +65,7 @@ func TestSecurityHeaders(t *testing.T) {
 			t.Errorf("CSP sans %q : %s", want, csp)
 		}
 	}
-	if strings.Contains(csp, "unsafe-eval") {
+	if strings.Contains(csp, "unsafe-eval") || strings.Contains(csp, "script-src 'self' 'unsafe-inline'") {
 		t.Errorf("CSP trop permissive : %s", csp)
 	}
 	if rec.Header().Get("X-Content-Type-Options") != "nosniff" {

@@ -73,3 +73,69 @@ test('bob (edit dans production et staging) ne reçoit rien de kube-system', asy
   await expect(page.getByText('Vous êtes déconnecté')).toBeVisible()
   expect((await page.request.get('/api/me')).status()).toBe(401)
 })
+
+// --- Inspecteur sur le vrai cluster (critères d'acceptation du jalon 5) ---
+
+type SnapPod = { name: string; namespace: string; owner: { kind: string; name: string }; displayStatus: string; restarts: number }
+
+async function snapshotPods(page: Page): Promise<SnapPod[]> {
+  return page.evaluate(() => new Promise<SnapPod[]>((resolve) => {
+    const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/stream`)
+    ws.onmessage = (e) => {
+      const m = JSON.parse(e.data)
+      if (m.type === 'snapshot') { ws.close(); resolve(m.pods) }
+    }
+  }))
+}
+
+const editorText = (page: Page) =>
+  page.getByTestId('yaml-editor').locator('.view-lines').innerText().then((t) => t.replace(/ /g, ' '))
+
+test('alice : logs en direct, instance précédente, YAML du Deployment avec ArgoCD', async ({ page }) => {
+  await login(page, 'alice@example.com')
+  const pods = await snapshotPods(page)
+  const panel = page.locator('aside.panel')
+
+  // Logs en direct : orders-service écrit une ligne par seconde.
+  const orders = pods.find((p) => p.namespace === 'staging' && p.owner.name === 'orders-service' && p.displayStatus === 'Running')!
+  await page.goto(`/pods/staging/${orders.name}`)
+  await panel.getByRole('tab', { name: 'Logs' }).click()
+  const logs = panel.getByTestId('logs')
+  await expect(logs).toContainText('GET /api/v1/orders')
+  const before = await logs.locator('.log-line').count()
+  await expect.poll(() => logs.locator('.log-line').count(), { timeout: 10_000 }).toBeGreaterThan(before)
+
+  // Instance précédente : les logs d'avant le crash de payment-worker.
+  const crashy = pods.find((p) => p.owner.name === 'payment-worker' && p.restarts > 0)!
+  await page.goto(`/pods/production/${crashy.name}`)
+  await panel.getByRole('tab', { name: 'Logs' }).click()
+  await panel.getByLabel('Instance précédente').check()
+  await expect(logs).toContainText('connection refused')
+
+  // YAML du Deployment propriétaire, sans managedFields, badge ArgoCD.
+  const api = pods.find((p) => p.owner.name === 'api-gateway' && p.namespace === 'production')!
+  await page.goto(`/pods/production/${api.name}`)
+  await panel.getByRole('tab', { name: 'YAML' }).click()
+  await expect(panel.getByLabel('Objet')).toHaveValue('Deployment/api-gateway')
+  await expect.poll(() => editorText(page), { timeout: 15_000 }).toContain('kind: Deployment')
+  expect(await editorText(page)).not.toContain('managedFields')
+  await expect(panel.getByTestId('argocd-badge')).toContainText('prod-apps')
+
+  await panel.getByRole('tab', { name: 'Événements' }).click()
+  await expect(panel.getByTestId('events')).toContainText(/Scheduled|Pulled|Started|Created/)
+})
+
+test('bob : l’inspecteur renvoie le refus de l’API server pour kube-system', async ({ page }) => {
+  await login(page, 'bob@example.com')
+  const yaml = await page.request.get('/api/yaml/apps/v1/Deployment/kube-system/coredns')
+  expect(yaml.status()).toBe(403)
+  expect((await yaml.json()).error).toContain('cannot get resource "deployments"')
+  expect((await page.request.get('/api/namespaces/kube-system/pods/coredns/events')).status()).toBe(403)
+
+  const logsError = await page.evaluate(() => new Promise<{ status: number; message: string }>((resolve) => {
+    const ws = new WebSocket(`ws://${location.host}/api/namespaces/kube-system/pods/coredns/logs`)
+    ws.onmessage = (e) => resolve(JSON.parse(e.data))
+  }))
+  expect(logsError.status).toBe(403)
+  expect(logsError.message).toContain('forbidden')
+})

@@ -5,7 +5,8 @@ import type { Me } from './api/types'
 import { Scene } from './scene/Scene'
 import { useCluster } from './store/cluster'
 import { Feed, Hint, Legend, Stats, TopBar } from './ui/Hud'
-import { Inspector } from './ui/Inspector'
+import { Inspector } from './inspector/Inspector'
+import { syncRoute } from './ui/route'
 
 export function App() {
   useEffect(() => {
@@ -13,7 +14,9 @@ export function App() {
       .then((r) => (r.ok ? (r.json() as Promise<Me>) : null))
       .then((me) => me && useCluster.getState().setMe(me))
       .catch(() => {})
-    return connectStream()
+    const stopRoute = syncRoute()
+    const stopStream = connectStream()
+    return () => { stopRoute(); stopStream() }
   }, [])
 
   return (

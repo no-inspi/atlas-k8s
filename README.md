@@ -130,7 +130,9 @@ make scan        # image + Trivy (échoue sur une vulnérabilité critique)
 - **La source Kubernetes** (`internal/kube`) : un informer partagé par type (nodes, pods, namespaces, Deployments, ReplicaSets, StatefulSets, DaemonSets, Jobs), allégé par `SetTransform` (ni managedFields, ni volumes, ni env, ni templates). Chaque événement marque des objets « sales », recalculés toutes les 100 ms depuis le cache ; seuls les vrais changements sont publiés. Le `displayStatus` est un portage de `printPod` de kubectl, et `requested` suit la règle de kube-scheduler (init containers, sidecars, overhead). metrics-server est relevé toutes les 15 s.
 - **Le simulateur** (`internal/demo`) produit le même modèle et passe par le même hub (`internal/stream`) : le front ne sait pas s'il regarde un vrai cluster.
 - **Le front** (`web/`, React + React Three Fiber) garde l'état dans un store Zustand indexé par UID. La scène lit le store dans sa boucle de rendu sans re-render React par message. Robots et bâtiments sont des `InstancedMesh`, avec un draw call par pièce quel que soit le nombre de pods.
-- **Sécurité navigateur** : CSP stricte (`'self'` partout, aucun asset inline, polices auto-hébergées), vérification de l'`Origin` à l'ouverture du WebSocket, en-tête `X-Atlas-Request` exigé sur toute requête mutante (CSRF).
+- **Inspecteur** (`internal/inspect`, `internal/logs`) : chaîne de propriétaires, YAML (sans `managedFields`), logs et événements. Propriétaires, YAML et logs passent par le client impersonné de l'utilisateur ; les événements viennent d'un cache partagé, après vérification de son droit `list events`. Les logs passent par un WebSocket avec backpressure : 2 000 lignes en attente au plus côté serveur, les lignes en trop sont comptées et signalées. Les erreurs de l'API server (403, 404) sont affichées telles quelles.
+- **Liens profonds** : `/pods/{namespace}/{nom}` et `/nodes/{nom}` ouvrent l'inspecteur sur l'objet ; l'URL suit la sélection.
+- **Sécurité navigateur** : CSP stricte pour les scripts (`script-src 'self'`, aucun script externe), polices auto-hébergées ; styles en ligne autorisés pour Monaco (voir plus bas), vérification de l'`Origin` à l'ouverture du WebSocket, en-tête `X-Atlas-Request` exigé sur toute requête mutante (CSRF).
 - **Authentification** (`internal/auth`) : OIDC code + PKCE ; session dans un cookie chiffré AES-256-GCM (`HttpOnly`, `SameSite=Lax`, `Secure` en https), sans token côté navigateur. Un nom d'utilisateur `system:*` est refusé et les groupes `system:*` ignorés ; tous les groupes sont préfixés (`oidc:`).
 - **Droits** (`internal/access`) : chaque appel à l'API server pour un utilisateur passe par un client impersonné (`Impersonate-User`, `Impersonate-Group`). Le flux est filtré par client, hors du verrou du hub : un objet n'est envoyé que si l'utilisateur peut le lister dans son namespace (SubjectAccessReview, cache 60 s). Si ses droits changent, le flux se ferme (code 4000) et le front repart d'un snapshot ; à l'expiration de la session, code 4401 et retour à la connexion.
 
@@ -142,12 +144,15 @@ internal/kube/     informers, conversions, displayStatus, metrics-server
 internal/demo/     cluster simulé
 internal/auth/     OIDC, session, CSRF ; authtest/ : IdP de test
 internal/access/   SubjectAccessReview, filtre du flux, clients impersonnés
+internal/inspect/  contrat de l'inspecteur (propriétaires, YAML, événements, logs)
+internal/logs/     WebSocket des logs avec backpressure
 internal/server/   routeur HTTP, CSP, SPA, métriques
 deploy/helm/       chart Helm et ses tests (helm template)
 web/src/api/       types du protocole, client de stream
 web/src/store/     état normalisé, bandeau d'événements
 web/src/scene/     ville, bâtiments, robots, sélection, postures, disposition
-web/src/ui/        barre du haut, stats, filtres, inspecteur
+web/src/inspector/ inspecteur : aperçu, logs (virtualisés), YAML (Monaco), événements
+web/src/ui/        barre du haut, stats, filtres, liens profonds
 ```
 
 ## Avancement
@@ -158,7 +163,7 @@ web/src/ui/        barre du haut, stats, filtres, inspecteur
 | 2 | Informers, `displayStatus`, flux branché sur un cluster kind | fait |
 | 3 | Image, chart Helm, déploiement in-cluster | fait |
 | 4 | OIDC, sessions, impersonation, filtrage par droits | fait |
-| 5 | Inspecteur : logs, YAML, événements | à venir |
+| 5 | Inspecteur : logs, YAML, événements | fait |
 | 6 | Terminal et actions, audit | à venir |
 | 7 | Échelle (LOD, regroupement, rendu à la demande), recherche, vue Liste, CI | à venir |
 
@@ -185,3 +190,8 @@ Choix du jalon 4 ([plan](docs/superpowers/plans/2026-10-06-jalon-4-auth-droits.m
 - Pages et API protégées ; les assets du front (`/assets/*`) restent publics, ils ne contiennent aucun secret.
 - `auth.oidc.scopes` vaut `openid email profile` par défaut (Google refuse `groups`) ; Dex, Keycloak et Entra ID acceptent `groups`.
 - Avec `auth.mode=oidc`, le chart exige une URL publique : Ingress, HTTPRoute ou `publicURL`.
+
+Choix du jalon 5 ([plan](docs/superpowers/plans/2026-10-06-jalon-5-inspecteur-lecture.md)) :
+
+- **CSP et Monaco** : Monaco crée des `<style>` et des attributs `style` sans prise en charge de nonce (vérifié sur la 0.57) ; la CSP autorise donc `'unsafe-inline'` pour les styles, les scripts restant limités à `'self'`. Pour une CSP de styles stricte, CodeMirror 6 (qui accepte un nonce) remplacerait Monaco. Monaco (~730 Ko gzippés) n'est chargé qu'à l'ouverture de l'onglet YAML.
+- Les événements sont rafraîchis toutes les 3 s tant que l'onglet est ouvert.

@@ -62,6 +62,16 @@ describe('sélection et filtre', () => {
     expect(s().pods.has('u1')).toBe(false)
   })
 
+  it('conserve l’onglet actif quand on change de pod', () => {
+    s().applyMessages([{ type: 'snapshot', rev: 1, pods: [pod(), pod({ uid: 'u2', name: 'other' })] }])
+    s().select({ type: 'pod', key: 'u1' })
+    s().openYaml({ kind: 'ReplicaSet', name: 'api-abc' })
+    expect(s().inspectorTab).toBe('yaml')
+    s().select({ type: 'pod', key: 'u2' })
+    expect(s().inspectorTab).toBe('yaml')
+    expect(s().yamlTarget).toBeNull()
+  })
+
   it('bascule le filtre de namespace', () => {
     s().toggleNsFilter('production')
     expect(s().nsFilter).toBe('production')
