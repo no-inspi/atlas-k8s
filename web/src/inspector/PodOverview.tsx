@@ -4,6 +4,7 @@ import { workloadKey, type Pod } from '../api/types'
 import { useCluster } from '../store/cluster'
 import { shortNode } from '../store/feed'
 import { age, fmtCpu, fmtMem } from '../ui/format'
+import { GROUP_THRESHOLD, world } from '../scene/world'
 import { Meter, goNode } from './common'
 import { PodActions } from './PodActions'
 
@@ -23,6 +24,7 @@ export function PodOverview({ p }: { p: Pod }) {
   const { pods, workloads, metrics, openYaml } = useCluster.getState()
   const chain = useOwners(p)
   const features = useCluster((s) => s.me?.features)
+  const stack = world.stacks.find((st) => st.uid === p.uid)
   const siblings = [...pods.values()].filter((q) => q.namespace === p.namespace && q.owner.kind === p.owner.kind && q.owner.name === p.owner.name && q.displayStatus !== 'Terminating')
   const onNodes = [...new Set(siblings.filter((q) => q.nodeName).map((q) => q.nodeName))].sort()
   const waiting = siblings.filter((q) => !q.nodeName).length
@@ -41,6 +43,12 @@ export function PodOverview({ p }: { p: Pod }) {
         <dt>Redémarrages</dt><dd>{p.restarts}</dd>
       </dl>
       {p.statusMessage && <p className="note">{p.statusMessage}</p>}
+      {stack && (
+        <p className="note">
+          Ce robot représente une pile de {stack.count} pods ({stack.owner}) : au-delà de {GROUP_THRESHOLD} pods, un node regroupe ses pods dans la vue.
+          La liste du node les détaille tous.
+        </p>
+      )}
 
       <h3>Containers</h3>
       <ul className="containers">

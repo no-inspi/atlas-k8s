@@ -8,6 +8,7 @@ import { Feed, Hint, Legend, Stats, TopBar } from './ui/Hud'
 import { Inspector } from './inspector/Inspector'
 import { syncRoute } from './ui/route'
 import { Toasts } from './ui/Toasts'
+import { perfEnabled } from './scene/PerfMeter'
 
 export function App() {
   useEffect(() => {
@@ -32,6 +33,7 @@ export function App() {
       <Hint />
       <Inspector />
       <Toasts />
+      {perfEnabled() && <div id="perf-meter" className="perf-meter" aria-hidden="true" />}
     </>
   )
 }

@@ -5,10 +5,12 @@ import * as THREE from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import { useCluster } from '../store/cluster'
 import { Buildings } from './Buildings'
+import { PerfMeter, perfEnabled } from './PerfMeter'
 import { City } from './City'
 import { pickables } from './pick'
 import { Robots } from './Robots'
 import { Selection } from './Selection'
+import { Stacks } from './Stacks'
 import { useReducedMotion, useTheme, type Theme } from './theme'
 import { world } from './world'
 
@@ -69,6 +71,18 @@ function CameraRig() {
       screenSpacePanning={false}
     />
   )
+}
+
+/** Demande une frame à chaque changement du flux, de la sélection ou du filtre. */
+function StoreInvalidator() {
+  const invalidate = useThree((s) => s.invalidate)
+  useEffect(() => {
+    const stop = useCluster.subscribe((s) => [s.version, s.selection, s.nsFilter] as const, () => invalidate())
+    const onVisible = () => invalidate()
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { stop(); document.removeEventListener('visibilitychange', onVisible) }
+  }, [invalidate])
+  return null
 }
 
 /** Clic court (moins de 6 px de déplacement) : sélectionne un pod ou un node. */
@@ -144,6 +158,8 @@ export function Scene() {
     <Canvas
       orthographic
       flat
+      // Rendu à la demande : une frame par changement d'état, interaction ou animation en cours.
+      frameloop="demand"
       shadows={{ type: THREE.PCFSoftShadowMap }}
       dpr={[1, 2]}
       camera={{ position: [24, 26, 26], near: 0.1, far: 400, zoom: 30 }}
@@ -154,9 +170,12 @@ export function Scene() {
       <City theme={theme} />
       <Buildings theme={theme} />
       <Robots theme={theme} reducedMotion={reducedMotion} />
+      <Stacks theme={theme} />
       <Selection theme={theme} />
       <CameraRig />
       <Picker />
+      <StoreInvalidator />
+      {perfEnabled() && <PerfMeter />}
     </Canvas>
   )
 }

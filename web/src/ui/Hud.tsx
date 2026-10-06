@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { clusterColors } from '../scene/colors'
+import { legendItems } from './legend'
 import { postureFor } from '../scene/posture'
 import { useCluster } from '../store/cluster'
 
@@ -78,16 +79,40 @@ export function Legend() {
   useCluster((s) => s.version)
   const nsFilter = useCluster((s) => s.nsFilter)
   const toggle = useCluster((s) => s.toggleNsFilter)
-  const colors = clusterColors(useCluster.getState())
-  const list = [...colors.keys()]
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const st = useCluster.getState()
+  const colors = clusterColors(st)
+  const counts = new Map<string, number>()
+  for (const p of st.pods.values()) counts.set(p.namespace, (counts.get(p.namespace) ?? 0) + 1)
+  const { visible, hidden } = legendItems(counts, nsFilter)
+  const chip = (ns: string) => (
+    <button key={ns} className="ns" aria-pressed={nsFilter === ns} onClick={() => toggle(ns)}>
+      <i style={{ background: colors.get(ns) }} />
+      {ns}
+    </button>
+  )
+  const matches = hidden.filter((ns) => ns.includes(query.trim()))
   return (
     <div className={`legend ${nsFilter ? 'filtering' : ''}`} role="group" aria-label="Filtrer par namespace">
-      {list.map((ns) => (
-        <button key={ns} className="ns" aria-pressed={nsFilter === ns} onClick={() => toggle(ns)}>
-          <i style={{ background: colors.get(ns) }} />
-          {ns}
+      {visible.map(chip)}
+      {hidden.length > 0 && (
+        <button className="ns more" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+          +{hidden.length} namespace{hidden.length > 1 ? 's' : ''}
         </button>
-      ))}
+      )}
+      {open && hidden.length > 0 && (
+        <div className="legend-more" role="dialog" aria-label="Autres namespaces">
+          <input type="search" placeholder="Filtrer les namespaces" aria-label="Filtrer les namespaces" value={query}
+            onChange={(e) => setQuery(e.target.value)} autoFocus />
+          <div className="legend-more-list">
+            {matches.map((ns) => (
+              <span key={ns} onClick={() => setOpen(false)} style={{ display: 'contents' }}>{chip(ns)}</span>
+            ))}
+            {!matches.length && <span className="note">Aucun namespace ne correspond.</span>}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

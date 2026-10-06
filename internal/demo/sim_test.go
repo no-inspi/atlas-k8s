@@ -307,3 +307,27 @@ func TestDeterministic(t *testing.T) {
 		t.Fatal("même seed et même horloge doivent produire la même séquence")
 	}
 }
+
+func TestScaledCluster(t *testing.T) {
+	sink := newSink()
+	s := New(sink, Options{Seed: 1, Now: t0, Scale: Scale{Nodes: 100, PodsPerNode: 30}})
+	advance(s, t0, 5*time.Second)
+	if len(sink.nodes) != 100 {
+		t.Fatalf("nodes = %d", len(sink.nodes))
+	}
+	if n := len(sink.pods); n < 2700 || n > 3300 {
+		t.Errorf("pods = %d, attendu environ 3 000", n)
+	}
+	pending := 0
+	for _, p := range sink.pods {
+		if p.NodeName == "" {
+			pending++
+		}
+	}
+	if pending > 30 {
+		t.Errorf("%d pods sans node : la capacité simulée doit suffire", pending)
+	}
+	if len(sink.namespaces) < 50 {
+		t.Errorf("namespaces = %d", len(sink.namespaces))
+	}
+}

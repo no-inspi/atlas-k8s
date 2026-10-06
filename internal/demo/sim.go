@@ -25,6 +25,8 @@ type Sink interface {
 
 type Options struct {
 	Seed uint64
+	// Scale agrandit le cluster simulé (banc de performance) ; zéro : catalogue du prototype.
+	Scale Scale
 	// Now est l'heure de départ de la simulation (time.Now() si zéro).
 	Now time.Time
 }
@@ -76,6 +78,8 @@ type Sim struct {
 	now         time.Time
 	nodes       []*simNode
 	workloads   []*simWorkload
+	catalog     catalog
+	ix          *index // vues dérivées des pods ; nil = à reconstruire
 	pods        []*simPod
 	nextChurn   time.Time
 	nextMetrics time.Time
@@ -87,9 +91,10 @@ func New(sink Sink, opts Options) *Sim {
 	if now.IsZero() {
 		now = time.Now()
 	}
-	s := &Sim{sink: sink, rng: rand.New(rand.NewPCG(opts.Seed, opts.Seed^0x9e3779b97f4a7c15)), now: now}
+	s := &Sim{sink: sink, rng: rand.New(rand.NewPCG(opts.Seed, opts.Seed^0x9e3779b97f4a7c15)), now: now,
+		catalog: catalogFor(opts.Scale)}
 	s.buildNodes()
-	for _, d := range workloads {
+	for _, d := range s.catalog.workloads {
 		w := &simWorkload{def: d, replicas: d.Replicas, hash: s.rid(10)}
 		if d.Kind == "Job" {
 			w.nextJob = now.Add(secs(jobFirstSec))
@@ -138,7 +143,7 @@ func (s *Sim) Step(now time.Time) {
 
 func (s *Sim) buildNodes() {
 	created := s.now.Add(-time.Duration(2+s.rng.IntN(7)) * 24 * time.Hour)
-	for _, p := range pools {
+	for _, p := range s.catalog.pools {
 		group := s.hex(8)
 		for i := 0; i < p.Count; i++ {
 			n := model.Node{
@@ -247,14 +252,15 @@ func (s *Sim) newPod(w *simWorkload, ordinal int) *simPod {
 	if d.NotReady && !w.notReadyTaken {
 		p.notReady, w.notReadyTaken = true, true
 	}
-	s.setStatus(p, "Pending")
 	s.pods = append(s.pods, p)
+	s.setStatus(p, "Pending")
 	return p
 }
 
 // setStatus aligne phase, readiness et état du container sur ce qu'afficherait
 // `kubectl get pods`.
 func (s *Sim) setStatus(p *simPod, status string) {
+	s.invalidate()
 	defer s.onTransition(p, p.pod.DisplayStatus, status)
 	d := p.wl.def
 	c := model.ContainerStatus{Name: d.Name, Image: d.Image, Restarts: p.pod.Restarts}
@@ -289,6 +295,7 @@ func (s *Sim) setStatus(p *simPod, status string) {
 }
 
 func (s *Sim) bind(p *simPod, n *simNode) {
+	s.invalidate()
 	p.pod.NodeName = n.node.Name
 	p.pod.PodIP = fmt.Sprintf("10.52.%d.%d", s.nodeIndex(n), 2+s.rng.IntN(248))
 	p.pod.StatusMessage = ""
@@ -305,6 +312,7 @@ func (s *Sim) terminate(p *simPod) {
 }
 
 func (s *Sim) remove(p *simPod) {
+	s.invalidate()
 	for i, q := range s.pods {
 		if q == p {
 			s.pods = append(s.pods[:i], s.pods[i+1:]...)
@@ -369,14 +377,61 @@ func (s *Sim) advancePods() {
 
 /* ---------- contrôleurs ---------- */
 
-func (s *Sim) livePods(w *simWorkload) []*simPod {
-	var out []*simPod
+// index regroupe en une passe ce que les contrôleurs et le scheduler lisent à
+// chaque pas : sans lui, 3 000 pods sur 100 nodes coûteraient des millions de
+// parcours par seconde. Toute modification d'un pod l'invalide.
+type index struct {
+	usage map[*simNode]usage         // requests des pods non terminés
+	count map[string]int             // pods par node
+	live  map[*simWorkload][]*simPod // pods non Terminating par workload
+	same  map[workloadOnNode]int     // replicas d'un workload par node
+}
+
+type workloadOnNode struct {
+	w    *simWorkload
+	node string
+}
+
+func (s *Sim) invalidate() { s.ix = nil }
+
+func (s *Sim) idx() *index {
+	if s.ix != nil {
+		return s.ix
+	}
+	byName := make(map[string]*simNode, len(s.nodes))
+	for _, n := range s.nodes {
+		byName[n.node.Name] = n
+	}
+	ix := &index{usage: map[*simNode]usage{}, count: map[string]int{}, live: map[*simWorkload][]*simPod{}, same: map[workloadOnNode]int{}}
 	for _, p := range s.pods {
-		if p.wl == w && p.pod.DisplayStatus != "Terminating" {
-			out = append(out, p)
+		terminating := p.pod.DisplayStatus == "Terminating"
+		if !terminating {
+			ix.live[p.wl] = append(ix.live[p.wl], p)
+		}
+		if p.pod.NodeName == "" {
+			continue
+		}
+		ix.count[p.pod.NodeName]++
+		if !terminating {
+			ix.same[workloadOnNode{p.wl, p.pod.NodeName}]++
+		}
+		if n := byName[p.pod.NodeName]; n != nil && p.pod.DisplayStatus != "Completed" {
+			u := ix.usage[n]
+			u.cpu += p.pod.Requests.CPU
+			u.mem += p.pod.Requests.Memory
+			if p.wl.def.GPU {
+				u.gpu++
+			}
+			ix.usage[n] = u
 		}
 	}
-	return out
+	s.ix = ix
+	return ix
+}
+
+// livePods renvoie une copie : l'appelant peut la trier ou créer des pods.
+func (s *Sim) livePods(w *simWorkload) []*simPod {
+	return append([]*simPod(nil), s.idx().live[w]...)
 }
 
 func (s *Sim) reconcile() {
@@ -523,20 +578,7 @@ type usage struct {
 	gpu      int
 }
 
-func (s *Sim) usageOf(n *simNode) usage {
-	var u usage
-	for _, p := range s.pods {
-		if p.pod.NodeName != n.node.Name || p.pod.DisplayStatus == "Completed" {
-			continue
-		}
-		u.cpu += p.pod.Requests.CPU
-		u.mem += p.pod.Requests.Memory
-		if p.wl.def.GPU {
-			u.gpu++
-		}
-	}
-	return u
-}
+func (s *Sim) usageOf(n *simNode) usage { return s.idx().usage[n] }
 
 // fit renvoie "" si le pod peut aller sur le node, sinon la raison telle que
 // l'écrit kube-scheduler.
@@ -572,12 +614,7 @@ func (s *Sim) chooseNode(p *simPod) *simNode {
 		if s.fit(p, n) != "" {
 			continue
 		}
-		same := 0
-		for _, q := range s.pods {
-			if q.wl == p.wl && q.pod.NodeName == n.node.Name && q.pod.DisplayStatus != "Terminating" {
-				same++
-			}
-		}
+		same := s.idx().same[workloadOnNode{p.wl, n.node.Name}]
 		load := float64(s.usageOf(n).cpu) / float64(n.node.Allocatable.CPU)
 		if best == nil || same < bestSame || (same == bestSame && load < bestLoad) {
 			best, bestSame, bestLoad = n, same, load
@@ -607,7 +644,7 @@ func (s *Sim) failReason(p *simPod) string {
 
 func (s *Sim) publishNamespaces() {
 	seen := map[string]bool{}
-	for _, d := range workloads {
+	for _, d := range s.catalog.workloads {
 		if !seen[d.NS] {
 			seen[d.NS] = true
 			s.sink.Upsert(stream.KindNamespace, d.NS, model.Namespace{Name: d.NS})
@@ -639,15 +676,7 @@ func (s *Sim) flush() {
 	}
 }
 
-func (s *Sim) podCount(n *simNode) int {
-	c := 0
-	for _, p := range s.pods {
-		if p.pod.NodeName == n.node.Name {
-			c++
-		}
-	}
-	return c
-}
+func (s *Sim) podCount(n *simNode) int { return s.idx().count[n.node.Name] }
 
 func (s *Sim) workloadModel(w *simWorkload) model.Workload {
 	m := model.Workload{Kind: w.def.Kind, Name: w.def.Name, Namespace: w.def.NS, Replicas: w.replicas}

@@ -25,7 +25,7 @@ export function Selection({ theme }: { theme: Theme }) {
     return { marker, arcs, geo }
   }, [theme])
 
-  useFrame(({ clock }) => {
+  useFrame(({ clock, invalidate }) => {
     const st = useCluster.getState()
     const sel = st.selection
     const t = clock.elapsedTime
@@ -40,7 +40,7 @@ export function Selection({ theme }: { theme: Theme }) {
         marker.visible = true
         marker.position.set(a.x, a.y + 1.75 + Math.sin(t * 3) * 0.12, a.z)
         const siblings = world.pods.filter((p) => p.uid !== pod.uid && p.namespace === pod.namespace &&
-          p.owner.kind === pod.owner.kind && p.owner.name === pod.owner.name).slice(0, MAX_ARCS)
+          p.owner.kind === pod.owner.kind && p.owner.name === pod.owner.name && !world.targets.get(p.uid)?.hidden).slice(0, MAX_ARCS)
         for (const s of siblings) {
           const b = robotPositions.get(s.uid)
           if (!b) continue
@@ -62,6 +62,7 @@ export function Selection({ theme }: { theme: Theme }) {
     }
     geo.setDrawRange(0, v / 3)
     geo.attributes.position.needsUpdate = true
+    if (marker.visible && !document.hidden) invalidate() // le marqueur flotte
   })
 
   return (

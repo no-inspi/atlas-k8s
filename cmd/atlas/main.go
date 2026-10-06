@@ -52,6 +52,7 @@ type flags struct {
 	demo                                                                         bool
 	oidc                                                                         oidcFlags
 	features                                                                     server.Features
+	demoScale                                                                    demo.Scale
 }
 
 type oidcFlags struct {
@@ -64,6 +65,13 @@ func parseFlags() flags {
 	var f flags
 	flag.StringVar(&f.addr, "addr", env("ATLAS_ADDR", ":8080"), "adresse d'écoute HTTP")
 	flag.StringVar(&f.metricsAddr, "metrics-addr", env("ATLAS_METRICS_ADDR", ":9090"), "adresse des métriques Prometheus (vide : désactivé)")
+	flag.Func("demo-scale", "cluster simulé agrandi, NODESxPODS_PAR_NODE (ex. 100x30) : banc de performance", func(v string) error {
+		_, err := fmt.Sscanf(v, "%dx%d", &f.demoScale.Nodes, &f.demoScale.PodsPerNode)
+		if err != nil || f.demoScale.Nodes < 1 || f.demoScale.PodsPerNode < 1 {
+			return fmt.Errorf("format attendu NODESxPODS_PAR_NODE, par ex. 100x30")
+		}
+		return nil
+	})
 	flag.BoolVar(&f.demo, "demo", env("ATLAS_DEMO", "") == "true", "sert un cluster simulé, sans API server")
 	flag.StringVar(&f.clusterName, "cluster-name", env("ATLAS_CLUSTER_NAME", "gke-prod-europe-west1"), "nom du cluster affiché")
 	flag.StringVar(&f.authMode, "auth-mode", env("ATLAS_AUTH_MODE", "oidc"), "oidc | none (développement uniquement)")
@@ -90,6 +98,9 @@ func parseFlags() flags {
 	flag.BoolVar(&ft.ActionsEnabled, "actions", env("ATLAS_ACTIONS_ENABLED", "true") == "true", "actions d'exploitation (false : console en lecture seule)")
 	flag.Parse()
 	ft.ExecDeniedNamespaces = splitList(*denied)
+	if f.demoScale.Nodes > 0 {
+		f.demo = true // --demo-scale implique --demo
+	}
 	return f
 }
 
@@ -110,7 +121,7 @@ func run() error {
 
 	if f.demo {
 		cfg.User = "demo"
-		sim := demo.New(hub, demo.Options{Seed: uint64(time.Now().UnixNano())})
+		sim := demo.New(hub, demo.Options{Seed: uint64(time.Now().UnixNano()), Scale: f.demoScale})
 		hub.MarkReady()
 		cfg.Inspect, cfg.Actions, cfg.Exec = sim, sim, sim
 		go sim.Run(ctx)

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { useCluster } from '../store/cluster'
 import { Part, opacityBasicMaterial, opacityMaterial, roundCapacity } from './instanced'
+import { perfStats } from './PerfMeter'
 import { pickables } from './pick'
 import { poseAt, postureFor, type Antenna } from './posture'
 import type { Theme } from './theme'
@@ -23,6 +24,9 @@ interface PartDef {
 
 const box = (w: number, h: number, d: number) => new THREE.BoxGeometry(w, h, d)
 const NECK = 0.58
+const ROBOT_HEIGHT = 1.2 // unités monde, antenne comprise
+// Niveau de détail : sous cette hauteur à l'écran (px), un robot devient un cube.
+export const LOD_PX = 14
 const SIT_DROP = 0.16
 const PLATFORM_TOP = 0.5
 
@@ -125,7 +129,8 @@ export function Robots({ theme, reducedMotion }: { theme: Theme; reducedMotion: 
     pickables.robots.meshes = [s.parts.get('body')!.mesh, s.parts.get('head')!.mesh]
   }
 
-  useFrame(({ clock, camera }, delta) => {
+  useFrame(({ clock, camera, invalidate }, delta) => {
+    const started = performance.now()
     const st = useCluster.getState()
     world.update(st)
     const pods = world.pods
@@ -137,6 +142,11 @@ export function Robots({ theme, reducedMotion }: { theme: Theme; reducedMotion: 
     const sel = st.selection?.type === 'pod' ? st.selection.key : null
     const firstFill = !seeded.current && pods.length > 0
     const { base, head, m, t: tr, rx, pos, quat, scale, euler, color } = tmp
+    // Caméra orthographique : zoom = pixels par unité monde.
+    const lod = camera.zoom * ROBOT_HEIGHT < LOD_PX
+    // Animations idle (balancement, clignements) : seulement de près, onglet visible.
+    const animate = !reducedMotion && !lod && !document.hidden
+    let moving = false
 
     if (tmp.nsColor.size !== world.colors.size) tmp.nsColor.clear()
     const nsColor = (ns: string) => {
@@ -150,9 +160,9 @@ export function Robots({ theme, reducedMotion }: { theme: Theme; reducedMotion: 
     let i = 0
     for (const p of pods) {
       const target = world.targets.get(p.uid)
-      if (!target) continue
+      if (!target || target.hidden) continue // pod représenté par une pile
       const posture = postureFor(p)
-      const pose = poseAt(posture.kind, t, phaseOf(p.uid), reducedMotion)
+      const pose = poseAt(posture.kind, t, phaseOf(p.uid), !animate)
       const ty = target.onNode ? PLATFORM_TOP : 0.02
 
       let a = anims.current.get(p.uid)
@@ -160,6 +170,7 @@ export function Robots({ theme, reducedMotion }: { theme: Theme; reducedMotion: 
         a = { x: target.x, y: ty, z: target.z, scale: firstFill ? pose.scale : 0.01, yaw: pose.yaw, fall: pose.fall, tilt: 0, phase: phaseOf(p.uid) }
         anims.current.set(p.uid, a)
       }
+      if (Math.abs(target.x - a.x) + Math.abs(target.z - a.z) + Math.abs(ty - a.y) + Math.abs(pose.scale - a.scale) > 0.002) moving = true
       a.x += (target.x - a.x) * k
       a.y += (ty - a.y) * k
       a.z += (target.z - a.z) * k
@@ -181,6 +192,23 @@ export function Robots({ theme, reducedMotion }: { theme: Theme; reducedMotion: 
 
       const dim = st.nsFilter !== null && p.namespace !== st.nsFilter
       const opacity = dim ? 0.1 : posture.kind === 'stomp' ? 0.75 : posture.kind === 'fade' ? 0.6 : 1
+
+      if (lod) {
+        // De loin : un cube à la couleur du namespace (rouge si en erreur), une seule pièce.
+        const s = Math.max(0.02, a.scale)
+        pos.set(a.x, a.y + 0.55 * s, a.z)
+        scale.set(1.1 * s, 2.6 * s, 1.1 * s)
+        const body = parts.get('body')!
+        body.setOpacity(i, opacity)
+        body.setMatrix(i, m.compose(pos, quat.identity(), scale))
+        color.copy(nsColor(p.namespace))
+        if (posture.antenna === 'err') color.lerp(CRASH_RED, 0.55)
+        else if (p.uid === sel) color.lerp(colors.accent, 0.35)
+        body.setColor(i, color)
+        uids.push(p.uid)
+        i++
+        continue
+      }
 
       for (const d of PARTS) {
         const part = parts.get(d.name)!
@@ -216,7 +244,11 @@ export function Robots({ theme, reducedMotion }: { theme: Theme; reducedMotion: 
       uids.push(p.uid)
       i++
     }
-    parts.forEach((part) => part.commit(i))
+    parts.forEach((part, name) => part.commit(lod && name !== 'body' ? 0 : i))
+    perfStats.robotsMs = performance.now() - started
+    perfStats.lod = lod
+    // Rendu à la demande : une nouvelle frame seulement s'il reste quelque chose à animer.
+    if (animate || moving) invalidate()
     if (firstFill) seeded.current = true
 
     if (anims.current.size > pods.length + 64) {

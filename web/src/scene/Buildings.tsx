@@ -6,6 +6,7 @@ import { useCluster } from '../store/cluster'
 import { Part, opacityMaterial } from './instanced'
 import { nodeStyle, type PlotGeometry } from './layout'
 import { pickables } from './pick'
+import { LOD_PX } from './Robots'
 import type { Theme } from './theme'
 import { world } from './world'
 
@@ -28,6 +29,7 @@ interface BPart {
   receive?: boolean
   opacity?: boolean
   dynamic?: boolean // position recalculée à chaque frame (fumée, pales, drapeau, alerte)
+  closeUp?: boolean // seulement en zoom rapproché (fumée, pales)
 }
 
 const box = (w: number, h: number, d: number) => new THREE.BoxGeometry(w, h, d)
@@ -45,7 +47,7 @@ const PARTS: BPart[] = [
   { name: 'window', style: 'std', geo: box(0.38, 0.32, 0.02), mat: 'window', at: () => [-1.05, -0.35, 0.35, 1.05].map((x) => [x, 1.1, 0.41] as Vec) },
   { name: 'roof', style: 'std', geo: roofGeo(0.6, 0.55), mat: 'roof', at: () => [[0, 1.82, 0]], scale: () => [4.3, 1, 1.05], cast: true },
   { name: 'chimney', style: 'std', geo: box(0.24, 0.55, 0.24), mat: 'roof', at: () => [[1.15, 2.0, -0.15]], cast: true },
-  { name: 'puff', style: 'std', geo: new THREE.SphereGeometry(0.16, 10, 8), mat: 'puff', at: () => [0, 1, 2, 3, 4].map(() => [1.15, 2.3, -0.15] as Vec), opacity: true, dynamic: true },
+  { name: 'puff', style: 'std', geo: new THREE.SphereGeometry(0.16, 10, 8), mat: 'puff', at: () => [0, 1, 2, 3, 4].map(() => [1.15, 2.3, -0.15] as Vec), opacity: true, dynamic: true, closeUp: true },
   // Tente (spot)
   { name: 'canvas', style: 'spot', geo: box(3.4, 0.45, 0.8), mat: 'canvas', at: () => [[0, 0.72, 0]], cast: true, receive: true },
   { name: 'tentRoof', style: 'spot', geo: roofGeo(0.6, 0.6), mat: 'tentRoof', at: () => [[0, 1.2, 0]], scale: () => [4.6, 1, 1], cast: true },
@@ -55,7 +57,7 @@ const PARTS: BPart[] = [
   { name: 'gpuWall', style: 'gpu', geo: box(3.5, 1.25, 0.85), mat: 'gpuWall', at: () => [[0, 1.12, 0]], cast: true, receive: true },
   { name: 'strip', style: 'gpu', geo: box(3.2, 0.07, 0.02), mat: 'strip', at: () => [[0, 1.45, 0.435]] },
   { name: 'housing', style: 'gpu', geo: box(0.75, 0.18, 0.6), mat: 'gpuWall', at: () => [[-0.9, 1.84, 0], [0.9, 1.84, 0]], cast: true },
-  { name: 'blade', style: 'gpu', geo: box(0.62, 0.03, 0.1), mat: 'blade', at: () => [[-0.9, 1.95, 0], [-0.9, 1.95, 0], [0.9, 1.95, 0], [0.9, 1.95, 0]], dynamic: true },
+  { name: 'blade', style: 'gpu', geo: box(0.62, 0.03, 0.1), mat: 'blade', at: () => [[-0.9, 1.95, 0], [-0.9, 1.95, 0], [0.9, 1.95, 0], [0.9, 1.95, 0]], dynamic: true, closeUp: true },
 ]
 
 /** Pièces dont un clic sélectionne le node (une instance par node). */
@@ -110,13 +112,15 @@ export function Buildings({ theme }: { theme: Theme }) {
     color: new THREE.Color(), up: new THREE.Vector3(0, 1, 0),
   }), [])
 
-  useFrame(({ clock }, delta) => {
+  useFrame(({ clock, camera, invalidate }, delta) => {
     const st = useCluster.getState()
     world.update(st)
     const layout = world.layout
     if (!layout) return
     const g = layout.geometry
     const nodes = world.nodes.filter((n) => layout.plots.has(n.name))
+    // Fumée et pales seulement de près (robots d'au moins 3 fois le seuil de niveau de détail).
+    const closeUp = camera.zoom * 1.2 >= 3 * LOD_PX
     const t = clock.elapsedTime
     const sel = st.selection?.type === 'node' ? st.selection.key : null
 
@@ -151,6 +155,7 @@ export function Buildings({ theme }: { theme: Theme }) {
           const idx = ni * offsets.length + j
           const shown =
             (d.style === 'all' || d.style === style) &&
+            (!d.closeUp || closeUp) &&
             (!['postL', 'postR', 'rail'].includes(d.name) || n.unschedulable) &&
             (d.name !== 'alert' || !ready)
           if (!shown) return part.hide(idx)
@@ -192,6 +197,8 @@ export function Buildings({ theme }: { theme: Theme }) {
     })
 
     for (const d of PARTS) parts.current.get(d.name)!.commit(nodes.length * d.at(g).length)
+    // Fumée, pales, drapeaux, cordons et alertes s'animent : frames continues de près seulement.
+    if (closeUp && nodes.length && !document.hidden) invalidate()
   })
 
   return <group ref={group} />
