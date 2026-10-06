@@ -24,6 +24,9 @@ import (
 	"github.com/no-inspi/cluster-atlas/web"
 )
 
+// version est injectée au build (-ldflags "-X main.version=…").
+var version = "dev"
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "atlas:", err)
@@ -40,7 +43,7 @@ func env(key, def string) string {
 
 type flags struct {
 	addr, metricsAddr, clusterName, authMode, kubeconfig, kubeContext, poolLabel string
-	demo                                                            bool
+	demo                                                                         bool
 }
 
 func parseFlags() flags {
@@ -96,7 +99,7 @@ func run() error {
 		metrics = &http.Server{Addr: f.metricsAddr, Handler: server.MetricsHandler(hub), ReadHeaderTimeout: 10 * time.Second}
 		go func() { errc <- metrics.ListenAndServe() }()
 	}
-	log.Info("atlas démarré", "addr", f.addr, "demo", f.demo, "cluster", f.clusterName)
+	log.Info("atlas démarré", "version", version, "addr", f.addr, "demo", f.demo, "cluster", f.clusterName)
 
 	select {
 	case err := <-errc:

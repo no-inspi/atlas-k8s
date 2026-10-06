@@ -1,6 +1,8 @@
-.PHONY: web build test test-go test-web demo dev e2e embed-dir clean kind-up kind-down scenarios run-kind test-integration
+.PHONY: image image-push scan web build test test-go test-web demo dev e2e embed-dir clean kind-up kind-down scenarios run-kind test-integration
 
 BIN := bin/atlas
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+IMAGE ?= ghcr.io/no-inspi/cluster-atlas
 
 embed-dir:
 	@mkdir -p web/dist && touch web/dist/.gitkeep
@@ -57,3 +59,15 @@ run-kind: build
 
 test-integration: embed-dir
 	go test -tags integration -count=1 -v ./internal/kube -run Live
+
+# --- Image et chart --------------------------------------------------------
+
+image:
+	docker build --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION) .
+
+# Image multi-arch (amd64/arm64), poussée sur le registre.
+image-push:
+	docker buildx build --platform linux/amd64,linux/arm64 --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION) --push .
+
+scan: image
+	trivy image --severity CRITICAL --exit-code 1 --ignore-unfixed $(IMAGE):$(VERSION)
