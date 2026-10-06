@@ -18,17 +18,29 @@ function fnv1a(s: string): number {
 /**
  * Teinte de chaque namespace : hash stable du nom, puis sondage linéaire dans
  * l'ordre alphabétique pour que deux namespaces visibles ne partagent pas une
- * teinte tant qu'il en reste. (L'annotation atlas.io/color viendra avec les
- * objets Namespace, au jalon 2.)
+ * teinte tant qu'il en reste. L'annotation atlas.io/color d'un namespace
+ * (overrides) l'emporte.
  */
-export function nsColors(namespaces: Iterable<string>): Map<string, string> {
+export function nsColors(namespaces: Iterable<string>, overrides: ReadonlyMap<string, string> = new Map()): Map<string, string> {
   const out = new Map<string, string>()
   const used = new Set<number>()
   for (const ns of [...new Set(namespaces)].sort()) {
+    const forced = overrides.get(ns)
+    if (forced) {
+      out.set(ns, forced)
+      continue
+    }
     let i = fnv1a(ns) % NS_PALETTE.length
     if (used.size < NS_PALETTE.length) while (used.has(i)) i = (i + 1) % NS_PALETTE.length
     used.add(i)
     out.set(ns, NS_PALETTE[i])
   }
   return out
+}
+
+/** Couleurs des namespaces présents parmi les pods, annotations comprises. */
+export function clusterColors(st: { pods: ReadonlyMap<string, { namespace: string }>; namespaces: ReadonlyMap<string, { color?: string }> }) {
+  const overrides = new Map<string, string>()
+  for (const [name, ns] of st.namespaces) if (ns.color) overrides.set(name, ns.color)
+  return nsColors([...st.pods.values()].map((p) => p.namespace), overrides)
 }

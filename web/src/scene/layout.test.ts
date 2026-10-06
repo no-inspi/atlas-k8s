@@ -16,6 +16,11 @@ describe('layoutCity', () => {
     expect(c.districts.map((d) => d.style)).toEqual(['std', 'gpu', 'spot'])
   })
 
+  it('reconnaît un pool GPU à son taint nvidia.com/gpu', () => {
+    const c = layoutCity([n('gke-t-1', 'tainted', { taints: [{ key: 'nvidia.com/gpu', value: 'present', effect: 'NoSchedule' }] })], plotGeometry(12))
+    expect(c.districts[0].style).toBe('gpu')
+  })
+
   it('ne dépend pas de l’ordre d’arrivée des nodes', () => {
     const a = layoutCity(nodes, plotGeometry(12))
     const b = layoutCity([...nodes].reverse(), plotGeometry(12))

@@ -1,6 +1,6 @@
 import type { Node, Pod } from '../api/types'
 import type { ClusterState } from '../store/cluster'
-import { nsColors } from './colors'
+import { clusterColors } from './colors'
 import { layoutCity, plotGeometry, queuePosition, slotCapacity, SlotAllocator, type CityLayout } from './layout'
 
 export interface PodTarget {
@@ -24,7 +24,7 @@ export class World {
   private layoutKey = ''
   private slots: SlotAllocator | null = null
 
-  update(st: Pick<ClusterState, 'version' | 'nodes' | 'pods'>): boolean {
+  update(st: Pick<ClusterState, 'version' | 'nodes' | 'pods' | 'namespaces'>): boolean {
     if (st.version === this.version) return false
     this.version = st.version
     this.nodes = [...st.nodes.values()].sort((a, b) => a.name.localeCompare(b.name))
@@ -41,7 +41,7 @@ export class World {
       this.layoutKey = key
       this.layout = layoutCity(this.nodes, plotGeometry(this.slots.capacity))
     }
-    this.colors = nsColors(this.pods.map((p) => p.namespace))
+    this.colors = clusterColors(st)
     this.placePods()
     return true
   }

@@ -6,6 +6,7 @@ const state = (version: number, nodes = [node()], pods = [pod()]) => ({
   version,
   nodes: new Map(nodes.map((n) => [n.name, n])),
   pods: new Map(pods.map((p) => [p.uid, p])),
+  namespaces: new Map(),
 })
 
 describe('World', () => {

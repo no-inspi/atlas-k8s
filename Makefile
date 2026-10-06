@@ -1,4 +1,4 @@
-.PHONY: web build test test-go test-web demo dev e2e embed-dir clean
+.PHONY: web build test test-go test-web demo dev e2e embed-dir clean kind-up kind-down scenarios run-kind test-integration
 
 BIN := bin/atlas
 
@@ -35,3 +35,25 @@ e2e: build
 clean:
 	rm -rf bin web/dist/*
 	@touch web/dist/.gitkeep
+
+# --- Cluster kind de développement -----------------------------------------
+
+KIND_CTX := kind-atlas
+
+kind-up:
+	kind create cluster --config hack/kind.yaml
+	kubectl --context $(KIND_CTX) taint nodes atlas-worker4 nvidia.com/gpu=present:NoSchedule --overwrite
+	hack/metrics-server.sh $(KIND_CTX)
+
+kind-down:
+	kind delete cluster --name atlas
+
+scenarios:
+	kubectl --context $(KIND_CTX) apply -f hack/scenarios/
+
+# Atlas contre le cluster kind, sans authentification (jalon 4 : OIDC via Dex).
+run-kind: build
+	$(BIN) --auth-mode=none --context $(KIND_CTX) --cluster-name kind-atlas
+
+test-integration: embed-dir
+	go test -tags integration -count=1 -v ./internal/kube -run Live

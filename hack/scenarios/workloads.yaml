@@ -1,0 +1,184 @@
+# Workloads de démonstration : chaque cas de la table « Statuts et postures ».
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: production
+  annotations:
+    atlas.io/color: "#3D6FB6"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: staging
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+---
+# Running, 3 replicas répartis.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: production
+  annotations:
+    argocd.argoproj.io/tracking-id: "prod-apps:apps/Deployment:production/api-gateway"
+spec:
+  replicas: 3
+  selector: { matchLabels: { app: api-gateway } }
+  template:
+    metadata: { labels: { app: api-gateway } }
+    spec:
+      topologySpreadConstraints:
+        - { maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway, labelSelector: { matchLabels: { app: api-gateway } } }
+      containers:
+        - name: api-gateway
+          image: registry.k8s.io/pause:3.10
+          resources: { requests: { cpu: 100m, memory: 64Mi }, limits: { memory: 128Mi } }
+---
+# CrashLoopBackOff : le container sort en erreur toutes les quelques secondes.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-worker
+  namespace: production
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: payment-worker } }
+  template:
+    metadata: { labels: { app: payment-worker } }
+    spec:
+      containers:
+        - name: payment-worker
+          image: busybox:1.36
+          command: ["sh", "-c", "echo 'dial tcp 10.60.3.12:5432: connection refused'; sleep 4; exit 1"]
+          resources: { requests: { cpu: 50m, memory: 32Mi } }
+---
+# ImagePullBackOff.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-preview
+  namespace: staging
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: checkout-preview } }
+  template:
+    metadata: { labels: { app: checkout-preview } }
+    spec:
+      containers:
+        - name: checkout-preview
+          image: registry.k8s.io/cluster-atlas/does-not-exist:0.0.0
+          resources: { requests: { cpu: 50m, memory: 32Mi } }
+---
+# Running mais non ready : la readiness probe échoue toujours.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-service
+  namespace: staging
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: orders-service } }
+  template:
+    metadata: { labels: { app: orders-service } }
+    spec:
+      containers:
+        - name: orders-service
+          image: busybox:1.36
+          command: ["sh", "-c", "sleep infinity"]
+          readinessProbe: { exec: { command: ["false"] }, periodSeconds: 5 }
+          resources: { requests: { cpu: 50m, memory: 32Mi } }
+---
+# Pending : demande plus de CPU qu'aucun node n'en a.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml-training
+  namespace: production
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: ml-training } }
+  template:
+    metadata: { labels: { app: ml-training } }
+    spec:
+      containers:
+        - name: ml-training
+          image: registry.k8s.io/pause:3.10
+          resources: { requests: { cpu: "64", memory: 64Mi } }
+---
+# StatefulSet (robots à sac à dos).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-payments
+  namespace: production
+spec:
+  serviceName: postgres-payments
+  replicas: 2
+  selector: { matchLabels: { app: postgres-payments } }
+  template:
+    metadata: { labels: { app: postgres-payments } }
+    spec:
+      containers:
+        - name: postgres
+          image: registry.k8s.io/pause:3.10
+          resources: { requests: { cpu: 100m, memory: 128Mi } }
+---
+# DaemonSet (robots à casque), sur tous les nodes y compris GPU et control-plane.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-exporter
+  namespace: monitoring
+spec:
+  selector: { matchLabels: { app: node-exporter } }
+  template:
+    metadata: { labels: { app: node-exporter } }
+    spec:
+      tolerations: [{ operator: Exists }]
+      containers:
+        - name: node-exporter
+          image: registry.k8s.io/pause:3.10
+          resources: { requests: { cpu: 20m, memory: 16Mi } }
+---
+# Pod GPU : tolère le taint du gpu-pool et le cible.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml-inference
+  namespace: production
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: ml-inference } }
+  template:
+    metadata: { labels: { app: ml-inference } }
+    spec:
+      nodeSelector: { cloud.google.com/gke-nodepool: gpu-pool }
+      tolerations: [{ key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }]
+      containers:
+        - name: ml-inference
+          image: registry.k8s.io/pause:3.10
+          resources: { requests: { cpu: 500m, memory: 256Mi } }
+---
+# Job périodique (robots à casquette) : Running puis Completed.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: db-backup
+  namespace: production
+spec:
+  schedule: "* * * * *"
+  successfulJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 90
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: db-backup
+              image: busybox:1.36
+              command: ["sh", "-c", "echo backup; sleep 15"]
+              resources: { requests: { cpu: 50m, memory: 32Mi } }

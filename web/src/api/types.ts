@@ -84,6 +84,11 @@ export interface Workload {
   argocd?: ArgoInfo
 }
 
+export interface Namespace {
+  name: string
+  color?: string // annotation atlas.io/color
+}
+
 export interface Usage {
   cpu: number
   memory: number
@@ -94,13 +99,14 @@ export interface Metrics {
   nodes: Record<string, Usage>
 }
 
-export type Kind = 'node' | 'pod' | 'workload'
+export type Kind = 'node' | 'pod' | 'workload' | 'namespace'
 
 export type Message =
-  | { type: 'snapshot'; rev: number; nodes?: Node[]; pods?: Pod[]; workloads?: Workload[] }
+  | { type: 'snapshot'; rev: number; nodes?: Node[]; pods?: Pod[]; workloads?: Workload[]; namespaces?: Namespace[] }
   | { type: 'upsert' | 'delete'; rev: number; kind: 'node'; obj: Node }
   | { type: 'upsert' | 'delete'; rev: number; kind: 'pod'; obj: Pod }
   | { type: 'upsert' | 'delete'; rev: number; kind: 'workload'; obj: Workload }
+  | { type: 'upsert' | 'delete'; rev: number; kind: 'namespace'; obj: Namespace }
   | { type: 'metrics'; metrics: Metrics }
 
 export interface Me {

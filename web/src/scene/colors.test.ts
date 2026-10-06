@@ -15,6 +15,12 @@ describe('nsColors', () => {
     expect(new Set(colors.values()).size).toBe(12)
   })
 
+  it('respecte la couleur imposée par l’annotation atlas.io/color', () => {
+    const colors = nsColors(['production', 'staging'], new Map([['production', '#112233']]))
+    expect(colors.get('production')).toBe('#112233')
+    expect(NS_PALETTE).toContain(colors.get('staging'))
+  })
+
   it('accepte plus de namespaces que de teintes', () => {
     const colors = nsColors(Array.from({ length: 20 }, (_, i) => `ns-${i}`))
     expect(colors.size).toBe(20)

@@ -67,8 +67,14 @@ export function plotGeometry(slots: number): PlotGeometry {
   }
 }
 
+/** Node GPU : ressource nvidia.com/gpu allouable, ou taint nvidia.com/gpu (pools GPU GKE). */
+export const isGpuNode = (n: Node) => n.gpu > 0 || n.taints.some((t) => t.key === 'nvidia.com/gpu')
+
+/** Style de bâtiment d'un node. */
+export const nodeStyle = (n: Node): DistrictStyle => (isGpuNode(n) ? 'gpu' : n.spot ? 'spot' : 'std')
+
 function styleOf(nodes: Node[]): DistrictStyle {
-  if (nodes.some((n) => n.gpu > 0)) return 'gpu'
+  if (nodes.some(isGpuNode)) return 'gpu'
   if (nodes.some((n) => n.spot)) return 'spot'
   return 'std'
 }
@@ -94,7 +100,7 @@ export function layoutCity(nodes: Node[], geo: PlotGeometry): CityLayout {
     return {
       pool, members, cols, rows,
       style: styleOf(members),
-      label: `${pool} · ${sample.instanceType}`,
+      label: sample.instanceType ? `${pool} · ${sample.instanceType}` : pool,
       width: cols * pitchX - ALLEY + 2 * DISTRICT_PAD,
       depth: rows * pitchZ - ALLEY + 2 * DISTRICT_PAD + LABEL_STRIP,
     }
@@ -134,10 +140,10 @@ export function layoutCity(nodes: Node[], geo: PlotGeometry): CityLayout {
     })
   }
 
-  const queue: Rect = { x: 0, z: depth / 2 + 2.6, width: Math.max(14, width * 0.8), depth: 2.6 }
+  const queue: Rect = { x: 0, z: depth / 2 + 3.4, width: Math.max(14, width * 0.8), depth: 2.6 }
   return {
     districts, plots, queue, geometry: geo,
-    bounds: { x: 0, z: 1.3, width: width, depth: depth + 2.6 * 2 },
+    bounds: { x: 0, z: 1.7, width: width, depth: depth + 3.4 * 2 },
   }
 }
 

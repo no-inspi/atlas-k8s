@@ -31,6 +31,14 @@ describe('applyMessages', () => {
     expect(s().version).toBeGreaterThan(v0)
   })
 
+  it('suit les namespaces et leur couleur', () => {
+    s().applyMessages([{ type: 'snapshot', rev: 1, namespaces: [{ name: 'prod', color: '#123456' }] }])
+    expect(s().namespaces.get('prod')?.color).toBe('#123456')
+    s().applyMessages([{ type: 'upsert', kind: 'namespace', rev: 2, obj: { name: 'dev' } }])
+    s().applyMessages([{ type: 'delete', kind: 'namespace', rev: 3, obj: { name: 'prod' } }])
+    expect([...s().namespaces.keys()]).toEqual(['dev'])
+  })
+
   it('stocke les métriques sans changer le rev', () => {
     s().applyMessages([{ type: 'snapshot', rev: 5 }])
     s().applyMessages([{ type: 'metrics', metrics: { pods: { u1: { cpu: 120, memory: 10 } }, nodes: {} } }])

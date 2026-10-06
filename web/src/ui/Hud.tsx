@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { nsColors } from '../scene/colors'
+import { useEffect, useState } from 'react'
+import { clusterColors } from '../scene/colors'
 import { postureFor } from '../scene/posture'
 import { useCluster } from '../store/cluster'
 
@@ -66,11 +66,11 @@ export function Stats() {
 }
 
 export function Legend() {
-  const names = useCluster((s) => [...new Set([...s.pods.values()].map((p) => p.namespace))].sort().join(','))
+  useCluster((s) => s.version)
   const nsFilter = useCluster((s) => s.nsFilter)
   const toggle = useCluster((s) => s.toggleNsFilter)
-  const list = useMemo(() => (names ? names.split(',') : []), [names])
-  const colors = useMemo(() => nsColors(list), [list])
+  const colors = clusterColors(useCluster.getState())
+  const list = [...colors.keys()]
   return (
     <div className={`legend ${nsFilter ? 'filtering' : ''}`} role="group" aria-label="Filtrer par namespace">
       {list.map((ns) => (

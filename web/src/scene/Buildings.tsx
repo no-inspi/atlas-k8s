@@ -4,7 +4,7 @@ import * as THREE from 'three'
 import type { Node } from '../api/types'
 import { useCluster } from '../store/cluster'
 import { Part, opacityMaterial } from './instanced'
-import type { PlotGeometry } from './layout'
+import { nodeStyle, type PlotGeometry } from './layout'
 import { pickables } from './pick'
 import type { Theme } from './theme'
 import { world } from './world'
@@ -60,10 +60,6 @@ const PARTS: BPart[] = [
 
 /** Pièces dont un clic sélectionne le node (une instance par node). */
 const PICK = ['platform', 'wall', 'canvas', 'gpuWall']
-
-function styleOf(n: Node): Style {
-  return n.gpu > 0 ? 'gpu' : n.spot ? 'spot' : 'std'
-}
 
 const isReady = (n: Node) => n.conditions.find((c) => c.type === 'Ready')?.status === 'True'
 
@@ -140,7 +136,7 @@ export function Buildings({ theme }: { theme: Theme }) {
     const { m, pos, quat, scale, color, up } = tmp
     nodes.forEach((n, ni) => {
       const plot = layout.plots.get(n.name)!
-      const style = styleOf(n)
+      const style = nodeStyle(n)
       const ready = isReady(n)
       const load = Math.min(1, n.requested.cpu / Math.max(1, n.allocatable.cpu))
       const bz = plot.z - g.depth / 2 + 0.5

@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { workloadKey, type Node, type Pod } from '../api/types'
-import { nsColors } from '../scene/colors'
+import { clusterColors } from '../scene/colors'
 import { postureFor, type Antenna } from '../scene/posture'
 import { useCluster } from '../store/cluster'
 import { shortNode } from '../store/feed'
@@ -106,7 +106,10 @@ function PodOverview({ p }: { p: Pod }) {
         <span className="cur">ce pod</span>
       </div>
       {wl?.argocd && (
-        <p className="argo-line"><span className="argo">ArgoCD : {wl.argocd.syncStatus}</span><span className="later">application {wl.argocd.application}</span></p>
+        <p className="argo-line">
+          <span className="argo">{wl.argocd.syncStatus ? `ArgoCD : ${wl.argocd.syncStatus}` : 'Géré par ArgoCD'}</span>
+          <span className="later">application {wl.argocd.application}</span>
+        </p>
       )}
 
       <h3>Ressources</h3>
@@ -129,7 +132,7 @@ function PodOverview({ p }: { p: Pod }) {
 function NodeOverview({ n }: { n: Node }) {
   const { pods, metrics } = useCluster.getState()
   const onNode = [...pods.values()].filter((p) => p.nodeName === n.name).sort((a, b) => a.name.localeCompare(b.name))
-  const colors = nsColors([...pods.values()].map((p) => p.namespace))
+  const colors = clusterColors(useCluster.getState())
   const usage = metrics.nodes[n.name]
   const allocPods = n.allocatable.pods ?? 110
 
@@ -197,7 +200,7 @@ export function Inspector() {
   let content = null
   if (selection?.type === 'pod') {
     const p = pods.get(selection.key)
-    const color = p ? nsColors([...pods.values()].map((q) => q.namespace)).get(p.namespace) : undefined
+    const color = p ? clusterColors(useCluster.getState()).get(p.namespace) : undefined
     content = p ? (
       <>
         <Head kind={`Pod · ${p.namespace}`} name={p.name} badge={p.displayStatus + (p.displayStatus === 'Running' && !p.ready ? ' (non ready)' : '')}

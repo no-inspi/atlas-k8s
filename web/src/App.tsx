@@ -20,8 +20,10 @@ export function App() {
       <div className="stage"><Scene /></div>
       <TopBar />
       <Stats />
-      <Feed />
-      <Legend />
+      <div className="bottom-left">
+        <Feed />
+        <Legend />
+      </div>
       <Hint />
       <Inspector />
     </>

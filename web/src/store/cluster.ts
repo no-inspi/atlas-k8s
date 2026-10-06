@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
-import { workloadKey, type Me, type Message, type Metrics, type Node, type Pod, type Workload } from '../api/types'
+import { workloadKey, type Me, type Message, type Metrics, type Namespace, type Node, type Pod, type Workload } from '../api/types'
 import { feedForNode, feedForPod, type FeedDraft, type FeedItem } from './feed'
 
 export type Selection = { type: 'pod' | 'node'; key: string; name: string } | null
@@ -20,6 +20,7 @@ export interface ClusterState {
   nodes: Map<string, Node>
   pods: Map<string, Pod>
   workloads: Map<string, Workload>
+  namespaces: Map<string, Namespace>
   metrics: Metrics
   me: Me | null
   selection: Selection
@@ -43,6 +44,7 @@ const initial = () => ({
   nodes: new Map<string, Node>(),
   pods: new Map<string, Pod>(),
   workloads: new Map<string, Workload>(),
+  namespaces: new Map<string, Namespace>(),
   metrics: { pods: {}, nodes: {} } as Metrics,
   me: null,
   selection: null as Selection,
@@ -56,7 +58,7 @@ export const useCluster = create<ClusterState>()(
 
     applyMessages(msgs) {
       const st = get()
-      let { rev, metrics, nodes, pods, workloads } = st
+      let { rev, metrics, nodes, pods, workloads, namespaces } = st
       let changed = false
       const drafts: FeedDraft[] = []
 
@@ -66,6 +68,7 @@ export const useCluster = create<ClusterState>()(
             nodes = new Map((m.nodes ?? []).map((n) => [n.name, n]))
             pods = new Map((m.pods ?? []).map((p) => [p.uid, p]))
             workloads = new Map((m.workloads ?? []).map((w) => [workloadKey(w), w]))
+            namespaces = new Map((m.namespaces ?? []).map((n) => [n.name, n]))
             rev = m.rev
             changed = true
             break
@@ -86,6 +89,9 @@ export const useCluster = create<ClusterState>()(
               if (d) drafts.push(d)
               if (del) nodes.delete(m.obj.name)
               else nodes.set(m.obj.name, m.obj)
+            } else if (m.kind === 'namespace') {
+              if (del) namespaces.delete(m.obj.name)
+              else namespaces.set(m.obj.name, m.obj)
             } else {
               const k = workloadKey(m.obj)
               if (del) workloads.delete(k)
@@ -103,7 +109,7 @@ export const useCluster = create<ClusterState>()(
         : st.feed
 
       set({
-        rev, metrics, nodes, pods, workloads, feed,
+        rev, metrics, nodes, pods, workloads, namespaces, feed,
         version: changed ? st.version + 1 : st.version,
         connection: 'live',
       })
