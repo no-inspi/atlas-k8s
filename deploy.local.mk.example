@@ -1,0 +1,4 @@
+# Copier en deploy.local.mk (ignoré par git) puis : make deploy
+IMAGE := registry.example.com/cluster-atlas
+KUBE_CONTEXT := mon-cluster
+VALUES := deploy/values.local.yaml

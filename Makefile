@@ -1,8 +1,11 @@
-.PHONY: load-up load-down kind-oidc helm-kind-oidc dev-demo dex-up dex-down run-dev e2e-auth helm-kind image image-push scan web build test test-go test-web demo dev e2e embed-dir clean kind-up kind-down scenarios run-kind test-integration
+.PHONY: deploy load-up load-down kind-oidc helm-kind-oidc dev-demo dex-up dex-down run-dev e2e-auth helm-kind image image-push scan web build test test-go test-web demo dev e2e embed-dir clean kind-up kind-down scenarios run-kind test-integration
 
 BIN := bin/atlas
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 IMAGE ?= ghcr.io/no-inspi/cluster-atlas
+
+# Réglages locaux du déploiement (registre, contexte, valeurs), hors dépôt.
+-include deploy.local.mk
 
 embed-dir:
 	@mkdir -p web/dist && touch web/dist/.gitkeep
@@ -131,3 +134,15 @@ load-up:
 
 load-down:
 	hack/load/kwok-down.sh
+
+# Déploiement depuis le poste : image construite pour PLATFORM, poussée sur IMAGE,
+# puis helm upgrade sur KUBE_CONTEXT avec VALUES (voir deploy.local.mk.example).
+PLATFORM ?= linux/amd64
+NAMESPACE ?= cluster-atlas
+deploy:
+	@test -n "$(KUBE_CONTEXT)" || { echo "KUBE_CONTEXT manquant (deploy.local.mk)"; exit 1; }
+	@case "$(VERSION)" in *-dirty) echo "arbre de travail modifié : commitez avant de déployer"; exit 1;; esac
+	docker buildx build --platform $(PLATFORM) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION) --push .
+	helm upgrade --install cluster-atlas deploy/helm/cluster-atlas --kube-context $(KUBE_CONTEXT) \
+	  -n $(NAMESPACE) --create-namespace --wait --timeout 3m \
+	  $(if $(VALUES),-f $(VALUES)) --set image.repository=$(IMAGE) --set image.tag=$(VERSION)

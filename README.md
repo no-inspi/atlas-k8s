@@ -111,6 +111,8 @@ Toutes les options sont commentées dans [`values.yaml`](deploy/helm/cluster-atl
 
 **Métriques** : Prometheus sur le port `9090` (`/metrics`), séparé du port public pour que l'Ingress ne les expose pas ; `metrics.serviceMonitor.enabled=true` crée un ServiceMonitor.
 
+**Depuis son poste** : copiez `deploy.local.mk.example` en `deploy.local.mk` (registre, contexte kube, fichier de valeurs ; ignoré par git), puis `make deploy` construit l'image, la pousse et fait le `helm upgrade`. L'arbre de travail doit être commité : le tag de l'image est le commit.
+
 Sur kind, `make helm-kind` construit l'image, la charge dans le cluster et installe le chart (sans OIDC jusqu'au jalon 4, donc sans exposition : `kubectl -n cluster-atlas port-forward svc/cluster-atlas 8080`).
 
 ## Tests
