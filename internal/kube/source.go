@@ -42,8 +42,9 @@ type Options struct {
 }
 
 const (
-	indexByNode  = "node"
-	indexByOwner = "owner"
+	indexByNode     = "node"
+	indexByOwner    = "owner"
+	indexByInvolved = "involved"
 )
 
 // ref identifie un objet Kubernetes dans la file de réconciliation.
@@ -71,6 +72,7 @@ type Source struct {
 	statefulsets appslisters.StatefulSetLister
 	daemonsets   appslisters.DaemonSetLister
 	jobs         batchlisters.JobLister
+	events       cache.Indexer
 	synced       []cache.InformerSynced
 
 	mu    sync.Mutex
@@ -108,6 +110,15 @@ func NewSource(client kubernetes.Interface, sink Sink, opts Options) *Source {
 	s.statefulsets = f.Apps().V1().StatefulSets().Lister()
 	s.daemonsets = f.Apps().V1().DaemonSets().Lister()
 	s.jobs = f.Batch().V1().Jobs().Lister()
+
+	// Événements : cache partagé pour l'inspecteur, hors du flux ; on n'attend pas
+	// leur synchronisation pour déclarer l'application prête.
+	evs := f.Core().V1().Events().Informer()
+	_ = evs.AddIndexers(cache.Indexers{indexByInvolved: func(obj any) ([]string, error) {
+		o := obj.(*corev1.Event).InvolvedObject
+		return []string{o.Namespace + "/" + o.Kind + "/" + o.Name}, nil
+	}})
+	s.events = evs.GetIndexer()
 
 	s.watch(pods.Informer(), s.onPod)
 	s.watch(f.Core().V1().Nodes().Informer(), func(o any) { s.mark(ref{stream.KindNode, o.(*corev1.Node).Name}) })
@@ -440,6 +451,43 @@ func slimContainers(cs []corev1.Container) {
 		c := &cs[i]
 		cs[i] = corev1.Container{Name: c.Name, Image: c.Image, Resources: c.Resources, RestartPolicy: c.RestartPolicy}
 	}
+}
+
+// PodEvents renvoie les événements d'un pod depuis le cache partagé.
+func (s *Source) PodEvents(namespace, name string) []model.Event {
+	objs, _ := s.events.ByIndex(indexByInvolved, namespace+"/Pod/"+name)
+	out := make([]model.Event, 0, len(objs))
+	for _, o := range objs {
+		out = append(out, ConvertEvent(o.(*corev1.Event)))
+	}
+	return out
+}
+
+// ConvertEvent lit indifféremment les anciens champs (count, lastTimestamp) et
+// les nouveaux (series, eventTime).
+func ConvertEvent(e *corev1.Event) model.Event {
+	m := model.Event{Type: e.Type, Reason: e.Reason, Message: e.Message, Count: e.Count,
+		FirstSeen: e.FirstTimestamp.Time, LastSeen: e.LastTimestamp.Time, Source: e.Source.Component}
+	if e.ReportingController != "" && m.Source == "" {
+		m.Source = e.ReportingController
+	}
+	if e.Series != nil {
+		m.Count = e.Series.Count
+		m.LastSeen = e.Series.LastObservedTime.Time
+	}
+	if m.LastSeen.IsZero() {
+		m.LastSeen = e.EventTime.Time
+	}
+	if m.LastSeen.IsZero() {
+		m.LastSeen = e.CreationTimestamp.Time
+	}
+	if m.FirstSeen.IsZero() {
+		m.FirstSeen = m.LastSeen
+	}
+	if m.Count == 0 {
+		m.Count = 1
+	}
+	return m
 }
 
 // PodUID retrouve l'UID d'un pod dans le cache (pour les métriques).

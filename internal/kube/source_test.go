@@ -87,11 +87,15 @@ func fixtures() []runtime.Object {
 	}
 }
 
+// lastSource : source démarrée par le dernier startSource (tests des événements).
+var lastSource *Source
+
 func startSource(t *testing.T, objs ...runtime.Object) (*fake.Clientset, *sink) {
 	t.Helper()
 	client := fake.NewClientset(objs...)
 	sk := newSink()
 	src := NewSource(client, sk, Options{Log: slog.New(slog.NewTextHandler(io.Discard, nil)), ReconcileInterval: 10 * time.Millisecond})
+	lastSource = src
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go func() { _ = src.Run(ctx) }()

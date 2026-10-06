@@ -29,17 +29,11 @@ type Config struct {
 
 	// Auth est nil sans authentification : pas d'impersonation ni de filtrage.
 	Auth     *auth.Auth
-	Reviewer *access.Reviewer // filtrage du flux (avec Auth)
-	Clients  ClientsFor       // clients impersonnés (avec Auth)
+	Reviewer *access.Reviewer    // filtrage du flux (avec Auth)
+	Clients  access.ClientSource // clients impersonnés (avec Auth)
 	// Kube : client du backend, utilisé sans authentification (auth none) ;
 	// nil en démo.
 	Kube kubernetes.Interface
-}
-
-// ClientsFor fournit le client Kubernetes impersonné d'un utilisateur
-// (*access.Clients).
-type ClientsFor interface {
-	For(u access.User) (kubernetes.Interface, error)
 }
 
 // csp interdit tout script, style ou police externe : le front est servi
@@ -147,7 +141,7 @@ func (s *server) accessReview(w http.ResponseWriter, r *http.Request) {
 	var client kubernetes.Interface
 	switch {
 	case s.cfg.Auth != nil:
-		c, err := s.cfg.Clients.For(s.user(r))
+		c, err := s.cfg.Clients.Kube(s.user(r))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

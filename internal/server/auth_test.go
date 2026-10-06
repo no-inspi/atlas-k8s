@@ -16,7 +16,6 @@ import (
 	"github.com/coder/websocket"
 	authzv1 "k8s.io/api/authorization/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
@@ -26,10 +25,6 @@ import (
 	"github.com/no-inspi/cluster-atlas/internal/model"
 	"github.com/no-inspi/cluster-atlas/internal/stream"
 )
-
-type fixedClients struct{ c kubernetes.Interface }
-
-func (f fixedClients) For(access.User) (kubernetes.Interface, error) { return f.c, nil }
 
 // Politique de test : le groupe oidc:dev ne voit que production.
 func rbacClient() *fake.Clientset {
@@ -67,7 +62,7 @@ func TestAuthenticatedServer(t *testing.T) {
 	hub.Flush()
 	client := rbacClient()
 	srv.Config.Handler = New(Config{ClusterName: "kind", Static: static, Auth: a,
-		Reviewer: access.NewReviewer(client), Clients: fixedClients{client}}, hub, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		Reviewer: access.NewReviewer(client), Clients: access.Static{K: client}}, hub, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	jar, _ := cookiejar.New(nil)
 	browser := &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}

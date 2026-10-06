@@ -171,11 +171,11 @@ func TestBatchAccessReview(t *testing.T) {
 
 func TestClientsImpersonate(t *testing.T) {
 	c := NewClients(&rest.Config{Host: "https://k8s.example"})
-	a, err := c.For(alice)
+	a, err := c.Kube(alice)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, _ := c.For(alice)
+	b, _ := c.Kube(alice)
 	if a != b {
 		t.Error("le client d'un même utilisateur doit être réutilisé")
 	}

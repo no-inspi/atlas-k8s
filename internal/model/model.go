@@ -99,6 +99,17 @@ type Namespace struct {
 	Color string `json:"color,omitempty"`
 }
 
+// Event est un événement Kubernetes concernant un objet (onglet Événements).
+type Event struct {
+	Type      string    `json:"type"` // Normal | Warning
+	Reason    string    `json:"reason"`
+	Message   string    `json:"message"`
+	Count     int32     `json:"count"`
+	FirstSeen time.Time `json:"firstSeen"`
+	LastSeen  time.Time `json:"lastSeen"`
+	Source    string    `json:"source,omitempty"`
+}
+
 // Usage est un instantané metrics-server.
 type Usage struct {
 	CPU    int64 `json:"cpu"`
