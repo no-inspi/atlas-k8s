@@ -380,6 +380,7 @@ func (s *Sim) livePods(w *simWorkload) []*simPod {
 
 func (s *Sim) reconcile() {
 	for _, w := range s.workloads {
+		s.reassignRoles(w)
 		live := s.livePods(w)
 		switch w.def.Kind {
 		case "Deployment":
@@ -435,6 +436,40 @@ func (s *Sim) reconcile() {
 			if !s.now.Before(w.nextJob) {
 				s.newPod(w, 0)
 				w.nextJob = w.nextJob.Add(secs(jobPeriodSec))
+			}
+		}
+	}
+}
+
+// reassignRoles redonne à un replica vivant le rôle de pod qui crashe ou qui
+// n'est jamais prêt, quand le pod qui le portait est en train de disparaître
+// (son remplaçant est créé avant que le rôle ne soit libéré).
+func (s *Sim) reassignRoles(w *simWorkload) {
+	live := s.livePods(w)
+	has := func(f func(*simPod) bool) bool {
+		for _, p := range live {
+			if f(p) {
+				return true
+			}
+		}
+		return false
+	}
+	if w.def.Crashy && !has(func(p *simPod) bool { return p.crash }) {
+		for _, p := range live {
+			if p.pod.DisplayStatus == "Running" {
+				p.crash, w.crashTaken = true, true
+				p.deadline = s.now.Add(secs(s.between(firstCrashMinSec, firstCrashMaxSec)))
+				break
+			}
+		}
+	}
+	if w.def.NotReady && !has(func(p *simPod) bool { return p.notReady }) {
+		for _, p := range live {
+			if p.pod.DisplayStatus == "Running" {
+				p.notReady, w.notReadyTaken = true, true
+				s.setStatus(p, "Running") // recalcule la readiness
+				s.event(p, "Warning", "Unhealthy", "Readiness probe failed: HTTP probe failed with statuscode: 503", "kubelet")
+				break
 			}
 		}
 	}

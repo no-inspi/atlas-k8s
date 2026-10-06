@@ -32,7 +32,8 @@ Deux comptes de test, mot de passe `password` :
 | Compte | Groupe impersonné | Droits (hack/dev-rbac.yaml) | Ce qu'il voit |
 | --- | --- | --- | --- |
 | `alice@example.com` | `oidc:sre` | `view` sur tout le cluster + lecture des nodes | tous les namespaces, les nodes |
-| `bob@example.com` | `oidc:dev` | `edit` dans `production` et `staging` | ces deux namespaces, bâtiments anonymes à la place des nodes |
+| `bob@example.com` | `oidc:dev` | `edit` dans `production` et `staging` | ces deux namespaces, bâtiments anonymes à la place des nodes ; terminal et actions dans ses namespaces |
+| `carol@example.com` | `oidc:ops` | `cluster-admin` | tout ; cordon, uncordon, drain |
 
 Le rôle `view` de Kubernetes ne couvre pas les nodes (ressource cluster-scoped) : sans droit de les lister, la ville dessine des bâtiments anonymes à partir du `nodeName` des pods visibles.
 
@@ -131,6 +132,15 @@ make scan        # image + Trivy (échoue sur une vulnérabilité critique)
 - **Le simulateur** (`internal/demo`) produit le même modèle et passe par le même hub (`internal/stream`) : le front ne sait pas s'il regarde un vrai cluster.
 - **Le front** (`web/`, React + React Three Fiber) garde l'état dans un store Zustand indexé par UID. La scène lit le store dans sa boucle de rendu sans re-render React par message. Robots et bâtiments sont des `InstancedMesh`, avec un draw call par pièce quel que soit le nombre de pods.
 - **Inspecteur** (`internal/inspect`, `internal/logs`) : chaîne de propriétaires, YAML (sans `managedFields`), logs et événements. Propriétaires, YAML et logs passent par le client impersonné de l'utilisateur ; les événements viennent d'un cache partagé, après vérification de son droit `list events`. Les logs passent par un WebSocket avec backpressure : 2 000 lignes en attente au plus côté serveur, les lignes en trop sont comptées et signalées. Les erreurs de l'API server (403, 404) sont affichées telles quelles.
+- **Terminal** (`internal/exec`) : `pods/exec` au nom de l'utilisateur, protocole WebSocket `v5.channel.k8s.io` avec repli SPDY ; `/bin/bash` puis `/bin/sh` ; xterm.js côté navigateur (stdin/stdout binaires, redimensionnement en JSON). Désactivable (`features.exec.enabled`), interdit dans `features.exec.deniedNamespaces`, fermé après `features.exec.idleTimeout` d'inactivité.
+- **Actions** (`internal/actions`) : supprimer un pod, scale, rollout restart, cordon, uncordon, drain, toujours par impersonation. Confirmation pour supprimer, scaler à 0 et drainer (récapitulatif, puis saisie du nom court du node) ; boutons grisés avec l'explication « Vous n'avez pas le droit … » d'après une revue d'accès ; résultat en notification et dans le bandeau. Le drain cordonne, puis évince par l'API Eviction en respectant les PDB (refus réessayés 60 s) et laisse les pods de DaemonSet. `features.actions.enabled: false` donne une console en lecture seule.
+- **Audit** (`internal/audit`) : une ligne JSON sur stdout par action et par ouverture ou fermeture de session exec, repérable par `"audit":true` :
+
+  ```json
+  {"time":"2026-10-06T10:31:02Z","audit":true,"user":"bob@example.com","groups":["oidc:dev"],"verb":"delete","resource":"pods","namespace":"production","name":"api-gateway-7f9-x","result":"success","durationMs":42}
+  ```
+
+  `result` vaut `success`, `forbidden` ou `failure` (avec `error`), et `requested` pour `exec-open`, dont l'issue est portée par `exec-close`. Les commandes tapées dans le terminal ne sont pas enregistrées.
 - **Liens profonds** : `/pods/{namespace}/{nom}` et `/nodes/{nom}` ouvrent l'inspecteur sur l'objet ; l'URL suit la sélection.
 - **Sécurité navigateur** : CSP stricte pour les scripts (`script-src 'self'`, aucun script externe), polices auto-hébergées ; styles en ligne autorisés pour Monaco (voir plus bas), vérification de l'`Origin` à l'ouverture du WebSocket, en-tête `X-Atlas-Request` exigé sur toute requête mutante (CSRF).
 - **Authentification** (`internal/auth`) : OIDC code + PKCE ; session dans un cookie chiffré AES-256-GCM (`HttpOnly`, `SameSite=Lax`, `Secure` en https), sans token côté navigateur. Un nom d'utilisateur `system:*` est refusé et les groupes `system:*` ignorés ; tous les groupes sont préfixés (`oidc:`).
@@ -164,7 +174,7 @@ web/src/ui/        barre du haut, stats, filtres, liens profonds
 | 3 | Image, chart Helm, déploiement in-cluster | fait |
 | 4 | OIDC, sessions, impersonation, filtrage par droits | fait |
 | 5 | Inspecteur : logs, YAML, événements | fait |
-| 6 | Terminal et actions, audit | à venir |
+| 6 | Terminal et actions, audit | fait |
 | 7 | Échelle (LOD, regroupement, rendu à la demande), recherche, vue Liste, CI | à venir |
 
 Choix propres au jalon 1, détaillés dans [`docs/superpowers/plans/2026-10-06-jalon-1-squelette-demo.md`](docs/superpowers/plans/2026-10-06-jalon-1-squelette-demo.md) :
@@ -195,3 +205,9 @@ Choix du jalon 5 ([plan](docs/superpowers/plans/2026-10-06-jalon-5-inspecteur-le
 
 - **CSP et Monaco** : Monaco crée des `<style>` et des attributs `style` sans prise en charge de nonce (vérifié sur la 0.57) ; la CSP autorise donc `'unsafe-inline'` pour les styles, les scripts restant limités à `'self'`. Pour une CSP de styles stricte, CodeMirror 6 (qui accepte un nonce) remplacerait Monaco. Monaco (~730 Ko gzippés) n'est chargé qu'à l'ouverture de l'onglet YAML.
 - Les événements sont rafraîchis toutes les 3 s tant que l'onglet est ouvert.
+
+Choix du jalon 6 ([plan](docs/superpowers/plans/2026-10-06-jalon-6-terminal-actions.md)) :
+
+- Le drain ignore aussi les pods statiques et ne force pas les pods sans contrôleur (comme `kubectl drain` sans `--force`) ; le récapitulatif les liste.
+- Si le node drainé héberge Cluster Atlas lui-même, son pod est évincé en dernier, après la réponse (le chart lui donne son nom par la downward API) ; la page se reconnecte.
+- Sans lecture des `Application` ArgoCD, l'avertissement de selfHeal s'affiche pour tout workload géré par ArgoCD.

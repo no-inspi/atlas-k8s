@@ -1,23 +1,10 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test } from '@playwright/test'
+import { snapshot, waitForPod } from './helpers'
 
 // Terminal et actions en mode démo (shell simulé, cluster simulé).
 
-type SnapPod = { name: string; namespace: string; owner: { kind: string; name: string }; displayStatus: string; nodeName: string }
-
-async function snapshot(page: Page): Promise<{ pods: SnapPod[]; nodes: { name: string; pool: string }[] }> {
-  await page.goto('/')
-  return page.evaluate(() => new Promise((resolve) => {
-    const ws = new WebSocket(`ws://${location.host}/api/stream`)
-    ws.onmessage = (e) => {
-      const m = JSON.parse(e.data)
-      if (m.type === 'snapshot') { ws.close(); resolve({ pods: m.pods, nodes: m.nodes }) }
-    }
-  }))
-}
-
 test('terminal : commandes, Ctrl+C, flèches ignorées, exit', async ({ page }) => {
-  const { pods } = await snapshot(page)
-  const api = pods.find((p) => p.owner.name === 'api-gateway' && p.displayStatus === 'Running')!
+  const api = await waitForPod(page, (p) => p.owner.name === 'api-gateway' && p.displayStatus === 'Running')
   await page.goto(`/pods/production/${api.name}`)
   const panel = page.locator('aside.panel')
   await panel.getByRole('tab', { name: 'Terminal' }).click()
@@ -42,17 +29,16 @@ test('terminal : commandes, Ctrl+C, flèches ignorées, exit', async ({ page }) 
 })
 
 test('terminal refusé pour un pod non démarré', async ({ page }) => {
-  const { pods } = await snapshot(page)
-  const broken = pods.find((p) => p.owner.name === 'checkout-preview')!
+  const broken = await waitForPod(page, (p) => p.owner.name === 'checkout-preview' && p.displayStatus === 'ImagePullBackOff')
   await page.goto(`/pods/staging/${broken.name}`)
   await page.locator('aside.panel').getByRole('tab', { name: 'Terminal' }).click()
   await expect(page.getByText('Container non démarré : ImagePullBackOff.')).toBeVisible()
 })
 
 test('supprimer un pod, scaler, drainer un node', async ({ page }) => {
-  const { pods, nodes } = await snapshot(page)
+  const { nodes } = await snapshot(page)
   const panel = page.locator('aside.panel')
-  const front = pods.find((p) => p.owner.name === 'frontend')!
+  const front = await waitForPod(page, (p) => p.owner.name === 'frontend' && p.displayStatus === 'Running')
 
   await page.goto(`/pods/production/${front.name}`)
   await panel.getByRole('button', { name: 'Supprimer le pod' }).click()
@@ -62,13 +48,16 @@ test('supprimer un pod, scaler, drainer un node', async ({ page }) => {
   await expect(page.locator('.toast').first()).toContainText(`Pod ${front.name} supprimé`)
   await expect(panel.getByText('Ce pod a été supprimé.')).toBeVisible({ timeout: 10_000 })
 
-  const other = pods.find((p) => p.owner.name === 'grafana')!
+  const other = await waitForPod(page, (p) => p.owner.name === 'grafana' && p.displayStatus === 'Running')
   await page.goto(`/pods/monitoring/${other.name}`)
   await panel.getByRole('button', { name: 'Ajouter un replica' }).click()
   await expect(page.locator('.toast').last()).toContainText('scalé à 2')
   await expect(panel.getByText('scale sera annulé à la prochaine synchronisation')).toBeVisible()
-  await expect(panel.getByRole('group', { name: /Replicas de/ })).toContainText('2 replicas', { timeout: 10_000 })
+  // Le compteur peut afficher la cible demandée : on attend la confirmation du flux.
+  await expect(panel.getByRole('group', { name: /Replicas de/ })).toContainText('2 replicas (2 prêts)', { timeout: 15_000 })
   await panel.getByRole('button', { name: 'Retirer un replica' }).click()
+  await expect(page.locator('.toast').last()).toContainText('scalé à 1')
+  await expect(panel.getByRole('group', { name: /Replicas de/ })).toContainText('1 replica (1 prêts)', { timeout: 15_000 })
   await panel.getByRole('button', { name: 'Retirer un replica' }).click()
   await expect(page.getByRole('dialog')).toContainText('Tous les pods')
   await page.getByRole('dialog').getByRole('button', { name: 'Annuler' }).click()
@@ -89,4 +78,7 @@ test('supprimer un pod, scaler, drainer un node', async ({ page }) => {
   // Les robots évincés repartent ailleurs : il ne reste que le DaemonSet sur le node.
   await expect.poll(async () => (await panel.locator('.podlist li').count()), { timeout: 15_000 }).toBe(1)
   await page.screenshot({ path: 'e2e/__screenshots__/actions-drain.png' })
+  // Remet le node en service pour les tests suivants.
+  await panel.getByRole('button', { name: 'Uncordon' }).click()
+  await expect(panel.getByText('SchedulingDisabled')).toHaveCount(0)
 })

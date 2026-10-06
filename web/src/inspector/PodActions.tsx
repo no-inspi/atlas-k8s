@@ -21,7 +21,7 @@ export function PodActions({ p }: { p: Pod }) {
   // deux clics rapides font bien 2 → 1 → 0.
   const [target, setTarget] = useState<number | null>(null)
   const replicas = target ?? wl?.replicas ?? 0
-  useEffect(() => { if (target !== null && wl?.replicas === target) setTarget(null) }, [target, wl?.replicas])
+  useEffect(() => { if (!busy && target !== null && wl?.replicas === target) setTarget(null) }, [busy, target, wl?.replicas])
 
   const run = async (label: string, fn: () => Promise<unknown>) => {
     setBusy(true)
