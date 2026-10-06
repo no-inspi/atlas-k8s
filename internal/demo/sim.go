@@ -41,6 +41,8 @@ type simWorkload struct {
 	crashTaken, notReadyTaken bool
 	last                      model.Workload
 	emitted                   bool
+	// restartedAt : rollout restart en cours d'un StatefulSet ou d'un DaemonSet.
+	restartedAt time.Time
 }
 
 type simPod struct {
@@ -64,6 +66,7 @@ type simNode struct {
 	node    model.Node
 	emitted model.Resources
 	sent    bool
+	dirty   bool // spec modifiée (cordon)
 }
 
 type Sim struct {
@@ -128,17 +131,6 @@ func (s *Sim) Step(now time.Time) {
 	s.flush()
 	if !now.Before(s.nextMetrics) {
 		s.publishMetrics()
-	}
-}
-
-// Scale change le nombre de replicas d'un Deployment ou d'un StatefulSet.
-func (s *Sim) Scale(ns, name string, replicas int32) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, w := range s.workloads {
-		if w.def.NS == ns && w.def.Name == name && (w.def.Kind == "Deployment" || w.def.Kind == "StatefulSet") {
-			w.replicas = replicas
-		}
 	}
 }
 
@@ -391,6 +383,9 @@ func (s *Sim) reconcile() {
 		live := s.livePods(w)
 		switch w.def.Kind {
 		case "Deployment":
+			if s.rollDeployment(w, live) {
+				continue
+			}
 			for i := len(live); i < int(w.replicas); i++ {
 				s.newPod(w, 0)
 			}
@@ -421,6 +416,7 @@ func (s *Sim) reconcile() {
 					s.terminate(p)
 				}
 			}
+			s.rollRestart(w, int(w.replicas))
 		case "DaemonSet":
 			onNode := map[string]bool{}
 			for _, p := range live {
@@ -434,6 +430,7 @@ func (s *Sim) reconcile() {
 					p.deadline = s.now.Add(secs(s.between(creatingMinSec, creatingMaxSec)))
 				}
 			}
+			s.rollRestart(w, len(s.nodes))
 		case "Job":
 			if !s.now.Before(w.nextJob) {
 				s.newPod(w, 0)
@@ -586,8 +583,8 @@ func (s *Sim) flush() {
 	for _, n := range s.nodes {
 		u := s.usageOf(n)
 		n.node.Requested = model.Resources{CPU: u.cpu, Memory: u.mem, Pods: int64(s.podCount(n))}
-		if !n.sent || n.node.Requested != n.emitted {
-			n.sent, n.emitted = true, n.node.Requested
+		if !n.sent || n.dirty || n.node.Requested != n.emitted {
+			n.sent, n.dirty, n.emitted = true, false, n.node.Requested
 			s.sink.Upsert(stream.KindNode, n.node.Name, n.node)
 		}
 	}

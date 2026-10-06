@@ -1,6 +1,7 @@
 package demo
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -215,7 +216,7 @@ func TestCrashLoopCycle(t *testing.T) {
 
 func TestScaleBeyondCapacityLeavesPodsPending(t *testing.T) {
 	s, sink := start(7)
-	s.Scale("production", "ml-inference", 3)
+	_ = s.Scale(context.Background(), anyone, "production", "Deployment", "ml-inference", 3)
 	advance(s, t0, 5*time.Second)
 	pending := 0
 	for _, p := range podsOf(sink, "production", "ml-inference") {
@@ -233,7 +234,7 @@ func TestScaleBeyondCapacityLeavesPodsPending(t *testing.T) {
 		t.Errorf("workload = %+v", w)
 	}
 
-	s.Scale("production", "ml-inference", 1)
+	_ = s.Scale(context.Background(), anyone, "production", "Deployment", "ml-inference", 1)
 	advance(s, t0.Add(5*time.Second), 3*time.Second)
 	if n := len(podsOf(sink, "production", "ml-inference")); n != 1 {
 		t.Errorf("après scale down : %d pods", n)
@@ -242,7 +243,7 @@ func TestScaleBeyondCapacityLeavesPodsPending(t *testing.T) {
 
 func TestNewPodGoesThroughContainerCreating(t *testing.T) {
 	s, sink := start(8)
-	s.Scale("production", "frontend", 3)
+	_ = s.Scale(context.Background(), anyone, "production", "Deployment", "frontend", 3)
 	advance(s, t0, 5*time.Second)
 	var fresh string
 	for uid, st := range sink.statuses {

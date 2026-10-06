@@ -171,7 +171,9 @@ func drainPlan(ctx context.Context, kc kubernetes.Interface, node string) (actio
 			}
 		}
 	}
-	sort.Slice(plan.Blocking, func(i, j int) bool { return plan.Blocking[i].Namespace+plan.Blocking[i].Name < plan.Blocking[j].Namespace+plan.Blocking[j].Name })
+	sort.Slice(plan.Blocking, func(i, j int) bool {
+		return plan.Blocking[i].Namespace+plan.Blocking[i].Name < plan.Blocking[j].Namespace+plan.Blocking[j].Name
+	})
 	return plan, nil
 }
 

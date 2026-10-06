@@ -86,7 +86,7 @@ func TestDemoEvents(t *testing.T) {
 		t.Error("le plus récent doit venir en premier")
 	}
 
-	s.Scale("production", "ml-inference", 2)
+	_ = s.Scale(context.Background(), anyone, "production", "Deployment", "ml-inference", 2)
 	advance(s, t0, 3*time.Second)
 	var pending model.Pod
 	for _, p := range sink.pods {
