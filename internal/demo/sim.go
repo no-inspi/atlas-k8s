@@ -52,6 +52,12 @@ type simPod struct {
 	crash        bool
 	notReady     bool
 	dirty        bool
+
+	// Inspecteur : événements et logs de l'instance courante et précédente.
+	events   []model.Event
+	logs     []logLine
+	prevLogs []logLine
+	logSeq   int // nombre total de lignes écrites (suivi des logs)
 }
 
 type simNode struct {
@@ -115,6 +121,7 @@ func (s *Sim) Step(now time.Time) {
 	defer s.mu.Unlock()
 	s.now = now
 	s.advancePods()
+	s.tickLogs()
 	s.reconcile()
 	s.churn()
 	s.schedule()
@@ -203,11 +210,17 @@ func (s *Sim) startInstantly(p *simPod) {
 		s.setStatus(p, "ImagePullBackOff")
 	case p.crash:
 		p.pod.Restarts = int32(6 + s.rng.IntN(9))
-		s.setStatus(p, "CrashLoopBackOff")
+		s.setStatus(p, "Running")
 		p.deadline = s.now.Add(secs(s.between(0.5, backoffSec)))
 	default:
 		s.setStatus(p, "Running")
 	}
+	if p.crash {
+		// Le pod a déjà redémarré : son instance précédente a des logs.
+		p.prevLogs = append([]logLine(nil), p.logs...)
+		s.setStatus(p, "CrashLoopBackOff")
+	}
+	s.backdate(p)
 }
 
 /* ---------- pods ---------- */
@@ -249,6 +262,7 @@ func (s *Sim) newPod(w *simWorkload, ordinal int) *simPod {
 // setStatus aligne phase, readiness et état du container sur ce qu'afficherait
 // `kubectl get pods`.
 func (s *Sim) setStatus(p *simPod, status string) {
+	defer s.onTransition(p, p.pod.DisplayStatus, status)
 	d := p.wl.def
 	c := model.ContainerStatus{Name: d.Name, Image: d.Image, Restarts: p.pod.Restarts}
 	phase, ready := "Pending", false
@@ -286,6 +300,7 @@ func (s *Sim) bind(p *simPod, n *simNode) {
 	p.pod.PodIP = fmt.Sprintf("10.52.%d.%d", s.nodeIndex(n), 2+s.rng.IntN(248))
 	p.pod.StatusMessage = ""
 	p.dirty = true
+	s.event(p, "Normal", "Scheduled", fmt.Sprintf("Successfully assigned %s/%s to %s", p.pod.Namespace, p.pod.Name, n.node.Name), "default-scheduler")
 }
 
 func (s *Sim) terminate(p *simPod) {
@@ -465,6 +480,7 @@ func (s *Sim) schedule() {
 		if msg := s.failReason(p); msg != p.pod.StatusMessage {
 			p.pod.StatusMessage = msg
 			p.dirty = true
+			s.event(p, "Warning", "FailedScheduling", msg, "default-scheduler")
 		}
 	}
 }
