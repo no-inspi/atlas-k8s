@@ -1,0 +1,17 @@
+Cluster Atlas {{ .Chart.AppVersion }} est installé dans le namespace {{ .Release.Namespace }}.
+{{- $url := include "atlas.publicURL" . }}
+{{ if $url }}
+Ouvrez {{ $url }} et connectez-vous avec le SSO de votre organisation.
+Les droits affichés sont ceux de vos RoleBindings : chaque requête est faite
+en votre nom (impersonation), avec les groupes préfixés « {{ .Values.auth.oidc.groupsPrefix }} ».
+{{- else }}
+L'application n'est pas exposée (ingress.enabled et httpRoute.enabled sont faux).
+Accès local :
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "atlas.fullname" . }} 8080:{{ .Values.service.port }}
+  puis http://localhost:8080
+{{- end }}
+{{- if eq .Values.auth.mode "none" }}
+
+ATTENTION : auth.mode=none. Aucune authentification ; à réserver au développement.
+{{- end }}

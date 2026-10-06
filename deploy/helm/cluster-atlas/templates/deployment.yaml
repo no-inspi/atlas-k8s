@@ -1,0 +1,137 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "atlas.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "atlas.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "atlas.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "atlas.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        # Redémarre les pods si la configuration change.
+        checksum/config: {{ toJson (pick .Values "clusterName" "auth" "features" "ui") | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "atlas.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 15
+      containers:
+        - name: atlas
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+          env:
+            - name: ATLAS_ADDR
+              value: ":8080"
+            - name: ATLAS_METRICS_ADDR
+              value: ":{{ .Values.metrics.port }}"
+            - name: ATLAS_CLUSTER_NAME
+              value: {{ .Values.clusterName | default .Release.Name | quote }}
+            - name: ATLAS_AUTH_MODE
+              value: {{ .Values.auth.mode | quote }}
+            - name: ATLAS_PUBLIC_URL
+              value: {{ include "atlas.publicURL" . | quote }}
+            - name: ATLAS_OIDC_ISSUER_URL
+              value: {{ .Values.auth.oidc.issuerURL | quote }}
+            - name: ATLAS_OIDC_CLIENT_ID
+              value: {{ .Values.auth.oidc.clientID | quote }}
+            - name: ATLAS_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "atlas.secretName" . }}
+                  key: client-secret
+            - name: ATLAS_COOKIE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "atlas.secretName" . }}
+                  key: cookie-key
+            - name: ATLAS_OIDC_USERNAME_CLAIM
+              value: {{ .Values.auth.oidc.usernameClaim | quote }}
+            - name: ATLAS_OIDC_GROUPS_CLAIM
+              value: {{ .Values.auth.oidc.groupsClaim | quote }}
+            - name: ATLAS_OIDC_GROUPS_PREFIX
+              value: {{ .Values.auth.oidc.groupsPrefix | quote }}
+            - name: ATLAS_SESSION_TTL
+              value: {{ .Values.auth.sessionTTL | quote }}
+            - name: ATLAS_EXEC_ENABLED
+              value: {{ .Values.features.exec.enabled | quote }}
+            - name: ATLAS_EXEC_DENIED_NAMESPACES
+              value: {{ join "," .Values.features.exec.deniedNamespaces | quote }}
+            - name: ATLAS_EXEC_IDLE_TIMEOUT
+              value: {{ .Values.features.exec.idleTimeout | quote }}
+            - name: ATLAS_ACTIONS_ENABLED
+              value: {{ .Values.features.actions.enabled | quote }}
+            - name: ATLAS_POOL_LABEL
+              value: {{ .Values.ui.poolLabel | quote }}
+          readinessProbe:
+            # Prêt une fois les caches des informers synchronisés.
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+      {{- if or .Values.affinity (gt (int .Values.replicaCount) 1) }}
+      affinity:
+        {{- if .Values.affinity }}
+        {{- toYaml .Values.affinity | nindent 8 }}
+        {{- else }}
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    {{- include "atlas.selectorLabels" . | nindent 20 }}
+        {{- end }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

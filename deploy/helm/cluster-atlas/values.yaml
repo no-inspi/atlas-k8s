@@ -1,0 +1,145 @@
+# Nom du cluster affiché dans l'interface.
+clusterName: ""
+
+image:
+  repository: ghcr.io/no-inspi/cluster-atlas
+  # Vide : appVersion du chart.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# 1 par défaut, 2 pour la haute disponibilité (sessions en cookies chiffrés :
+# aucune affinité nécessaire, un client reconnecté reçoit un nouveau snapshot).
+replicaCount: 1
+
+auth:
+  # oidc | none. « none » est réservé au développement local et refusé si
+  # l'application est exposée (ingress.enabled ou httpRoute.enabled).
+  mode: oidc
+  oidc:
+    issuerURL: https://accounts.google.com
+    clientID: ""
+    # Ignoré si existingSecret est renseigné.
+    clientSecret: ""
+    # Secret existant avec les clés client-secret et cookie-key.
+    existingSecret: ""
+    usernameClaim: email
+    groupsClaim: groups
+    # Préfixe ajouté aux groupes envoyés en Impersonate-Group : les RoleBindings
+    # doivent viser les mêmes noms (par ex. « oidc:sre »).
+    groupsPrefix: "oidc:"
+  sessionTTL: 8h
+
+features:
+  exec:
+    enabled: true
+    deniedNamespaces: [kube-system]
+    idleTimeout: 15m
+  actions:
+    # false : console en lecture seule.
+    enabled: true
+
+ui:
+  # Label désignant le node pool ; vide = détection automatique
+  # (GKE, Karpenter, EKS, puis type d'instance).
+  poolLabel: ""
+
+rbac:
+  create: true
+  # Restreint l'impersonation à certains utilisateurs ou groupes (resourceNames).
+  # Vide : tous. Le préfixe de groupe (auth.oidc.groupsPrefix) est en plus
+  # appliqué par l'application, RBAC ne sachant pas filtrer par préfixe.
+  impersonate:
+    users: []
+    groups: []
+
+serviceAccount:
+  create: true
+  # Vide : nom de la release.
+  name: ""
+  annotations: {}
+
+service:
+  type: ClusterIP
+  port: 8080
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: nginx
+  host: atlas.example.com
+  annotations: {}
+  tls: true
+  # Vide : <release>-tls (rempli par cert-manager si un issuer est indiqué).
+  tlsSecretName: ""
+  certManager:
+    clusterIssuer: ""
+    issuer: ""
+
+# Alternative à l'Ingress : Gateway API.
+httpRoute:
+  enabled: false
+  annotations: {}
+  hostnames: []
+  # Par ex. [{name: gateway, namespace: gateway-system, sectionName: https}]
+  parentRefs: []
+  # Les flux (logs, exec, stream) sont des WebSockets longs : au moins 3 600 s.
+  timeouts:
+    request: 3600s
+
+networkPolicy:
+  enabled: true
+  # Sources autorisées vers le port HTTP : le namespace du contrôleur d'ingress
+  # ou de la Gateway.
+  allowFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+  # Sources autorisées vers le port des métriques.
+  metricsFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+  apiServer:
+    # Vide : IP lues sur l'EndpointSlice default/kubernetes à l'installation,
+    # sinon 0.0.0.0/0 sur les ports ci-dessous.
+    cidrs: []
+    ports: [443, 6443]
+  dns:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: kube-system
+    podSelector:
+      matchLabels:
+        k8s-app: kube-dns
+  # Sortie vers l'issuer OIDC (découverte, JWKS, échange de code).
+  oidcIssuer:
+    cidrs: ["0.0.0.0/0"]
+    ports: [443]
+  # Règles egress supplémentaires (format NetworkPolicyEgressRule).
+  extraEgress: []
+
+metrics:
+  port: 9090
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}
+
+podDisruptionBudget:
+  # Créé seulement si replicaCount > 1.
+  minAvailable: 1
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+podAnnotations: {}
+podLabels: {}
+priorityClassName: ""
+nodeSelector: {}
+tolerations: []
+affinity: {}

@@ -1,0 +1,72 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+{{- /* IP réelles de l'API server (après DNAT, c'est elles que la politique voit). */}}
+{{- $apiCIDRs := $np.apiServer.cidrs }}
+{{- $apiPorts := $np.apiServer.ports }}
+{{- if not $apiCIDRs }}
+{{- $slice := lookup "discovery.k8s.io/v1" "EndpointSlice" "default" "kubernetes" }}
+{{- if $slice }}
+{{- range $slice.endpoints }}{{ range .addresses }}{{ $apiCIDRs = append $apiCIDRs (printf "%s/32" .) }}{{ end }}{{ end }}
+{{- $apiPorts = list }}
+{{- range $slice.ports }}{{ $apiPorts = append $apiPorts .port }}{{ end }}
+{{- end }}
+{{- end }}
+{{- if not $apiCIDRs }}{{ $apiCIDRs = list "0.0.0.0/0" }}{{ end }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "atlas.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "atlas.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "atlas.selectorLabels" . | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - ports:
+        - port: http
+      {{- with $np.allowFrom }}
+      from:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- with $np.metricsFrom }}
+    - ports:
+        - port: metrics
+      from:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+  egress:
+    - to:
+        - namespaceSelector:
+            {{- toYaml $np.dns.namespaceSelector | nindent 12 }}
+          podSelector:
+            {{- toYaml $np.dns.podSelector | nindent 12 }}
+      ports:
+        - { port: 53, protocol: UDP }
+        - { port: 53, protocol: TCP }
+    - to:
+        {{- range $apiCIDRs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+      ports:
+        {{- range $apiPorts }}
+        - { port: {{ . }}, protocol: TCP }
+        {{- end }}
+    {{- if eq .Values.auth.mode "oidc" }}
+    - to:
+        {{- range $np.oidcIssuer.cidrs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+      ports:
+        {{- range $np.oidcIssuer.ports }}
+        - { port: {{ . }}, protocol: TCP }
+        {{- end }}
+    {{- end }}
+    {{- with $np.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

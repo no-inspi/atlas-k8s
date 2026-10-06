@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["auth", "image", "replicaCount"],
+  "properties": {
+    "clusterName": { "type": "string" },
+    "replicaCount": { "type": "integer", "minimum": 1 },
+    "image": {
+      "type": "object",
+      "required": ["repository"],
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "tag": { "type": "string" },
+        "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+      }
+    },
+    "auth": {
+      "type": "object",
+      "required": ["mode"],
+      "properties": {
+        "mode": { "enum": ["oidc", "none"] },
+        "sessionTTL": { "type": "string", "pattern": "^[0-9]+(s|m|h)$" },
+        "oidc": {
+          "type": "object",
+          "properties": {
+            "issuerURL": { "type": "string", "pattern": "^https://" },
+            "clientID": { "type": "string" },
+            "clientSecret": { "type": "string" },
+            "existingSecret": { "type": "string" },
+            "usernameClaim": { "type": "string", "minLength": 1 },
+            "groupsClaim": { "type": "string" },
+            "groupsPrefix": { "type": "string" }
+          }
+        }
+      }
+    },
+    "features": {
+      "type": "object",
+      "properties": {
+        "exec": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "deniedNamespaces": { "type": "array", "items": { "type": "string" } },
+            "idleTimeout": { "type": "string", "pattern": "^[0-9]+(s|m|h)$" }
+          }
+        },
+        "actions": { "type": "object", "properties": { "enabled": { "type": "boolean" } } }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "className": { "type": "string" },
+        "host": { "type": "string" },
+        "tls": { "type": "boolean" }
+      }
+    },
+    "httpRoute": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "hostnames": { "type": "array", "items": { "type": "string" } },
+        "parentRefs": { "type": "array" }
+      }
+    },
+    "networkPolicy": { "type": "object", "properties": { "enabled": { "type": "boolean" } } },
+    "metrics": { "type": "object", "properties": { "port": { "type": "integer", "minimum": 1024, "maximum": 65535 } } }
+  }
+}

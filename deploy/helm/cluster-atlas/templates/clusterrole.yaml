@@ -1,0 +1,56 @@
+{{- if .Values.rbac.create }}
+# Droits du ServiceAccount (spec, « ClusterRole du ServiceAccount ») : lecture
+# pour le cache partagé, impersonation pour tout le reste. Aucune écriture sur
+# les workloads, aucun pods/exec, ni secrets ni configmaps.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "atlas.fullname" . }}
+  labels:
+    {{- include "atlas.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [users]
+    verbs: [impersonate]
+    {{- with .Values.rbac.impersonate.users }}
+    resourceNames:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  - apiGroups: [""]
+    resources: [groups]
+    verbs: [impersonate]
+    {{- with .Values.rbac.impersonate.groups }}
+    resourceNames:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  - apiGroups: [""]
+    resources: [nodes, pods, namespaces, events]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments, replicasets, statefulsets, daemonsets]
+    verbs: [get, list, watch]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [get, list, watch]
+  - apiGroups: [metrics.k8s.io]
+    resources: [pods, nodes]
+    verbs: [get, list]
+  - apiGroups: [authorization.k8s.io]
+    resources: [subjectaccessreviews]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "atlas.fullname" . }}
+  labels:
+    {{- include "atlas.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "atlas.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "atlas.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

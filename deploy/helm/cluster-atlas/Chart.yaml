@@ -1,0 +1,11 @@
+apiVersion: v2
+name: cluster-atlas
+description: Console Kubernetes in-cluster qui montre le cluster en temps réel sous forme de ville isométrique 3D.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.27.0-0"
+home: https://github.com/no-inspi/cluster-atlas
+sources:
+  - https://github.com/no-inspi/cluster-atlas
+keywords: [kubernetes, console, observability, visualization]
