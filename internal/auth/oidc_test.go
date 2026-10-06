@@ -136,10 +136,10 @@ func TestCallbackRejectsBadState(t *testing.T) {
 
 func TestCallbackRejectsBadNonceAndIdentities(t *testing.T) {
 	cases := map[string]map[string]any{
-		"nonce forgé":       {"email": "a@x", "email_verified": true, "nonce": "forged"},
-		"email non vérifié": {"email": "a@x", "email_verified": false},
+		"nonce forgé":        {"email": "a@x", "email_verified": true, "nonce": "forged"},
+		"email non vérifié":  {"email": "a@x", "email_verified": false},
 		"utilisateur system": {"email": "system:admin", "email_verified": true},
-		"claim absent":      {"email_verified": true},
+		"claim absent":       {"email_verified": true},
 	}
 	for name, claims := range cases {
 		f := newFixture(t)
