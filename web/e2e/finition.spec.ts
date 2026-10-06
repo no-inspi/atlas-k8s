@@ -10,7 +10,7 @@ test('recherche (/) : ouvre le pod et suit le lien profond', async ({ page }) =>
   await page.keyboard.press('/')
   const box = page.getByRole('combobox', { name: /Rechercher/ })
   await expect(box).toBeFocused()
-  await box.fill(api.name.slice(0, 22))
+  await box.fill(api.name)
   await expect(page.getByRole('option').first()).toContainText(api.name)
   await page.keyboard.press('Enter')
   await expect(page.locator('aside.panel')).toContainText(api.name)

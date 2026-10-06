@@ -124,6 +124,10 @@ ATLAS_URL=http://atlas.localtest.me npx playwright test -c playwright.auth.confi
 make scan        # image + Trivy (échoue sur une vulnérabilité critique)
 ```
 
+**Performance.** `atlas --demo-scale 100x30` simule 100 nodes et 3 000 pods ; `?perf=1` dans l'URL affiche images/s, temps de frame, coût des robots et draw calls. Sur un vrai cluster, `make load-up` crée 100 nodes [kwok](https://kwok.sigs.k8s.io/) et 3 000 pods `pause` dans le cluster kind (`NODES=…`, `PODS=…` pour changer), `make load-down` les supprime.
+
+**CI** (`.github/workflows/`) : `ci.yml` sur chaque push et pull request (gofmt, `go vet`, `go test -race`, tests et `helm lint` du chart, `tsc`, Vitest, e2e Playwright en mode démo, image multi-arch, Trivy) ; `release.yml` sur un tag `vX.Y.Z` pousse l'image `ghcr.io/<owner>/cluster-atlas` (amd64 et arm64) et le chart `oci://ghcr.io/<owner>/charts/cluster-atlas`. Les workflows sont vérifiés localement par `go run github.com/rhysd/actionlint/cmd/actionlint@latest`.
+
 ## Architecture
 
 - **Un binaire Go** (`cmd/atlas`) sert le front compilé (`embed.FS`), les probes `/healthz` et `/readyz`, `/api/me` et le flux `/api/stream`.
@@ -141,6 +145,8 @@ make scan        # image + Trivy (échoue sur une vulnérabilité critique)
   ```
 
   `result` vaut `success`, `forbidden` ou `failure` (avec `error`), et `requested` pour `exec-open`, dont l'issue est portée par `exec-close`. Les commandes tapées dans le terminal ne sont pas enregistrées.
+- **Échelle** : de loin, un robot est un cube (une pièce au lieu de treize) ; fumée et ventilateurs seulement de près. Au-delà de 48 pods, un node montre une pile par workload (ou par namespace s'il y en a trop) avec un compteur. Le rendu est à la demande : une frame par changement d'état, mouvement de caméra ou animation en cours, aucune quand rien ne bouge ; les animations au repos s'arrêtent avec `prefers-reduced-motion` ou onglet caché.
+- **Recherche, vue Liste, thème** : `/` cherche un pod, un node ou un workload, centre la caméra et sélectionne. La vue Liste est un arbre namespace → workload → pod, plus les nodes, navigable au clavier (rôle `tree`) et ouvre le même inspecteur. Thème système, clair ou sombre, mémorisé dans le navigateur.
 - **Liens profonds** : `/pods/{namespace}/{nom}` et `/nodes/{nom}` ouvrent l'inspecteur sur l'objet ; l'URL suit la sélection.
 - **Sécurité navigateur** : CSP stricte pour les scripts (`script-src 'self'`, aucun script externe), polices auto-hébergées ; styles en ligne autorisés pour Monaco (voir plus bas), vérification de l'`Origin` à l'ouverture du WebSocket, en-tête `X-Atlas-Request` exigé sur toute requête mutante (CSRF).
 - **Authentification** (`internal/auth`) : OIDC code + PKCE ; session dans un cookie chiffré AES-256-GCM (`HttpOnly`, `SameSite=Lax`, `Secure` en https), sans token côté navigateur. Un nom d'utilisateur `system:*` est refusé et les groupes `system:*` ignorés ; tous les groupes sont préfixés (`oidc:`).
@@ -162,7 +168,7 @@ web/src/api/       types du protocole, client de stream
 web/src/store/     état normalisé, bandeau d'événements
 web/src/scene/     ville, bâtiments, robots, sélection, postures, disposition
 web/src/inspector/ inspecteur : aperçu, logs (virtualisés), YAML (Monaco), événements
-web/src/ui/        barre du haut, stats, filtres, liens profonds
+web/src/ui/        barre du haut, stats, filtres, recherche, vue Liste, thème, liens profonds
 ```
 
 ## Avancement
@@ -175,7 +181,7 @@ web/src/ui/        barre du haut, stats, filtres, liens profonds
 | 4 | OIDC, sessions, impersonation, filtrage par droits | fait |
 | 5 | Inspecteur : logs, YAML, événements | fait |
 | 6 | Terminal et actions, audit | fait |
-| 7 | Échelle (LOD, regroupement, rendu à la demande), recherche, vue Liste, CI | à venir |
+| 7 | Échelle (LOD, regroupement, rendu à la demande), recherche, vue Liste, CI | fait |
 
 Choix propres au jalon 1, détaillés dans [`docs/superpowers/plans/2026-10-06-jalon-1-squelette-demo.md`](docs/superpowers/plans/2026-10-06-jalon-1-squelette-demo.md) :
 
@@ -211,3 +217,34 @@ Choix du jalon 6 ([plan](docs/superpowers/plans/2026-10-06-jalon-6-terminal-acti
 - Le drain ignore aussi les pods statiques et ne force pas les pods sans contrôleur (comme `kubectl drain` sans `--force`) ; le récapitulatif les liste.
 - Si le node drainé héberge Cluster Atlas lui-même, son pod est évincé en dernier, après la réponse (le chart lui donne son nom par la downward API) ; la page se reconnecte.
 - Sans lecture des `Application` ArgoCD, l'avertissement de selfHeal s'affiche pour tout workload géré par ArgoCD.
+
+Choix du jalon 7 ([plan](docs/superpowers/plans/2026-10-06-jalon-7-echelle-finition.md)) :
+
+- Pas de vertex shader pour les animations : la mesure ne l'exige pas (mise à jour CPU des robots : 1 ms de loin, 3 ms de près, à 3 000 pods).
+- **Hors MVP**, en plus de la liste de la spec : supprimer un node via le fournisseur (NodeClaim Karpenter, node pool GKE). `kubectl delete node` ne suffit pas : le kubelet le réenregistre tant que la machine tourne.
+
+Mesures (kind sur MacBook M4, Chrome) :
+
+| Mesure | Résultat |
+| --- | --- |
+| 3 000 pods sur 100 nodes kwok, vue d'ensemble en rotation | 60 images/s, robots 1,0 ms par frame |
+| idem, zoom rapproché | 60 images/s, robots 2,9 ms par frame |
+| Premier snapshot affiché | 186 ms |
+| Mémoire du backend à 3 142 pods | 92 Mi |
+| Pod créé / supprimé visible dans la vue, sous charge | 337 ms / 239 ms |
+
+## Critères d'acceptation
+
+Vérifiés sur kind avec Dex (`make e2e-auth`, in-cluster et en local) ; le passage sur un cluster GKE réel reste à faire.
+
+- [x] `helm install` sur un cluster vierge donne une URL fonctionnelle en moins de 2 min, sans `kubectl` (≈ 7 s sur kind, image déjà présente).
+- [x] Un pod créé, supprimé ou qui change de statut apparaît en moins de 2 s (0,1 à 0,35 s, `make test-integration`).
+- [x] L'utilisateur `view` voit les pods et lit les logs ; actions et terminal sont désactivés avec une explication ; un appel forcé renvoie 403.
+- [x] L'utilisateur sans droits sur `kube-system` ne reçoit aucun objet de ce namespace dans le flux.
+- [x] Le terminal ouvre un shell, gère le redimensionnement, Ctrl+C, Tab, les flèches, et se ferme à `exit`.
+- [x] Les logs suivent un pod en direct ; « instance précédente » montre les logs d'avant le crash.
+- [x] Le YAML est celui du Deployment propriétaire, sans `managedFields`, avec ArgoCD quand il existe (application seulement, voir jalon 2).
+- [x] Un drain respecte les PDB et ignore les DaemonSets ; les robots évincés réapparaissent ailleurs.
+- [x] Chaque action et chaque session exec produisent une ligne d'audit.
+- [x] 60 images/s à 3 000 pods ; mémoire du backend sous 300 Mi (92 Mi). Mesuré sur M4 : à confirmer sur un M1.
+- [x] Pod non-root, système de fichiers en lecture seule, Trivy sans vulnérabilité critique.
