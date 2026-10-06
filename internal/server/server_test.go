@@ -93,6 +93,23 @@ func TestSPAFallbackAndAssets(t *testing.T) {
 	}
 }
 
+func TestPrometheusMetrics(t *testing.T) {
+	h, hub := newTest(static)
+	if rec := get(h, "/metrics"); rec.Code == 200 && strings.Contains(rec.Body.String(), "go_goroutines") {
+		t.Error("/metrics ne doit pas être servi sur le port public")
+	}
+	rec := get(MetricsHandler(hub), "/metrics")
+	body := rec.Body.String()
+	if rec.Code != 200 {
+		t.Fatalf("/metrics = %d", rec.Code)
+	}
+	for _, want := range []string{"atlas_stream_clients 0", "atlas_stream_rev", "atlas_stream_messages_total", "go_goroutines"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("/metrics sans %q", want)
+		}
+	}
+}
+
 func TestMissingFrontend(t *testing.T) {
 	h, _ := newTest(fstest.MapFS{".gitkeep": {Data: nil}})
 	rec := get(h, "/")

@@ -39,13 +39,14 @@ func env(key, def string) string {
 }
 
 type flags struct {
-	addr, clusterName, authMode, kubeconfig, kubeContext, poolLabel string
+	addr, metricsAddr, clusterName, authMode, kubeconfig, kubeContext, poolLabel string
 	demo                                                            bool
 }
 
 func parseFlags() flags {
 	var f flags
 	flag.StringVar(&f.addr, "addr", env("ATLAS_ADDR", ":8080"), "adresse d'écoute HTTP")
+	flag.StringVar(&f.metricsAddr, "metrics-addr", env("ATLAS_METRICS_ADDR", ":9090"), "adresse des métriques Prometheus (vide : désactivé)")
 	flag.BoolVar(&f.demo, "demo", env("ATLAS_DEMO", "") == "true", "sert un cluster simulé, sans API server")
 	flag.StringVar(&f.clusterName, "cluster-name", env("ATLAS_CLUSTER_NAME", "gke-prod-europe-west1"), "nom du cluster affiché")
 	flag.StringVar(&f.authMode, "auth-mode", env("ATLAS_AUTH_MODE", "oidc"), "oidc | none (développement uniquement)")
@@ -88,8 +89,13 @@ func run() error {
 	go hub.Run(ctx)
 
 	srv := &http.Server{Addr: f.addr, Handler: server.New(cfg, hub, log), ReadHeaderTimeout: 10 * time.Second}
-	errc := make(chan error, 1)
+	errc := make(chan error, 2)
 	go func() { errc <- srv.ListenAndServe() }()
+	var metrics *http.Server
+	if f.metricsAddr != "" {
+		metrics = &http.Server{Addr: f.metricsAddr, Handler: server.MetricsHandler(hub), ReadHeaderTimeout: 10 * time.Second}
+		go func() { errc <- metrics.ListenAndServe() }()
+	}
 	log.Info("atlas démarré", "addr", f.addr, "demo", f.demo, "cluster", f.clusterName)
 
 	select {
@@ -100,6 +106,9 @@ func run() error {
 	log.Info("arrêt en cours")
 	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	if metrics != nil {
+		_ = metrics.Shutdown(shutdown)
+	}
 	return srv.Shutdown(shutdown)
 }
 

@@ -42,6 +42,7 @@ func Handler(h *Hub, log *slog.Logger) http.Handler {
 		if err := writeAll(ctx, c, initial); err != nil {
 			return
 		}
+		h.CountSent(len(initial))
 		ping := time.NewTicker(pingInterval)
 		defer ping.Stop()
 		for {
@@ -56,6 +57,7 @@ func Handler(h *Hub, log *slog.Logger) http.Handler {
 				if err := writeAll(ctx, c, batch); err != nil {
 					return
 				}
+				h.CountSent(len(batch))
 			case <-ping.C:
 				pctx, cancel := context.WithTimeout(ctx, writeTimeout)
 				err := c.Ping(pctx)

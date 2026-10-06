@@ -7,6 +7,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/no-inspi/cluster-atlas/internal/model"
@@ -64,7 +65,24 @@ type Hub struct {
 	lastMetrics *Message
 	subs        map[*Subscription]struct{}
 	ready       bool
+	sent        atomic.Uint64
 }
+
+// Stats alimente les métriques Prometheus.
+type Stats struct {
+	Clients      int
+	Rev          uint64
+	MessagesSent uint64
+}
+
+func (h *Hub) Stats() Stats {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return Stats{Clients: len(h.subs), Rev: h.rev, MessagesSent: h.sent.Load()}
+}
+
+// CountSent comptabilise les messages écrits sur les WebSockets.
+func (h *Hub) CountSent(n int) { h.sent.Add(uint64(n)) }
 
 func NewHub(opts Options) *Hub {
 	if opts.FlushInterval == 0 {

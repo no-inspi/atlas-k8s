@@ -174,6 +174,22 @@ func TestMetricsAreBroadcastAndReplayed(t *testing.T) {
 	}
 }
 
+func TestStats(t *testing.T) {
+	h := newTestHub(16)
+	_, sub := h.Subscribe(0)
+	h.Upsert(KindPod, "a", pod("a", "Running"))
+	h.Flush()
+	h.CountSent(3)
+	st := h.Stats()
+	if st.Clients != 1 || st.Rev != 1 || st.MessagesSent != 3 {
+		t.Errorf("stats = %+v", st)
+	}
+	sub.Close()
+	if h.Stats().Clients != 0 {
+		t.Error("client fermé encore compté")
+	}
+}
+
 func TestReady(t *testing.T) {
 	h := newTestHub(16)
 	if h.Ready() {
