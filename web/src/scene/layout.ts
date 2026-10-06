@@ -1,5 +1,5 @@
 // Disposition de la ville : quartiers (node pools), parcelles (nodes), places
-// des robots sur chaque parcelle et file d'attente des pods Pending.
+// des blocs de pods sur chaque parcelle et file d'attente des pods Pending.
 // Unité : la même que la scène du prototype (une parcelle de 12 places = 4,1).
 
 import type { Node } from '../api/types'
@@ -41,7 +41,7 @@ export interface CityLayout {
   geometry: PlotGeometry
 }
 
-const CELL = 0.95 // pas entre deux robots
+const CELL = 0.95 // pas entre deux blocs de pods
 const BUILDING_DEPTH = 1.6 // fond de parcelle occupé par le bâtiment
 const ALLEY = 1.9 // allée entre deux parcelles
 const DISTRICT_PAD = 1.2 // marge intérieure d'un quartier
@@ -153,50 +153,5 @@ export function queuePosition(q: Rect, i: number): { x: number; z: number } {
   return {
     x: q.x - q.width / 2 + 0.6 + (i % perRow) * 1.05,
     z: q.z - 0.5 + Math.floor(i / perRow) * 1.05,
-  }
-}
-
-/**
- * Place de chaque pod sur sa parcelle : un pod garde sa place tant qu'il reste
- * sur le même node ; un nouveau pod prend la première place libre.
- */
-export class SlotAllocator {
-  private byNode = new Map<string, (string | null)[]>()
-  private byPod = new Map<string, { node: string; slot: number }>()
-
-  constructor(readonly capacity: number) {}
-
-  /** Renvoie la place du pod, ou -1 si le node n'en a plus. */
-  assign(node: string, uid: string): number {
-    const cur = this.byPod.get(uid)
-    if (cur && cur.node === node) return cur.slot
-    if (cur) this.release(uid)
-    let slots = this.byNode.get(node)
-    if (!slots) this.byNode.set(node, (slots = new Array(this.capacity).fill(null)))
-    const i = slots.indexOf(null)
-    if (i < 0) return -1
-    slots[i] = uid
-    this.byPod.set(uid, { node, slot: i })
-    return i
-  }
-
-  release(uid: string): void {
-    const cur = this.byPod.get(uid)
-    if (!cur) return
-    const slots = this.byNode.get(cur.node)
-    if (slots) slots[cur.slot] = null
-    this.byPod.delete(uid)
-  }
-
-  slotOf(uid: string): number | undefined {
-    return this.byPod.get(uid)?.slot
-  }
-
-  /** Libère les pods disparus ou sans node, puis place les autres. */
-  sync(pods: Iterable<{ uid: string; nodeName: string }>): void {
-    const live = new Map<string, string>()
-    for (const p of pods) live.set(p.uid, p.nodeName)
-    for (const uid of [...this.byPod.keys()]) if (!live.get(uid)) this.release(uid)
-    for (const [uid, nodeName] of live) if (nodeName) this.assign(nodeName, uid)
   }
 }

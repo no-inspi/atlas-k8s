@@ -45,7 +45,7 @@ export function PodOverview({ p }: { p: Pod }) {
       {p.statusMessage && <p className="note">{p.statusMessage}</p>}
       {stack && (
         <p className="note">
-          Ce robot représente une pile de {stack.count} pods ({stack.owner}) : au-delà de {GROUP_THRESHOLD} pods, un node regroupe ses pods dans la vue.
+          Ce bloc représente une pile de {stack.count} pods ({stack.owner}) : au-delà de {GROUP_THRESHOLD} pods, un node regroupe ses pods dans la vue.
           La liste du node les détaille tous.
         </p>
       )}

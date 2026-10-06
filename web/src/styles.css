@@ -230,3 +230,15 @@ h3{font-size:13.5px;font-weight:600;margin:20px 0 8px;color:var(--ink)}
 .tree-item .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tree-item .later{font-size:12px;white-space:nowrap}
 @media (max-width:760px){.top-btn{padding:8px 10px}}
+
+/* Affichage des pods : tri, masquage, infobulle */
+.pod-controls{display:flex;gap:6px;flex-wrap:wrap;align-items:center;max-width:min(720px,calc(100vw - 24px))}
+.pc-sort{display:flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:3px 6px 3px 11px;font-size:13px;color:var(--muted)}
+.pc-sort select{font:inherit;color:var(--ink);background:var(--panel-2);border:1px solid var(--line);border-radius:999px;padding:2px 8px}
+.pc-note{font-size:12px;color:var(--muted);background:color-mix(in srgb,var(--panel) 82%,transparent);border-radius:6px;padding:2px 6px}
+.ns.kind[aria-pressed="false"]{opacity:.5;text-decoration:line-through}
+.ns.kind .glyph{font-size:11px;width:11px;text-align:center}
+.ns .count{color:var(--muted);font-variant-numeric:tabular-nums}
+.pod-tip{position:fixed;z-index:6;pointer-events:none;display:flex;flex-direction:column;gap:2px;max-width:340px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:7px 10px;font-size:12.5px;color:var(--muted);box-shadow:0 8px 24px rgba(0,0,0,.16)}
+.pod-tip strong{color:var(--ink);font-family:var(--mono);font-size:12.5px;font-weight:600;word-break:break-all}
+@media (hover:none){.pod-tip{display:none}}

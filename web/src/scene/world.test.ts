@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { World } from './world'
+import { BLOCK_MIN, type PodView } from './podView'
 import { node, pod } from '../store/fixtures'
 
 const state = (version: number, nodes = [node()], pods = [pod()]) => ({
@@ -31,13 +32,51 @@ describe('World', () => {
     expect(w.targets.get('a')?.onNode).toBe(true)
     expect(w.targets.get('b')?.onNode).toBe(false)
   })
+})
 
-  it('garde la place d’un pod quand un voisin disparaît', () => {
+describe('réglages d’affichage', () => {
+  const pods = [
+    pod({ uid: 'small', name: 'small', requests: { cpu: 100, memory: 64 << 20 } }),
+    pod({ uid: 'big', name: 'big', requests: { cpu: 50, memory: 2 * 2 ** 30 } }),
+    pod({ uid: 'dns', name: 'coredns', namespace: 'kube-system', requests: { cpu: 900, memory: 70 << 20 } }),
+    pod({ uid: 'ds', name: 'exporter', owner: { kind: 'DaemonSet', name: 'node-exporter' }, requests: { cpu: 0, memory: 0 } }),
+  ]
+  const withView = (podView: PodView, nsFilter: string | null = null) => ({ ...state(1, [node()], pods), podView, nsFilter })
+  // Ordre de remplissage des places : z (rangée) puis x (colonne).
+  const order = (w: World) => [...w.targets].sort(([, a], [, b]) => a.z - b.z || a.x - b.x).map(([uid]) => uid)
+
+  it('range les plus gros pods en premier et règle la hauteur sur la ressource triée', () => {
     const w = new World()
-    w.update(state(1, [node()], [pod({ uid: 'a' }), pod({ uid: 'b' }), pod({ uid: 'c' })]))
-    const before = w.targets.get('c')
-    w.update(state(2, [node()], [pod({ uid: 'a' }), pod({ uid: 'c' })]))
-    expect(w.targets.get('c')).toEqual(before)
+    w.update(withView({ sort: 'memory', hideSystem: false, hiddenKinds: [] }))
+    expect(order(w)).toEqual(['big', 'dns', 'small', 'ds'])
+    expect(w.targets.get('big')!.h).toBeGreaterThan(w.targets.get('small')!.h)
+    expect(w.targets.get('ds')!.h).toBe(BLOCK_MIN)
+    w.update(withView({ sort: 'cpu', hideSystem: false, hiddenKinds: [] }))
+    expect(order(w)).toEqual(['dns', 'small', 'big', 'ds'])
+    expect(w.targets.get('dns')!.h).toBeGreaterThan(w.targets.get('big')!.h)
+  })
+
+  it('masque les namespaces système, sauf celui choisi dans la légende', () => {
+    const w = new World()
+    w.update(withView({ sort: 'name', hideSystem: true, hiddenKinds: [] }))
+    expect(w.targets.has('dns')).toBe(false)
+    expect(w.filtered).toBe(1)
+    w.update(withView({ sort: 'name', hideSystem: true, hiddenKinds: [] }, 'kube-system'))
+    expect(w.targets.has('dns')).toBe(true)
+  })
+
+  it('masque les types de workload choisis', () => {
+    const w = new World()
+    w.update(withView({ sort: 'name', hideSystem: false, hiddenKinds: ['DaemonSet'] }))
+    expect(w.targets.has('ds')).toBe(false)
+    expect(w.pods.map((p) => p.uid).sort()).toEqual(['big', 'dns', 'small'])
+  })
+
+  it('garde le node d’un pod masqué', () => {
+    const w = new World()
+    w.update({ ...state(1, [], [pods[2]]), podView: { sort: 'name', hideSystem: true, hiddenKinds: [] } })
+    expect(w.nodes).toHaveLength(1)
+    expect(w.targets.size).toBe(0)
   })
 })
 

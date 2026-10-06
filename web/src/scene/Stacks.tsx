@@ -4,7 +4,7 @@ import { useCluster } from '../store/cluster'
 import type { Theme } from './theme'
 import { world } from './world'
 
-// Compteurs des piles (« ×12 ») au-dessus du robot qui représente les pods d'un
+// Compteurs des piles (« ×12 ») au-dessus du bloc qui représente les pods d'un
 // workload sur un node trop chargé.
 
 const cache = new Map<string, THREE.CanvasTexture>()
@@ -41,7 +41,7 @@ export function Stacks({ theme }: { theme: Theme }) {
   return (
     <group>
       {items.map((st) => (
-        <sprite key={st.uid} position={[st.x, 2.05, st.z]} scale={[0.7, 0.35, 1]} raycast={() => null} renderOrder={10}>
+        <sprite key={st.uid} position={[st.x, 0.5 + st.top + 0.55, st.z]} scale={[0.7, 0.35, 1]} raycast={() => null} renderOrder={10}>
           <spriteMaterial map={st.tex} depthTest={false} transparent />
         </sprite>
       ))}

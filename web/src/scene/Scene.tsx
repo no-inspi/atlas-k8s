@@ -3,12 +3,13 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
+import { shallow } from 'zustand/shallow'
 import { useCluster } from '../store/cluster'
 import { Buildings } from './Buildings'
 import { PerfMeter, perfEnabled } from './PerfMeter'
 import { City } from './City'
 import { pickables } from './pick'
-import { Robots } from './Robots'
+import { Pods } from './Pods'
 import { Selection } from './Selection'
 import { Stacks } from './Stacks'
 import { useReducedMotion, useTheme, type Theme } from './theme'
@@ -44,7 +45,7 @@ function CameraRig() {
     const { bounds } = layout
     const span = Math.max(bounds.width, bounds.depth * 1.3)
     const aspect = size.width / size.height
-    // En portrait, on accepte de rogner le décor (arbres) pour garder des robots lisibles.
+    // En portrait, on accepte de rogner le décor (arbres) pour garder des pods lisibles.
     const viewHeight = Math.max(span * 0.8, (span * (aspect < 1 ? 0.9 : 1.15)) / aspect)
     const fit = size.height / viewHeight
     c.minZoom = fit * ZOOM_MIN
@@ -102,7 +103,7 @@ function CameraRig() {
 function StoreInvalidator() {
   const invalidate = useThree((s) => s.invalidate)
   useEffect(() => {
-    const stop = useCluster.subscribe((s) => [s.version, s.selection, s.nsFilter] as const, () => invalidate())
+    const stop = useCluster.subscribe((s) => [s.version, s.selection, s.nsFilter, s.podView, s.hover?.uid] as const, () => invalidate(), { equalityFn: shallow })
     const onVisible = () => invalidate()
     document.addEventListener('visibilitychange', onVisible)
     return () => { stop(); document.removeEventListener('visibilitychange', onVisible) }
@@ -110,38 +111,65 @@ function StoreInvalidator() {
   return null
 }
 
-/** Clic court (moins de 6 px de déplacement) : sélectionne un pod ou un node. */
+/**
+ * Clic court (moins de 6 px de déplacement) : sélectionne un pod ou un node.
+ * Survol à la souris : pod sous le pointeur (infobulle), une fois par frame au plus.
+ */
 function Picker() {
   const { gl, camera } = useThree()
   useEffect(() => {
     const ray = new THREE.Raycaster()
     const ptr = new THREE.Vector2()
     let down: { x: number; y: number } | null = null
+    let frame = 0
+    const el = gl.domElement
+
+    const hitAt = (clientX: number, clientY: number) => {
+      const r = el.getBoundingClientRect()
+      ptr.set(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1)
+      ray.setFromCamera(ptr, camera)
+      const pods = pickables.pods.meshes, nodes = pickables.nodes.meshes
+      const hit = ray.intersectObjects([...pods, ...nodes], false)[0]
+      if (!hit || hit.instanceId === undefined) return null
+      if (pods.includes(hit.object as THREE.InstancedMesh)) {
+        const uid = pickables.pods.uids[hit.instanceId]
+        return uid ? { type: 'pod' as const, key: uid } : null
+      }
+      const name = pickables.nodes.names[hit.instanceId]
+      return name ? { type: 'node' as const, key: name } : null
+    }
+
     const onDown = (e: PointerEvent) => { down = { x: e.clientX, y: e.clientY } }
     const onUp = (e: PointerEvent) => {
       if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6) return
       down = null
-      const r = gl.domElement.getBoundingClientRect()
-      ptr.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1)
-      ray.setFromCamera(ptr, camera)
-      const robots = pickables.robots.meshes, nodes = pickables.nodes.meshes
-      const hit = ray.intersectObjects([...robots, ...nodes], false)[0]
-      const { select } = useCluster.getState()
-      if (!hit || hit.instanceId === undefined) return select(null)
-      if (robots.includes(hit.object as THREE.InstancedMesh)) {
-        const uid = pickables.robots.uids[hit.instanceId]
-        if (uid) select({ type: 'pod', key: uid })
-      } else {
-        const name = pickables.nodes.names[hit.instanceId]
-        if (name) select({ type: 'node', key: name })
-      }
+      useCluster.getState().select(hitAt(e.clientX, e.clientY))
     }
-    const el = gl.domElement
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse' || e.buttons) return
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        const hit = hitAt(e.clientX, e.clientY)
+        const pod = hit?.type === 'pod' ? hit.key : null
+        el.style.cursor = hit ? 'pointer' : ''
+        useCluster.getState().setHover(pod ? { uid: pod, x: e.clientX, y: e.clientY } : null)
+      })
+    }
+    const onLeave = () => {
+      cancelAnimationFrame(frame)
+      el.style.cursor = ''
+      useCluster.getState().setHover(null)
+    }
     el.addEventListener('pointerdown', onDown)
     el.addEventListener('pointerup', onUp)
+    el.addEventListener('pointermove', onMove)
+    el.addEventListener('pointerleave', onLeave)
     return () => {
+      cancelAnimationFrame(frame)
       el.removeEventListener('pointerdown', onDown)
       el.removeEventListener('pointerup', onUp)
+      el.removeEventListener('pointermove', onMove)
+      el.removeEventListener('pointerleave', onLeave)
     }
   }, [gl, camera])
   return null
@@ -194,7 +222,7 @@ export function Scene() {
       <Lights theme={theme} />
       <City theme={theme} />
       <Buildings theme={theme} />
-      <Robots theme={theme} reducedMotion={reducedMotion} />
+      <Pods theme={theme} reducedMotion={reducedMotion} />
       <Stacks theme={theme} />
       <Selection theme={theme} />
       <CameraRig />

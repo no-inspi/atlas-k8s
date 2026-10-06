@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { robotPositions, world } from '../scene/world'
+import { podPositions, world } from '../scene/world'
 import { useCluster } from '../store/cluster'
 import { search, type SearchResult } from './searchRank'
 
@@ -7,7 +7,7 @@ import { search, type SearchResult } from './searchRank'
 function positionOf(r: SearchResult): { x: number; z: number } | null {
   const uid = r.type === 'pod' ? r.key : r.podUid
   if (uid) {
-    const p = robotPositions.get(uid) ?? world.targets.get(uid)
+    const p = podPositions.get(uid) ?? world.targets.get(uid)
     return p ? { x: p.x, z: p.z } : null
   }
   const plot = world.layout?.plots.get(r.key)

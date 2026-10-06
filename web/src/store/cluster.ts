@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
 import { workloadKey, type Me, type Message, type Metrics, type Namespace, type Node, type Pod, type Workload } from '../api/types'
+import { loadView, saveView, type PodView } from '../scene/podView'
 import { feedForNode, feedForPod, type FeedDraft, type FeedItem, type FeedLevel } from './feed'
 
 export interface Toast {
@@ -41,6 +42,10 @@ export interface ClusterState {
   /** Vue principale : ville 3D ou liste accessible. */
   view: '3d' | 'list'
   nsFilter: string | null
+  /** Tri, hauteur et masquage des pods dans la ville (conservés dans le navigateur). */
+  podView: PodView
+  /** Pod (ou pile) sous le pointeur, et position du pointeur dans la page. */
+  hover: { uid: string; x: number; y: number } | null
   feed: FeedItem[]
   toasts: Toast[]
 
@@ -50,6 +55,8 @@ export interface ClusterState {
   setMe(me: Me): void
   select(sel: { type: 'pod' | 'node'; key: string } | null): void
   toggleNsFilter(ns: string): void
+  setPodView(patch: Partial<PodView>): void
+  setHover(hover: { uid: string; x: number; y: number } | null): void
   setInspectorTab(tab: InspectorTab): void
   openYaml(target: YamlTarget): void
   /** Résultat d'une action : notification et entrée dans le bandeau d'événements. */
@@ -78,6 +85,8 @@ const initial = () => ({
   focus: null as { x: number; z: number; seq: number } | null,
   view: '3d' as '3d' | 'list',
   nsFilter: null,
+  podView: loadView(),
+  hover: null as { uid: string; x: number; y: number } | null,
   feed: [] as FeedItem[],
   toasts: [] as Toast[],
 })
@@ -158,6 +167,16 @@ export const useCluster = create<ClusterState>()(
     },
 
     toggleNsFilter: (ns) => set((s) => ({ nsFilter: s.nsFilter === ns ? null : ns })),
+    setPodView: (patch) => {
+      const podView = { ...get().podView, ...patch }
+      saveView(podView)
+      set({ podView })
+    },
+    setHover: (hover) => {
+      const cur = get().hover
+      if (cur?.uid === hover?.uid && cur?.x === hover?.x && cur?.y === hover?.y) return
+      set({ hover })
+    },
     setInspectorTab: (inspectorTab) => set({ inspectorTab }),
     openYaml: (yamlTarget) => set({ inspectorTab: 'yaml', yamlTarget }),
     notify: (text, level = '') => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { layoutCity, plotGeometry, slotCapacity, SlotAllocator, queuePosition } from './layout'
+import { layoutCity, plotGeometry, slotCapacity, queuePosition } from './layout'
 import { node } from '../store/fixtures'
 
 const n = (name: string, pool: string, extra = {}) => node({ name, pool, ...extra })
@@ -70,38 +70,6 @@ describe('slotCapacity et plotGeometry', () => {
 
   it('agrandit la parcelle au-delà', () => {
     expect(plotGeometry(48).width).toBeGreaterThan(plotGeometry(12).width)
-  })
-})
-
-describe('SlotAllocator', () => {
-  it('donne la première place libre et la garde', () => {
-    const a = new SlotAllocator(12)
-    expect(a.assign('n1', 'p1')).toBe(0)
-    expect(a.assign('n1', 'p2')).toBe(1)
-    expect(a.assign('n1', 'p1')).toBe(0)
-  })
-
-  it('ne déplace pas un pod quand son voisin disparaît, et réutilise la place libérée', () => {
-    const a = new SlotAllocator(12)
-    a.assign('n1', 'p1'); a.assign('n1', 'p2'); a.assign('n1', 'p3')
-    a.sync([{ uid: 'p2', nodeName: 'n1' }, { uid: 'p3', nodeName: 'n1' }])
-    expect(a.slotOf('p3')).toBe(2)
-    expect(a.assign('n1', 'p4')).toBe(0)
-  })
-
-  it('déménage un pod qui change de node et renvoie -1 quand le node est plein', () => {
-    const a = new SlotAllocator(1)
-    a.assign('n1', 'p1')
-    expect(a.assign('n1', 'p2')).toBe(-1)
-    expect(a.assign('n2', 'p1')).toBe(0)
-    expect(a.assign('n1', 'p2')).toBe(0)
-  })
-
-  it('libère les pods sans node', () => {
-    const a = new SlotAllocator(4)
-    a.assign('n1', 'p1')
-    a.sync([{ uid: 'p1', nodeName: '' }])
-    expect(a.slotOf('p1')).toBeUndefined()
   })
 })
 

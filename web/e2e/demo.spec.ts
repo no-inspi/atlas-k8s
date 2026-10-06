@@ -36,6 +36,30 @@ test('les chips de namespace filtrent la vue', async ({ page }) => {
   await expect(page.getByTestId('ns-stat')).toHaveCount(0)
 })
 
+test('affichage des pods : namespaces système et types masqués, tri mémorisé', async ({ page }) => {
+  await page.goto('/')
+  await expect(page.getByTestId('pods-running')).toHaveText(/\d+\/\d+/)
+  const controls = page.getByRole('group', { name: 'Affichage des pods' })
+  // kube-system est masqué par défaut.
+  const system = controls.getByRole('button', { name: /^Masquer système/ })
+  await expect(system).toHaveAttribute('aria-pressed', 'true')
+  await expect(controls.getByText(/^\d+ pods masqués$/)).toBeVisible()
+  await system.click()
+  await expect(controls.getByText(/pods masqués$/)).toHaveCount(0)
+
+  const daemonsets = controls.getByRole('button', { name: /DaemonSet/ })
+  await daemonsets.click()
+  await expect(daemonsets).toHaveAttribute('aria-pressed', 'false')
+  await expect(controls.getByText(/^\d+ pods masqués$/)).toBeVisible()
+
+  await controls.getByLabel('Trier par').selectOption('cpu')
+  await expect(controls.getByText('hauteur = request CPU')).toBeVisible()
+  await page.reload()
+  await expect(page.getByRole('group', { name: 'Affichage des pods' }).getByLabel('Trier par')).toHaveValue('cpu')
+  await expect(page.getByRole('button', { name: /DaemonSet/ })).toHaveAttribute('aria-pressed', 'false')
+  await page.evaluate(() => localStorage.removeItem('atlas.podView'))
+})
+
 test('un clic dans la ville ouvre l’inspecteur, qui navigue entre node et pod', async ({ page }) => {
   const problems = collectProblems(page)
   await page.goto('/')

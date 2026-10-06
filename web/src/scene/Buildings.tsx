@@ -6,7 +6,7 @@ import { useCluster } from '../store/cluster'
 import { Part, opacityMaterial } from './instanced'
 import { nodeStyle, type PlotGeometry } from './layout'
 import { pickables } from './pick'
-import { LOD_PX } from './Robots'
+import { LOD_PX } from './Pods'
 import type { Theme } from './theme'
 import { world } from './world'
 
@@ -119,7 +119,7 @@ export function Buildings({ theme }: { theme: Theme }) {
     if (!layout) return
     const g = layout.geometry
     const nodes = world.nodes.filter((n) => layout.plots.has(n.name))
-    // Fumée et pales seulement de près (robots d'au moins 3 fois le seuil de niveau de détail).
+    // Fumée et pales seulement de près (au moins 3 fois le seuil de niveau de détail).
     const closeUp = camera.zoom * 1.2 >= 3 * LOD_PX
     const t = clock.elapsedTime
     const sel = st.selection?.type === 'node' ? st.selection.key : null

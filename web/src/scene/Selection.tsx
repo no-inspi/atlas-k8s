@@ -3,7 +3,7 @@ import { useMemo } from 'react'
 import * as THREE from 'three'
 import { useCluster } from '../store/cluster'
 import type { Theme } from './theme'
-import { robotPositions, world } from './world'
+import { podPositions, world } from './world'
 
 // Marqueur flottant au-dessus de l'objet sélectionné et arcs vers les autres
 // pods du même workload.
@@ -34,21 +34,21 @@ export function Selection({ theme }: { theme: Theme }) {
     marker.visible = false
 
     if (sel?.type === 'pod') {
-      const a = robotPositions.get(sel.key)
+      const a = podPositions.get(sel.key)
       const pod = st.pods.get(sel.key)
       if (a && pod) {
         marker.visible = true
-        marker.position.set(a.x, a.y + 1.75 + Math.sin(t * 3) * 0.12, a.z)
+        marker.position.set(a.x, a.y + a.h + 0.75 + Math.sin(t * 3) * 0.12, a.z)
         const siblings = world.pods.filter((p) => p.uid !== pod.uid && p.namespace === pod.namespace &&
           p.owner.kind === pod.owner.kind && p.owner.name === pod.owner.name && !world.targets.get(p.uid)?.hidden).slice(0, MAX_ARCS)
         for (const s of siblings) {
-          const b = robotPositions.get(s.uid)
+          const b = podPositions.get(s.uid)
           if (!b) continue
           const h = 1.4 + Math.hypot(b.x - a.x, b.z - a.z) * 0.18
           for (let i = 0; i < SEG; i++)
             for (const f of [i / SEG, (i + 1) / SEG]) {
               pos[v++] = a.x + (b.x - a.x) * f
-              pos[v++] = a.y + 1.25 + (b.y - a.y) * f + 4 * h * f * (1 - f)
+              pos[v++] = a.y + a.h + (b.y + b.h - a.y - a.h) * f + 4 * h * f * (1 - f)
               pos[v++] = a.z + (b.z - a.z) * f
             }
         }

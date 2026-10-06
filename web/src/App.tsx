@@ -5,6 +5,7 @@ import type { Me } from './api/types'
 import { Scene } from './scene/Scene'
 import { useCluster } from './store/cluster'
 import { Feed, Hint, Legend, Stats, TopBar } from './ui/Hud'
+import { PodControls, PodTooltip } from './ui/PodControls'
 import { Inspector } from './inspector/Inspector'
 import { syncRoute } from './ui/route'
 import { Toasts } from './ui/Toasts'
@@ -31,9 +32,11 @@ export function App() {
       <Stats />
       <div className="bottom-left">
         <Feed />
+        {view === '3d' && <PodControls />}
         <Legend />
       </div>
       <Hint />
+      {view === '3d' && <PodTooltip />}
       <Inspector />
       <Toasts />
       {perfEnabled() && <div id="perf-meter" className="perf-meter" aria-hidden="true" />}

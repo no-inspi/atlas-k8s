@@ -119,7 +119,7 @@ Messages JSON : `{"type":"snapshot","rev":N,"nodes":[…],"pods":[…],"workload
 
 ## Vue 3D
 
-Le cluster est une ville vue en isométrique : les node pools sont des quartiers, les nodes des bâtiments posés sur une parcelle, les pods des robots qui vivent sur la parcelle de leur node.
+Le cluster est une ville vue en isométrique : les node pools sont des quartiers, les nodes des bâtiments posés sur une parcelle, les pods des blocs rangés sur la parcelle de leur node.
 
 **Correspondances**
 
@@ -131,11 +131,13 @@ Le cluster est une ville vue en isométrique : les node pools sont des quartiers
 | Node GPU | Bâtiment sombre avec ventilateurs sur le toit | Vitesse des ventilateurs selon la charge |
 | Node cordonné | Barrière rayée devant la parcelle | `unschedulable: true` |
 | Node NotReady | Bâtiment grisé, fenêtres éteintes, icône d'alerte | Condition `Ready` fausse |
-| Pod | Robot (corps, tête, yeux, antenne lumineuse) | Couleur du corps = namespace ; antenne = statut |
-| Pod de DaemonSet | Robot avec casque | Présent sur chaque node |
-| Pod de StatefulSet | Robot avec sac à dos | Pod avec identité et stockage |
-| Pod de Job | Robot avec casquette, disparaît une fois `Completed` | Tâche ponctuelle |
+| Pod | Bloc graphite qui remplit sa case, liseré lumineux autour du dessus, icône carrée au centre | Liseré = namespace ; hauteur = request RAM (ou CPU) rapportée à l'allouable du node ; couleur de l'icône = statut (blanche si sain) |
+| Pod de DaemonSet | Icône en dôme | Présent sur chaque node |
+| Pod de StatefulSet | Icône en disque | Pod avec identité et stockage |
+| Pod de Job | Icône pyramidale, disparaît une fois `Completed` | Tâche ponctuelle |
 | Pods en attente | File d'attente devant la ville | Pods `Pending` sans `nodeName` |
+
+Sur chaque parcelle, les blocs sont rangés selon le tri choisi (request RAM ou CPU décroissante, type de workload, namespace, nom) : les plus gros au fond, où ils ne masquent pas les autres. Les namespaces système (`kube-system`, `kube-public`, `kube-node-lease`) sont masqués par défaut, sauf s'ils sont choisis dans la légende ; chaque type de workload peut être masqué. Ces réglages sont mémorisés dans le navigateur. Au survol, une infobulle donne le nom, le workload, le statut et les requests du pod.
 
 **Statuts et postures**
 
