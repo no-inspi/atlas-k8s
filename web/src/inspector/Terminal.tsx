@@ -45,7 +45,14 @@ export default function Terminal({ ns, pod, container, session, onStatus }: {
     const sendSize = () => {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }))
     }
-    ws.onopen = () => { onStatus('open'); sendSize() }
+    // Les frappes tapées avant l'ouverture sont gardées, pas perdues.
+    let queued: Uint8Array[] = []
+    ws.onopen = () => {
+      onStatus('open')
+      sendSize()
+      queued.forEach((b) => ws.send(b))
+      queued = []
+    }
     ws.onmessage = (ev) => {
       if (ev.data instanceof ArrayBuffer) return term.write(new Uint8Array(ev.data))
       const m = JSON.parse(ev.data as string) as { type: string; message?: string; code?: number }
@@ -57,7 +64,10 @@ export default function Terminal({ ns, pod, container, session, onStatus }: {
       if (!ended) term.writeln(`\r\n\x1b[2mConnexion fermée (code ${ev.code}).\x1b[0m`)
       onStatus('closed')
     }
-    const data = term.onData((d) => { if (ws.readyState === WebSocket.OPEN) ws.send(enc.encode(d)) })
+    const data = term.onData((d) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(enc.encode(d))
+      else if (ws.readyState === WebSocket.CONNECTING) queued.push(enc.encode(d))
+    })
     const resized = term.onResize(sendSize)
     const ro = new ResizeObserver(() => fit.fit())
     ro.observe(host.current!)

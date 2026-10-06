@@ -152,7 +152,9 @@ func run() error {
 			clients = access.Static{K: client, D: dyn, C: rc}
 		}
 		cfg.Inspect = kube.NewInspector(clients, src, authorize)
-		cfg.Actions, cfg.Exec = kube.NewActions(clients), kube.NewExec(clients)
+		// ATLAS_POD_* : downward API du chart, pour qu'un drain n'évince pas Atlas en pleine requête.
+		cfg.Actions = kube.NewActions(clients).WithSelf(os.Getenv("ATLAS_POD_NAMESPACE"), os.Getenv("ATLAS_POD_NAME"))
+		cfg.Exec = kube.NewExec(clients)
 	}
 	go hub.Run(ctx)
 

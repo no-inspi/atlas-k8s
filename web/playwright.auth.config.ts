@@ -9,7 +9,7 @@ const inCluster = process.env.ATLAS_URL
 export default defineConfig({
   testDir: 'e2e',
   testMatch: 'auth.spec.ts',
-  timeout: 45_000,
+  timeout: 150_000,
   workers: 1,
   use: {
     baseURL: inCluster ?? 'http://localhost:8080',

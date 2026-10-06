@@ -22,6 +22,9 @@ type Entry struct {
 	Duration  time.Duration
 	// Detail complète l'entrée (replicas demandés, container, nombre de pods évincés…).
 	Detail map[string]any
+	// Result impose le résultat (sinon déduit de l'erreur) : « requested » pour
+	// une ouverture d'exec, dont l'issue est portée par exec-close.
+	Result string
 }
 
 type line struct {
@@ -65,6 +68,9 @@ func (l *Logger) Record(e Entry, err error) {
 	}
 	ln := line{Time: l.now().UTC().Format(time.RFC3339Nano), Audit: true, User: e.User, Groups: groups, Verb: e.Verb,
 		Resource: e.Resource, Namespace: e.Namespace, Name: e.Name, Result: Result(err), DurationMs: e.Duration.Milliseconds(), Detail: e.Detail}
+	if e.Result != "" {
+		ln.Result = e.Result
+	}
 	if err != nil {
 		ln.Error = err.Error()
 	}

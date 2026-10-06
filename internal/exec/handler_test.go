@@ -135,11 +135,45 @@ func TestSessionRelaysStdinStdoutAndResize(t *testing.T) {
 	if b.commands[0][0] != "/bin/bash" {
 		t.Errorf("bash doit être essayé en premier : %v", b.commands)
 	}
-	if !strings.Contains(auditBuf.String(), `"verb":"exec-open"`) || !strings.Contains(auditBuf.String(), `"verb":"exec-close"`) {
+	if !strings.Contains(auditBuf.String(), `"verb":"exec-open","resource":"pods/exec","namespace":"prod","name":"api","result":"requested"`) ||
+		!strings.Contains(auditBuf.String(), `"verb":"exec-close"`) {
 		t.Errorf("audit = %s", auditBuf.String())
 	}
 	if strings.Contains(auditBuf.String(), "ls -la") {
 		t.Error("les commandes tapées ne doivent pas être auditées")
+	}
+}
+
+// Une tentative échouée laisse un lecteur de stdin bloqué (comme remotecommand) :
+// il ne doit pas avaler la première frappe destinée au shell suivant.
+type greedyBackend struct{ echoBackend }
+
+func (g *greedyBackend) Exec(ctx context.Context, u access.User, ns, pod, c string, cmd []string, s Streams) error {
+	if cmd[0] == "/bin/bash" {
+		go func() { buf := make([]byte, 64); _, _ = s.Stdin.Read(buf) }()
+		go func() { <-s.Resize }() // comme remotecommand : lit la première taille
+		time.Sleep(20 * time.Millisecond)
+		return errors.New(`exec: "/bin/bash": stat /bin/bash: no such file or directory`)
+	}
+	return g.echoBackend.Exec(ctx, u, ns, pod, c, cmd, s)
+}
+
+func TestFailedAttemptDoesNotEatKeystrokesOrSize(t *testing.T) {
+	g := &greedyBackend{}
+	c := dial(t, serve(t, g, opts, io.Discard), "prod", "")
+	_ = c.Write(context.Background(), websocket.MessageText, []byte(`{"type":"resize","cols":90,"rows":30}`))
+	time.Sleep(50 * time.Millisecond)
+	_ = c.Write(context.Background(), websocket.MessageBinary, []byte("e"))
+	_ = c.Write(context.Background(), websocket.MessageBinary, []byte("cho\r"))
+	time.Sleep(50 * time.Millisecond)
+	_ = c.Write(context.Background(), websocket.MessageBinary, []byte("exit"))
+	if out, _ := readUntil(t, c); !strings.HasPrefix(out, "ECHO") {
+		t.Errorf("première frappe perdue : %q", out)
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if len(g.sizes) == 0 || g.sizes[0] != (Size{Cols: 90, Rows: 30}) {
+		t.Errorf("la taille initiale doit parvenir au shell retenu : %+v", g.sizes)
 	}
 }
 

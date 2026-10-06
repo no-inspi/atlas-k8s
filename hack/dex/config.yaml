@@ -1,6 +1,7 @@
 # Dex de développement : deux utilisateurs, mot de passe « password ».
 #   alice@example.com, groupe sre → view sur tout le cluster
 #   bob@example.com,   groupe dev → edit dans production et staging seulement
+#   carol@example.com, groupe ops → cluster-admin (cordon, drain)
 issuer: http://localhost:5556/dex
 storage:
   type: memory
@@ -30,3 +31,9 @@ staticPasswords:
     emailVerified: true
     userID: 3c9e7d1a-5b2f-4e8c-a0d4-6f7e8a9b0c1d
     groups: [dev]
+  - email: carol@example.com
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: carol
+    emailVerified: true
+    userID: 9b2d4f6a-1c3e-4a5b-8d7f-2e4c6a8b0d1f
+    groups: [ops]

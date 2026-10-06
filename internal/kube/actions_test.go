@@ -3,6 +3,7 @@ package kube
 import (
 	"context"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -187,4 +188,47 @@ func TestDrainEvictsAndRespectsPDB(t *testing.T) {
 	if !n.Spec.Unschedulable {
 		t.Error("le drain doit cordonner le node d'abord")
 	}
+}
+
+func TestDrainEvictsItselfLast(t *testing.T) {
+	client := drainFixtures()
+	var order []string
+	var mu sync.Mutex
+	client.PrependReactor("create", "pods", func(act k8stesting.Action) (bool, runtime.Object, error) {
+		if act.GetSubresource() != "eviction" {
+			return false, nil, nil
+		}
+		mu.Lock()
+		order = append(order, act.(k8stesting.CreateAction).GetObject().(*policyv1.Eviction).Name)
+		mu.Unlock()
+		return true, nil, nil
+	})
+	a := NewActions(access.Static{K: client}).WithSelf("prod", "web-1")
+	a.selfDelay = 20 * time.Millisecond
+	res, err := a.Drain(context.Background(), bob, "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	evictedBeforeResponse := append([]string(nil), order...)
+	mu.Unlock()
+	for _, n := range evictedBeforeResponse {
+		if n == "web-1" {
+			t.Fatal("Cluster Atlas ne doit pas s'évincer avant d'avoir répondu")
+		}
+	}
+	var self actions.Eviction
+	for _, e := range res.Evictions {
+		if e.Name == "web-1" {
+			self = e
+		}
+	}
+	if self.Result != "evicted" || !strings.Contains(self.Message, "Cluster Atlas") {
+		t.Errorf("résultat pour Cluster Atlas = %+v", self)
+	}
+	eventually(t, "éviction différée de Cluster Atlas", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(order) > 0 && order[len(order)-1] == "web-1"
+	})
 }

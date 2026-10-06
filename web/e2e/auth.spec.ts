@@ -78,13 +78,16 @@ test('bob (edit dans production et staging) ne reçoit rien de kube-system', asy
 
 type SnapPod = { name: string; namespace: string; owner: { kind: string; name: string }; displayStatus: string; restarts: number }
 
+/** Snapshot du flux ; échoue vite (au lieu de rester bloqué) si Atlas redémarre. */
 async function snapshotPods(page: Page): Promise<SnapPod[]> {
-  return page.evaluate(() => new Promise<SnapPod[]>((resolve) => {
+  return page.evaluate(() => new Promise<SnapPod[]>((resolve, reject) => {
     const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/stream`)
+    const timer = setTimeout(() => { ws.close(); reject(new Error('snapshot : délai dépassé')) }, 5000)
     ws.onmessage = (e) => {
       const m = JSON.parse(e.data)
-      if (m.type === 'snapshot') { ws.close(); resolve(m.pods) }
+      if (m.type === 'snapshot') { clearTimeout(timer); ws.close(); resolve(m.pods) }
     }
+    ws.onerror = () => { clearTimeout(timer); reject(new Error('snapshot : connexion impossible')) }
   }))
 }
 
@@ -121,8 +124,10 @@ test('alice : logs en direct, instance précédente, YAML du Deployment avec Arg
   expect(await editorText(page)).not.toContain('managedFields')
   await expect(panel.getByTestId('argocd-badge')).toContainText('prod-apps')
 
+  // Les événements expirent après 1 h : table ou liste vide, mais jamais d'erreur.
   await panel.getByRole('tab', { name: 'Événements' }).click()
-  await expect(panel.getByTestId('events')).toContainText(/Scheduled|Pulled|Started|Created/)
+  await expect(panel.getByTestId('events').or(panel.getByText('Aucun événement récent pour ce pod.'))).toBeVisible()
+  await expect(panel.locator('.p-body .s-err')).toHaveCount(0)
 })
 
 test('bob : l’inspecteur renvoie le refus de l’API server pour kube-system', async ({ page }) => {
@@ -139,3 +144,126 @@ test('bob : l’inspecteur renvoie le refus de l’API server pour kube-system',
   expect(logsError.status).toBe(403)
   expect(logsError.message).toContain('forbidden')
 })
+
+// --- Terminal et actions sur le vrai cluster (critères du jalon 6) ---
+
+test('bob : terminal réel (sh), redimensionnement, Ctrl+C, Tab, flèches, exit', async ({ page }) => {
+  await login(page, 'bob@example.com')
+  const pods = await snapshotPods(page)
+  const orders = pods.find((p) => p.namespace === 'staging' && p.owner.name === 'orders-service' && p.displayStatus === 'Running')!
+  await page.goto(`/pods/staging/${orders.name}`)
+  const panel = page.locator('aside.panel')
+  await panel.getByRole('tab', { name: 'Terminal' }).click()
+  const term = panel.getByTestId('terminal')
+  await expect(term).toContainText('/ #', { timeout: 15_000 }) // invite de busybox sh (root)
+  await term.click()
+
+  await page.keyboard.type('echo hello-$((40+2))')
+  await page.keyboard.press('Enter')
+  await expect(term).toContainText('hello-42')
+
+  // Redimensionnement : la taille du TTY vue dans le pod suit la fenêtre.
+  // Sortie balisée (SZ:colonnes lignes) pour ne pas confondre avec d'autres nombres.
+  const ttysize = async (n: number) => {
+    await page.keyboard.type(`echo SZ${n}:$(ttysize)`)
+    await page.keyboard.press('Enter')
+    await expect(term).toContainText(new RegExp(`SZ${n}:\\d+ \\d+`))
+    return (await term.innerText()).match(new RegExp(`SZ${n}:(\\d+ \\d+)`))![1]
+  }
+  const before = await ttysize(1)
+  // Le panneau est plafonné en largeur : c'est la hauteur de la fenêtre qui change le nombre de lignes.
+  await page.setViewportSize({ width: 1440, height: 650 })
+  await page.waitForTimeout(800)
+  const after = await ttysize(2)
+  expect(before).not.toBe('0 0')
+  expect(after).not.toBe(before)
+
+  await page.keyboard.type('sleep 100')
+  await page.keyboard.press('Enter')
+  await page.keyboard.press('Control+C')
+  await page.keyboard.type('echo apres-interruption')
+  await page.keyboard.press('Enter')
+  await expect(term).toContainText('apres-interruption')
+
+  await page.keyboard.type('ech') // complétion par Tab
+  await page.keyboard.press('Tab')
+  await page.keyboard.type(' tab-ok')
+  await page.keyboard.press('Enter')
+  await expect(term).toContainText('tab-ok')
+  await page.keyboard.press('ArrowUp') // historique : rejoue « echo tab-ok »
+  await page.keyboard.press('Enter')
+  await expect.poll(async () => ((await term.innerText()).match(/tab-ok/g) ?? []).length).toBeGreaterThanOrEqual(4)
+
+  await page.keyboard.type('exit')
+  await page.keyboard.press('Enter')
+  await expect(term).toContainText('Session terminée')
+})
+
+test('alice (view) : actions et terminal désactivés avec explication, appels forcés refusés (403)', async ({ page }) => {
+  await login(page, 'alice@example.com')
+  const pods = await snapshotPods(page)
+  const api = pods.find((p) => p.owner.name === 'api-gateway' && p.namespace === 'production')!
+  await page.goto(`/pods/production/${api.name}`)
+  const panel = page.locator('aside.panel')
+  const del = panel.getByRole('button', { name: 'Supprimer le pod' })
+  await expect(del).toBeDisabled()
+  await expect(del).toHaveAttribute('title', "Vous n'avez pas le droit delete sur pods dans production")
+  await expect(panel.getByRole('button', { name: 'Rollout restart' })).toBeDisabled()
+  await panel.getByRole('tab', { name: 'Terminal' }).click()
+  await expect(panel.getByText("Vous n'avez pas le droit create sur pods/exec dans production.")).toBeVisible()
+
+  const forced = await page.request.delete(`/api/namespaces/production/pods/${api.name}`, { headers: { 'X-Atlas-Request': '1' } })
+  expect(forced.status()).toBe(403)
+  expect((await forced.json()).error).toContain('cannot delete resource "pods"')
+  const exec = await page.evaluate((name) => new Promise<{ type: string; message: string }>((resolve) => {
+    const ws = new WebSocket(`ws://${location.host}/api/namespaces/production/pods/${name}/exec?container=api-gateway`)
+    ws.onmessage = (e) => { if (typeof e.data === 'string') resolve(JSON.parse(e.data)) }
+  }), api.name)
+  expect(exec.type).toBe('error')
+  expect(exec.message).toMatch(/forbidden|cannot create resource "pods\/exec"/)
+})
+
+test('carol : le drain respecte le PDB et ignore le DaemonSet, les pods repartent ailleurs', async ({ page }) => {
+  await login(page, 'carol@example.com')
+  // Un worker qui porte un pod api-gateway (protégé par le PDB) et d'autres pods.
+  const pods = await snapshotPods(page) as (SnapPod & { nodeName?: string })[]
+  const apiNode = pods.find((p) => p.owner.name === 'api-gateway')!.nodeName!
+  const short = apiNode.split('-').pop()!
+  // Pods censés repartir ailleurs (les Jobs du CronJob changent de nom à chaque exécution).
+  const movable = pods.filter((p) => p.nodeName === apiNode && p.owner.name !== 'api-gateway' &&
+    !['DaemonSet', 'Job', 'Node'].includes(p.owner.kind) && p.displayStatus !== 'Completed')
+
+  test.info().annotations.push({ type: 'node', description: apiNode })
+  try {
+    await drainAndCheck(page, apiNode, short, movable)
+  } finally {
+    // Remet le node en service, même si une vérification a échoué.
+    await page.request.post(`/api/nodes/${apiNode}/uncordon`, { headers: { 'X-Atlas-Request': '1' } })
+  }
+})
+
+async function drainAndCheck(page: Page, apiNode: string, short: string, movable: (SnapPod & { nodeName?: string })[]) {
+  const panel = page.locator('aside.panel')
+  await page.goto(`/nodes/${apiNode}`)
+  await panel.getByRole('button', { name: 'Drain' }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toContainText('PodDisruptionBudgets qui bloqueraient')
+  await expect(dialog).toContainText('production/api-gateway')
+  await expect(dialog).toContainText('pod de DaemonSet')
+  await dialog.getByLabel('Nom court du node').fill(short)
+  await dialog.getByRole('button', { name: 'Drainer' }).click()
+  // L'API Eviction refuse (429) tant que le PDB l'exige : le drain réessaie jusqu'à 60 s.
+  await expect(page.locator('.toast').last()).toContainText(`Drain de ${short}`, { timeout: 90_000 })
+  await expect(page.locator('.toast').last()).toContainText('blocked')
+
+  // Les pods évincés réapparaissent sur d'autres nodes.
+  await expect.poll(async () => {
+    const now = await snapshotPods(page).catch(() => []) as (SnapPod & { nodeName?: string })[]
+    return now.length > 0 && movable.every((m) => now.some((p) => p.owner.name === m.owner.name && p.namespace === m.namespace && p.nodeName && p.nodeName !== apiNode))
+  }, { timeout: 90_000, intervals: [2000] }).toBe(true)
+  await page.screenshot({ path: 'e2e/__screenshots__/auth-drain.png' })
+
+  await page.goto(`/nodes/${apiNode}`)
+  await panel.getByRole('button', { name: 'Uncordon' }).click()
+  await expect(page.locator('.toast').last()).toContainText(`Node ${short} réactivé`)
+}

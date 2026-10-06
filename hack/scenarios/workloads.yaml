@@ -37,6 +37,17 @@ spec:
           image: registry.k8s.io/pause:3.10
           resources: { requests: { cpu: 100m, memory: 64Mi }, limits: { memory: 128Mi } }
 ---
+# PDB : aucune interruption volontaire permise (3 replicas, 3 minimum) ; un drain
+# doit laisser ces pods en place et le signaler.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api-gateway
+  namespace: production
+spec:
+  minAvailable: 3
+  selector: { matchLabels: { app: api-gateway } }
+---
 # CrashLoopBackOff : le container sort en erreur toutes les quelques secondes.
 apiVersion: apps/v1
 kind: Deployment

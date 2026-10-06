@@ -87,10 +87,10 @@ func Handler(b Backend, session SessionFunc, opts Options, auditLog *audit.Logge
 		touch()
 
 		// Navigateur → stdin et redimensionnements.
-		stdinR, stdinW := io.Pipe()
+		stdin := make(chan []byte, 64)
 		resize := make(chan Size, 1)
+		var lastSize atomic.Pointer[Size]
 		go func() {
-			defer stdinW.Close()
 			defer close(resize)
 			for {
 				typ, data, err := c.Read(ctx)
@@ -100,24 +100,27 @@ func Handler(b Backend, session SessionFunc, opts Options, auditLog *audit.Logge
 				}
 				touch()
 				if typ == websocket.MessageBinary {
-					if _, err := stdinW.Write(data); err != nil {
+					select {
+					case stdin <- data:
+					case <-execCtx.Done():
 						return
 					}
 					continue
 				}
 				var m control
 				if json.Unmarshal(data, &m) == nil && m.Type == "resize" && m.Cols > 0 && m.Rows > 0 {
+					sz := Size{Cols: m.Cols, Rows: m.Rows}
+					lastSize.Store(&sz)
 					select { // seule la dernière taille compte
 					case <-resize:
 					default:
 					}
-					resize <- Size{Cols: m.Cols, Rows: m.Rows}
+					resize <- sz
 				}
 			}
 		}()
 
 		out := &wsWriter{ctx: ctx, c: c, touch: touch}
-		go func() { <-execCtx.Done(); _ = stdinW.CloseWithError(io.EOF) }()
 		// Raison d'une fermeture décidée par le serveur (session expirée, inactivité).
 		var closing atomic.Value
 		closing.Store("")
@@ -147,7 +150,7 @@ func Handler(b Backend, session SessionFunc, opts Options, auditLog *audit.Logge
 		entry := audit.Entry{User: user.Name, Groups: user.Groups, Resource: "pods/exec", Namespace: ns, Name: pod,
 			Detail: map[string]any{"container": container}}
 		open := entry
-		open.Verb = "exec-open"
+		open.Verb, open.Result = "exec-open", "requested"
 		auditLog.Record(open, nil)
 		start := time.Now()
 
@@ -157,11 +160,16 @@ func Handler(b Backend, session SessionFunc, opts Options, auditLog *audit.Logge
 		}
 		var runErr error
 		for _, sh := range shells {
-			runErr = b.Exec(execCtx, user, ns, pod, container, []string{sh}, Streams{Stdin: stdinR, Stdout: out, Resize: resize})
+			// Un lecteur par tentative : celui d'une tentative échouée (bash absent)
+			// rend EOF au lieu d'avaler les premières frappes destinées à la suivante.
+			in := &attemptStdin{ch: stdin, done: make(chan struct{}), ctx: execCtx}
+			sizes, stopSizes := attemptResize(resize, lastSize.Load())
+			runErr = b.Exec(execCtx, user, ns, pod, container, []string{sh}, Streams{Stdin: in, Stdout: out, Resize: sizes})
+			close(in.done)
+			stopSizes()
 			if !MissingExecutable(runErr) {
 				break
 			}
-			open.Detail["shell"] = sh
 		}
 		if MissingExecutable(runErr) {
 			runErr = ErrNoShell
@@ -195,6 +203,64 @@ func Handler(b Backend, session SessionFunc, opts Options, auditLog *audit.Logge
 		}
 		c.Close(websocket.StatusNormalClosure, "")
 	})
+}
+
+// attemptResize donne à une tentative son propre canal de tailles, prérempli
+// avec la dernière taille connue : une tentative échouée ne doit pas consommer
+// la taille envoyée à l'ouverture. stop ferme le canal (fin de la tentative).
+func attemptResize(src <-chan Size, last *Size) (<-chan Size, func()) {
+	out := make(chan Size, 1)
+	if last != nil {
+		out <- *last
+	}
+	done, exited := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(exited)
+		for {
+			select {
+			case sz, ok := <-src:
+				if !ok {
+					return
+				}
+				select {
+				case <-out:
+				default:
+				}
+				out <- sz
+			case <-done:
+				return
+			}
+		}
+	}()
+	return out, func() {
+		close(done)
+		<-exited
+		close(out)
+	}
+}
+
+// attemptStdin lit les frappes du navigateur pour une tentative d'exec.
+type attemptStdin struct {
+	ch   <-chan []byte
+	done chan struct{}
+	ctx  context.Context
+	rest []byte
+}
+
+func (a *attemptStdin) Read(p []byte) (int, error) {
+	if len(a.rest) == 0 {
+		select {
+		case b := <-a.ch:
+			a.rest = b
+		case <-a.done:
+			return 0, io.EOF
+		case <-a.ctx.Done():
+			return 0, io.EOF
+		}
+	}
+	n := copy(p, a.rest)
+	a.rest = a.rest[n:]
+	return n, nil
 }
 
 // wsWriter envoie la sortie du terminal en messages binaires.

@@ -27,10 +27,26 @@ type Actions struct {
 	evictionTimeout time.Duration
 	retryEvery      time.Duration
 	now             func() time.Time
+	// self : le pod de Cluster Atlas. Drainer son node l'évincerait au milieu de
+	// la requête ; il est évincé en dernier, après la réponse.
+	self      *actions.PodRef
+	selfDelay time.Duration
 }
 
 func NewActions(clients access.ClientSource) *Actions {
-	return &Actions{clients: clients, evictionTimeout: 60 * time.Second, retryEvery: 5 * time.Second, now: time.Now}
+	return &Actions{clients: clients, evictionTimeout: 60 * time.Second, retryEvery: 5 * time.Second, now: time.Now, selfDelay: 2 * time.Second}
+}
+
+// WithSelf indique le pod qui exécute Cluster Atlas (downward API).
+func (a *Actions) WithSelf(namespace, name string) *Actions {
+	if namespace != "" && name != "" {
+		a.self = &actions.PodRef{Namespace: namespace, Name: name}
+	}
+	return a
+}
+
+func (a *Actions) isSelf(p actions.PodRef) bool {
+	return a.self != nil && a.self.Namespace == p.Namespace && a.self.Name == p.Name
 }
 
 var _ actions.Backend = (*Actions)(nil)
@@ -194,6 +210,11 @@ func (a *Actions) Drain(ctx context.Context, u access.User, node string) (action
 	res := actions.DrainResult{Node: node, Evictions: make([]actions.Eviction, len(plan.Evict)), Ignored: plan.Ignored}
 	var wg sync.WaitGroup
 	for i, p := range plan.Evict {
+		if a.isSelf(p) {
+			res.Evictions[i] = actions.Eviction{PodRef: p, Result: "evicted",
+				Message: "Cluster Atlas lui-même : évincé juste après cette réponse, la page se reconnectera"}
+			continue
+		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -201,6 +222,15 @@ func (a *Actions) Drain(ctx context.Context, u access.User, node string) (action
 		}()
 	}
 	wg.Wait()
+	for _, p := range plan.Evict {
+		if a.isSelf(p) {
+			// Après la réponse : le contexte de la requête sera fermé d'ici là.
+			go func() {
+				time.Sleep(a.selfDelay)
+				_ = a.evict(context.Background(), kc, p)
+			}()
+		}
+	}
 	return res, nil
 }
 

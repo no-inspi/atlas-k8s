@@ -43,3 +43,12 @@ metadata:
 subjects:
   - { kind: Group, name: "oidc:sre", apiGroup: rbac.authorization.k8s.io }
 roleRef: { kind: ClusterRole, name: atlas-dev-node-reader, apiGroup: rbac.authorization.k8s.io }
+---
+# carol (groupe ops) administre le cluster : cordon, uncordon, drain.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: atlas-dev-ops-admin
+subjects:
+  - { kind: Group, name: "oidc:ops", apiGroup: rbac.authorization.k8s.io }
+roleRef: { kind: ClusterRole, name: cluster-admin, apiGroup: rbac.authorization.k8s.io }
