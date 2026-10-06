@@ -93,6 +93,12 @@ type Workload struct {
 	Argo          *ArgoInfo `json:"argocd,omitempty"`
 }
 
+// Namespace porte la couleur choisie par l'annotation atlas.io/color, si elle existe.
+type Namespace struct {
+	Name  string `json:"name"`
+	Color string `json:"color,omitempty"`
+}
+
 // Usage est un instantané metrics-server.
 type Usage struct {
 	CPU    int64 `json:"cpu"`

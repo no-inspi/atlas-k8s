@@ -40,6 +40,7 @@ func TestSnapshotContainsSortedObjects(t *testing.T) {
 	h.Upsert(KindPod, "a", pod("a", "Running"))
 	h.Upsert(KindNode, "n1", model.Node{Name: "n1"})
 	h.Upsert(KindWorkload, "Deployment/ns/w", model.Workload{Kind: "Deployment", Name: "w"})
+	h.Upsert(KindNamespace, "prod", model.Namespace{Name: "prod", Color: "#123456"})
 	h.Flush()
 
 	init, sub2 := h.Subscribe(0)
@@ -50,6 +51,9 @@ func TestSnapshotContainsSortedObjects(t *testing.T) {
 	}
 	if len(snap.Pods) != 2 || snap.Pods[0].UID != "a" || snap.Pods[1].UID != "b" {
 		t.Errorf("pods non triés : %+v", snap.Pods)
+	}
+	if len(snap.Namespaces) != 1 || snap.Namespaces[0].Color != "#123456" {
+		t.Errorf("namespaces manquants : %+v", snap.Namespaces)
 	}
 	if len(snap.Nodes) != 1 || len(snap.Workloads) != 1 {
 		t.Errorf("nodes/workloads manquants : %+v", snap)

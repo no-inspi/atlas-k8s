@@ -12,12 +12,13 @@ import (
 
 // fakeSink garde l'état final et le journal des événements.
 type fakeSink struct {
-	nodes     map[string]model.Node
-	pods      map[string]model.Pod
-	workloads map[string]model.Workload
-	log       []string
-	metrics   *model.Metrics
-	statuses  map[string][]string // uid -> statuts successifs
+	nodes      map[string]model.Node
+	pods       map[string]model.Pod
+	workloads  map[string]model.Workload
+	namespaces []string
+	log        []string
+	metrics    *model.Metrics
+	statuses   map[string][]string // uid -> statuts successifs
 }
 
 func newSink() *fakeSink {
@@ -38,6 +39,8 @@ func (f *fakeSink) Upsert(kind stream.Kind, key string, obj any) {
 		f.log = append(f.log, fmt.Sprintf("upsert %s %s %s", o.Name, o.DisplayStatus, o.NodeName))
 	case model.Workload:
 		f.workloads[key] = o
+	case model.Namespace:
+		f.namespaces = append(f.namespaces, o.Name)
 	}
 }
 
@@ -107,6 +110,9 @@ func TestInitialClusterIsPlaced(t *testing.T) {
 	}
 	if sink.workloads["Deployment/production/api-gateway"].Argo == nil {
 		t.Error("api-gateway devrait porter l'information ArgoCD")
+	}
+	if len(sink.namespaces) != 5 {
+		t.Errorf("namespaces publiés : %v", sink.namespaces)
 	}
 	if sink.metrics == nil || len(sink.metrics.Pods) == 0 {
 		t.Error("métriques initiales absentes")

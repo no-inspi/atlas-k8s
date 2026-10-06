@@ -87,6 +87,7 @@ func New(sink Sink, opts Options) *Sim {
 		}
 		s.workloads = append(s.workloads, w)
 	}
+	s.publishNamespaces()
 	s.placeInitialPods()
 	s.nextChurn = now.Add(secs(churnPeriodSec))
 	s.flush()
@@ -554,6 +555,16 @@ func (s *Sim) failReason(p *simPod) string {
 }
 
 /* ---------- publication ---------- */
+
+func (s *Sim) publishNamespaces() {
+	seen := map[string]bool{}
+	for _, d := range workloads {
+		if !seen[d.NS] {
+			seen[d.NS] = true
+			s.sink.Upsert(stream.KindNamespace, d.NS, model.Namespace{Name: d.NS})
+		}
+	}
+}
 
 func (s *Sim) flush() {
 	for _, n := range s.nodes {

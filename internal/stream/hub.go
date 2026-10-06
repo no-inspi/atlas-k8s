@@ -15,21 +15,23 @@ import (
 type Kind string
 
 const (
-	KindNode     Kind = "node"
-	KindPod      Kind = "pod"
-	KindWorkload Kind = "workload"
+	KindNode      Kind = "node"
+	KindPod       Kind = "pod"
+	KindWorkload  Kind = "workload"
+	KindNamespace Kind = "namespace"
 )
 
 // Message est le format JSON de /api/stream.
 type Message struct {
-	Type      string           `json:"type"` // snapshot | upsert | delete | metrics
-	Rev       uint64           `json:"rev,omitempty"`
-	Kind      Kind             `json:"kind,omitempty"`
-	Obj       any              `json:"obj,omitempty"`
-	Nodes     []model.Node     `json:"nodes,omitempty"`
-	Pods      []model.Pod      `json:"pods,omitempty"`
-	Workloads []model.Workload `json:"workloads,omitempty"`
-	Metrics   *model.Metrics   `json:"metrics,omitempty"`
+	Type       string            `json:"type"` // snapshot | upsert | delete | metrics
+	Rev        uint64            `json:"rev,omitempty"`
+	Kind       Kind              `json:"kind,omitempty"`
+	Obj        any               `json:"obj,omitempty"`
+	Nodes      []model.Node      `json:"nodes,omitempty"`
+	Pods       []model.Pod       `json:"pods,omitempty"`
+	Workloads  []model.Workload  `json:"workloads,omitempty"`
+	Namespaces []model.Namespace `json:"namespaces,omitempty"`
+	Metrics    *model.Metrics    `json:"metrics,omitempty"`
 }
 
 type Options struct {
@@ -246,7 +248,7 @@ func (h *Hub) replayLocked(lastRev uint64) ([]Message, bool) {
 
 func (h *Hub) snapshotLocked() Message {
 	m := Message{Type: "snapshot", Rev: h.rev,
-		Nodes: []model.Node{}, Pods: []model.Pod{}, Workloads: []model.Workload{}}
+		Nodes: []model.Node{}, Pods: []model.Pod{}, Workloads: []model.Workload{}, Namespaces: []model.Namespace{}}
 	for _, obj := range h.state {
 		switch o := obj.(type) {
 		case model.Node:
@@ -255,10 +257,13 @@ func (h *Hub) snapshotLocked() Message {
 			m.Pods = append(m.Pods, o)
 		case model.Workload:
 			m.Workloads = append(m.Workloads, o)
+		case model.Namespace:
+			m.Namespaces = append(m.Namespaces, o)
 		}
 	}
 	sort.Slice(m.Nodes, func(i, j int) bool { return m.Nodes[i].Name < m.Nodes[j].Name })
 	sort.Slice(m.Pods, func(i, j int) bool { return m.Pods[i].UID < m.Pods[j].UID })
+	sort.Slice(m.Namespaces, func(i, j int) bool { return m.Namespaces[i].Name < m.Namespaces[j].Name })
 	sort.Slice(m.Workloads, func(i, j int) bool {
 		return model.WorkloadKey(m.Workloads[i]) < model.WorkloadKey(m.Workloads[j])
 	})
