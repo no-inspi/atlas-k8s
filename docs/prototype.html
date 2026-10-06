@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cluster Atlas — prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#DCE4E1; --ground:#E8EDEA; --road:#D2DAD7; --zone-std:#D3DED9; --zone-spot:#D5DEE8; --zone-gpu:#E2DBEA; --queue:#F1E6CC;
+  --platform:#F7F9F8; --ink:#1E292D; --muted:#5B686D; --line:#C6D0CC; --panel:#F9FBFA; --panel-2:#EDF2F0;
+  --accent:#2F5D8C; --accent-ink:#FFFFFF; --ok:#2B8350; --warn:#B87C0E; --err:#C23E28;
+  --code-bg:#182125; --code-ink:#D5DEDB; --code-dim:#7E8E93; --tree:#7FA88A; --house:#FBFCFB; --roof:#58707D;
+  --font:"Instrument Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono:"JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#121A1D; --ground:#182125; --road:#1F2A2F; --zone-std:#1F2D2B; --zone-spot:#1E2A36; --zone-gpu:#2A2433; --queue:#3A3220;
+    --platform:#2A373C; --ink:#E3EBE8; --muted:#97A5A9; --line:#33434A; --panel:#192327; --panel-2:#212E33;
+    --accent:#6C9BD0; --accent-ink:#0E1A26; --ok:#4FB57A; --warn:#E0A63A; --err:#E5664E; --tree:#4E7A5C; --house:#3A4950; --roof:#253238;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#121A1D; --ground:#182125; --road:#1F2A2F; --zone-std:#1F2D2B; --zone-spot:#1E2A36; --zone-gpu:#2A2433; --queue:#3A3220;
+  --platform:#2A373C; --ink:#E3EBE8; --muted:#97A5A9; --line:#33434A; --panel:#192327; --panel-2:#212E33;
+  --accent:#6C9BD0; --accent-ink:#0E1A26; --ok:#4FB57A; --warn:#E0A63A; --err:#E5664E; --tree:#4E7A5C; --house:#3A4950; --roof:#253238;
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{height:100%;margin:0}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:15px;line-height:1.45;overflow:hidden;-webkit-font-smoothing:antialiased}
+#stage{position:fixed;inset:0}
+#stage canvas{display:block;touch-action:none}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* Top bar */
+.top{position:fixed;left:12px;right:12px;top:calc(env(safe-area-inset-top,0px) + 12px);display:flex;align-items:center;gap:10px;pointer-events:none;z-index:3}
+.top > *{pointer-events:auto}
+.brand{display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 12px}
+.brand-mark{width:22px;height:22px;flex:none}
+.brand b{font-weight:700;letter-spacing:-.01em}
+.ctx{color:var(--muted);font-size:13px;border-left:1px solid var(--line);padding-left:10px;white-space:nowrap}
+.live{margin-left:auto;display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 12px;font-size:13px;color:var(--muted);white-space:nowrap}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 25%,transparent)}
+.sim{color:var(--warn);font-weight:600}
+
+/* Stats */
+.stats{position:fixed;left:12px;top:calc(env(safe-area-inset-top,0px) + 66px);display:flex;gap:8px;z-index:2;max-width:calc(100% - 24px);overflow-x:auto;scrollbar-width:none}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px 12px;white-space:nowrap}
+.stat span{display:block;font-size:12px;color:var(--muted)}
+.stat strong{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums}
+.stat.warn strong{color:var(--warn)} .stat.err strong{color:var(--err)}
+
+/* Namespace legend */
+.legend{position:fixed;left:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 12px);display:flex;gap:6px;flex-wrap:wrap;z-index:2;max-width:min(560px,calc(100% - 24px))}
+.ns{display:flex;align-items:center;gap:7px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:5px 11px 5px 8px;font-size:13px}
+.ns i{width:11px;height:11px;border-radius:3px;display:block}
+.ns[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.legend.filtering .ns[aria-pressed="false"]{opacity:.5}
+
+/* Event feed */
+.feed{position:fixed;left:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 56px);width:min(420px,calc(100% - 24px));z-index:2;display:flex;flex-direction:column;gap:3px;pointer-events:none}
+.feed div{font-size:12.5px;color:var(--muted);background:color-mix(in srgb,var(--panel) 82%,transparent);border-radius:6px;padding:3px 8px;width:fit-content;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.feed div.w{color:var(--warn)} .feed div.e{color:var(--err)}
+.feed time{font-variant-numeric:tabular-nums;margin-right:6px;opacity:.75}
+
+.hint{position:fixed;left:50%;top:calc(env(safe-area-inset-top,0px) + 124px);transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:10px;font-size:13.5px;z-index:4;transition:opacity .4s;white-space:nowrap}
+.hint.hide{opacity:0;pointer-events:none}
+
+/* Panel */
+.panel{position:fixed;z-index:5;background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column;transition:transform .28s cubic-bezier(.2,.8,.2,1)}
+@media (min-width:761px){
+  .panel{top:calc(env(safe-area-inset-top,0px) + 66px);right:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 12px);width:min(480px,46vw);border-radius:14px;transform:translateX(calc(100% + 24px))}
+  .panel.open{transform:none}
+}
+@media (max-width:760px){
+  .panel{left:0;right:0;bottom:0;height:64%;border-radius:16px 16px 0 0;transform:translateY(105%);padding-bottom:env(safe-area-inset-bottom,0px)}
+  .panel.open{transform:none}
+  .feed{display:none}
+  .ctx{display:none}
+  .live .lbl{display:none}
+  .stat strong{font-size:17px}
+}
+@media (prefers-reduced-motion:reduce){.panel{transition:none}}
+.p-head{padding:14px 16px 0;display:flex;gap:10px;align-items:flex-start}
+.p-title{min-width:0;flex:1}
+.p-kind{font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.p-kind i{width:9px;height:9px;border-radius:2px;display:block}
+.p-name{font-size:16px;font-weight:600;word-break:break-all;line-height:1.3;margin-top:2px}
+.close{border:1px solid var(--line);background:var(--panel-2);border-radius:8px;width:32px;height:32px;flex:none;font-size:16px;line-height:1}
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:600;padding:2px 8px;border-radius:6px;background:var(--panel-2)}
+.badge::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.s-ok{color:var(--ok)} .s-warn{color:var(--warn)} .s-err{color:var(--err)} .s-mute{color:var(--muted)}
+.tabs{display:flex;gap:2px;padding:12px 12px 0;border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:none;flex:none}
+.tab{border:0;background:none;padding:8px 10px 10px;font-size:14px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
+.tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent);font-weight:600}
+.p-body{flex:1;overflow:auto;padding:16px;min-height:0}
+.p-body.flush{padding:0;display:flex;flex-direction:column}
+
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:14px;margin:0}
+.kv dt{color:var(--muted)} .kv dd{margin:0;word-break:break-all;font-variant-numeric:tabular-nums}
+.link{border:0;background:none;padding:0;color:var(--accent);text-decoration:underline;text-underline-offset:2px;font-size:inherit;text-align:left}
+h3{font-size:13.5px;font-weight:600;margin:20px 0 8px;color:var(--ink)}
+.chain{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:13.5px}
+.chain .sep{color:var(--muted)}
+.chain .cur{font-weight:600}
+.meter{margin-bottom:10px}
+.meter-row{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);margin-bottom:4px;font-variant-numeric:tabular-nums}
+.meter-row b{color:var(--ink);font-weight:500}
+.bar{height:6px;border-radius:3px;background:var(--panel-2);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent);border-radius:3px;transition:width .6s}
+.bar i.hot{background:var(--warn)}
+.actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.btn{border:1px solid var(--line);background:var(--panel-2);border-radius:9px;padding:7px 12px;font-size:14px}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.danger{color:var(--err)}
+.btn:disabled{opacity:.45;cursor:default}
+.stepper{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+.stepper button{border:0;background:var(--panel-2);width:34px;height:34px;font-size:17px}
+.stepper span{padding:0 12px;font-size:14px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.note{font-size:13px;color:var(--muted);margin:10px 0 0}
+.podlist{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.podlist li+li{border-top:1px solid var(--line)}
+.podlist button{width:100%;display:flex;align-items:center;gap:8px;border:0;background:none;padding:8px 10px;text-align:left;font-size:13.5px}
+.podlist button:hover{background:var(--panel-2)}
+.podlist i{width:9px;height:9px;border-radius:2px;flex:none}
+.podlist .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* Code / logs / terminal */
+.toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;flex:none}
+.toolbar label{display:flex;align-items:center;gap:6px;color:var(--muted)}
+.toolbar select{font:inherit;background:var(--panel-2);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:3px 6px}
+.toolbar .sp{flex:1}
+.code{flex:1;margin:0;overflow:auto;background:var(--code-bg);color:var(--code-ink);font-family:var(--mono);font-size:12px;line-height:1.6;padding:12px 14px;white-space:pre;min-height:0}
+.code .ts{color:var(--code-dim)} .code .lv-w{color:#E7B85A} .code .lv-e{color:#F08A75} .code .lv-i{color:#8EC5A4}
+.y-k{color:#8FB8E8} .y-p{color:var(--code-dim)} .y-s{color:#B9D79A} .y-n{color:#E7B85A} .y-b{color:#D5A2E0}
+.term{flex:1;background:var(--code-bg);color:var(--code-ink);font-family:var(--mono);font-size:12.5px;line-height:1.55;padding:12px 14px;overflow:auto;min-height:0;cursor:text}
+.term .out{white-space:pre-wrap;word-break:break-all}
+.term .cmdline{display:flex;gap:0}
+.term .ps1{color:#8EC5A4;white-space:pre}
+.term input{flex:1;background:none;border:0;color:inherit;font:inherit;padding:0;outline:none;caret-color:#8EC5A4;min-width:0}
+.term .sys{color:var(--code-dim)}
+.term .err{color:#F08A75}
+.evt{width:100%;border-collapse:collapse;font-size:13px}
+.evt td{padding:7px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+.evt td:first-child{color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+.evt .r{font-weight:600;white-space:nowrap}
+.gone{padding:24px 16px;font-size:14px}
+.argo{display:inline-flex;align-items:center;gap:6px;color:var(--ok);font-weight:600}
+</style>
+</head>
+<body>
+<div id="stage" aria-label="Vue 3D du cluster"></div>
+
+<header class="top">
+  <div class="brand">
+    <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 21 7v10l-9 5-9-5V7z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 12 21 7M12 12v10M12 12 3 7" stroke="currentColor" stroke-width="1.8" fill="none" opacity=".5"/></svg>
+    <b>Cluster Atlas</b>
+    <span class="ctx">gke-prod-europe-west1</span>
+  </div>
+  <div class="live"><span class="dot"></span><span class="lbl">Live</span> <span id="clock">--:--:--</span> <span class="sim">Données simulées</span></div>
+</header>
+
+<div class="stats" id="stats"></div>
+<div class="feed" id="feed" aria-live="polite"></div>
+<div class="legend" id="legend" role="group" aria-label="Filtrer par namespace"></div>
+<div class="hint" id="hint">Touchez un pod ou un node pour l'inspecter</div>
+
+<aside class="panel" id="panel" aria-label="Inspecteur"></aside>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+(function(){
+"use strict";
+/* ---------- helpers ---------- */
+const $ = s => document.querySelector(s);
+const rnd = (a,b) => a + Math.random()*(b-a);
+const pick = a => a[Math.floor(Math.random()*a.length)];
+const rid = (n, ch='bcdfghjklmnpqrstvwxz2456789') => Array.from({length:n}, () => ch[Math.floor(Math.random()*ch.length)]).join('');
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const hms = d => d.toTimeString().slice(0,8);
+const cssv = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const age = t => { const s=Math.max(1,(Date.now()-t)/1000|0); if(s<60) return s+'s'; if(s<3600) return (s/60|0)+'m'; if(s<86400) return (s/3600|0)+'h'+String((s%3600)/60|0).padStart(2,'0'); return (s/86400|0)+'j'+((s%86400)/3600|0)+'h'; };
+const fmtCpu = m => m>=1000 ? (m/1000).toFixed(m%1000?2:0).replace(/\.?0+$/,'') : m+'m';
+const fmtMem = mi => mi>=1024 ? (mi/1024).toFixed(1)+'Gi' : Math.round(mi)+'Mi';
+
+/* ---------- model ---------- */
+const NS = {
+  production:{color:'#3D6FB6'}, staging:{color:'#2E9C8F'}, monitoring:{color:'#8A62C4'},
+  argocd:{color:'#D98E2B'}, 'kube-system':{color:'#7D8A94'}
+};
+const POOLS = {
+  'default-pool':{machine:'e2-standard-4', cpu:3920, mem:13000, spot:false, gpu:false, zone:'--zone-std'},
+  'spot-pool':{machine:'e2-standard-8', cpu:7910, mem:27000, spot:true, gpu:false, zone:'--zone-spot'},
+  'gpu-pool':{machine:'g2-standard-8 + L4', cpu:7910, mem:27000, spot:false, gpu:true, zone:'--zone-gpu'}
+};
+const REG = 'europe-west1-docker.pkg.dev/prod/apps/';
+const DEPS = [
+  {name:'api-gateway', ns:'production', replicas:3, img:'api-gateway:2.14.1', port:8080, cpu:250, mem:256, kind:'http'},
+  {name:'orders-service', ns:'production', replicas:3, img:'orders-service:1.9.0', port:8080, cpu:500, mem:512, kind:'http'},
+  {name:'payment-worker', ns:'production', replicas:2, img:'payment-worker:3.2.0', port:9090, cpu:300, mem:384, kind:'worker', crashy:true},
+  {name:'frontend', ns:'production', replicas:2, img:'frontend:5.0.3', port:80, cpu:100, mem:128, kind:'web'},
+  {name:'ml-inference', ns:'production', replicas:1, img:'ml-inference:0.8.2', port:8000, cpu:2000, mem:8192, kind:'ml', gpu:true},
+  {name:'api-gateway', ns:'staging', replicas:1, img:'api-gateway:2.15.0-rc1', port:8080, cpu:250, mem:256, kind:'http'},
+  {name:'orders-service', ns:'staging', replicas:1, img:'orders-service:1.10.0-rc2', port:8080, cpu:500, mem:512, kind:'http'},
+  {name:'prometheus', ns:'monitoring', replicas:1, img:'prometheus:v2.54.1', port:9090, cpu:1000, mem:2048, kind:'prom', ext:'quay.io/prometheus/'},
+  {name:'grafana', ns:'monitoring', replicas:1, img:'grafana:11.2.0', port:3000, cpu:200, mem:256, kind:'web', ext:'docker.io/grafana/'},
+  {name:'argocd-server', ns:'argocd', replicas:1, img:'argocd:v2.12.3', port:8080, cpu:250, mem:256, kind:'argo', ext:'quay.io/argoproj/'},
+  {name:'argocd-repo-server', ns:'argocd', replicas:1, img:'argocd:v2.12.3', port:8081, cpu:250, mem:512, kind:'argo', ext:'quay.io/argoproj/'},
+  {name:'coredns', ns:'kube-system', replicas:2, img:'coredns:v1.11.3', port:53, cpu:100, mem:70, kind:'dns', ext:'registry.k8s.io/coredns/'},
+  {name:'metrics-server', ns:'kube-system', replicas:1, img:'metrics-server:v0.7.2', port:4443, cpu:100, mem:200, kind:'generic', ext:'registry.k8s.io/metrics-server/'}
+].map(d => Object.assign(d, {rs:rid(10), rev:Math.floor(rnd(3,14)), image:(d.ext||REG)+d.img, crashAssigned:false}));
+
+const LAYOUT = [
+  {pool:'default-pool', xs:[-6,0,6], z:-4.6},
+  {pool:'spot-pool', xs:[-6,0], z:4.6},
+  {pool:'gpu-pool', xs:[7], z:4.6}
+];
+const S = { nodes:[], pods:[], sel:null, tab:'overview', nsFilter:null, feed:[], follow:true, prev:false, term:{} };
+let podSeq = 0;
+
+/* ---------- three.js scene ---------- */
+const stage = $('#stage');
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+stage.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const cam = new THREE.OrthographicCamera(-1,1,1,-1,0.1,300);
+cam.position.set(24,26,26);
+const controls = new THREE.OrbitControls(cam, renderer.domElement);
+controls.target.set(0,0,2.5);
+controls.enableDamping = true; controls.dampingFactor = .08;
+controls.minPolarAngle = .45; controls.maxPolarAngle = 1.15;
+controls.minZoom = .6; controls.maxZoom = 3.2;
+controls.screenSpacePanning = false;
+
+const hemi = new THREE.HemisphereLight(0xffffff, 0x9aa5a2, .8); scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffffff, .65);
+sun.position.set(14,26,10); sun.castShadow = true;
+sun.shadow.mapSize.set(2048,2048);
+Object.assign(sun.shadow.camera, {left:-20,right:20,top:20,bottom:-20,near:1,far:80});
+sun.shadow.radius = 4;
+scene.add(sun);
+
+const themed = []; // {mat, varName}
+function themedMat(varName, opts={}){ const m = new THREE.MeshStandardMaterial(Object.assign({color:cssv(varName)||'#ccc', roughness:.95}, opts)); themed.push({mat:m, v:varName}); return m; }
+function plane(w,d,mat,x,z,y=0){ const m=new THREE.Mesh(new THREE.PlaneGeometry(w,d),mat); m.rotation.x=-Math.PI/2; m.position.set(x,y,z); m.receiveShadow=true; scene.add(m); return m; }
+
+plane(140,140, themedMat('--ground'), 0,0,0);
+plane(140,2.2, themedMat('--road'), 0,0.4,.005);
+plane(2.2,30, themedMat('--road'), 13.2,2,.005);
+plane(20.5,7.2, themedMat('--zone-std'), 0,-4.6,.01);
+plane(14.5,7.2, themedMat('--zone-spot'), -3,4.6,.01);
+plane(5.6,7.2, themedMat('--zone-gpu'), 7,4.6,.01);
+plane(22,2.6, themedMat('--queue'), 0,11.2,.01);
+
+/* ground labels drawn on canvas */
+const labels = [];
+function groundLabel(text, w, h, x, z, align='left', size=56){
+  const c = document.createElement('canvas'); c.width = Math.round(w*64); c.height = Math.round(h*64);
+  const tex = new THREE.CanvasTexture(c); tex.anisotropy = 4;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w,h), new THREE.MeshBasicMaterial({map:tex, transparent:true, depthWrite:false}));
+  m.rotation.x = -Math.PI/2; m.position.set(x,.03,z); scene.add(m);
+  const L = {c, tex, text, align, size, draw(){
+    const g=c.getContext('2d'); g.clearRect(0,0,c.width,c.height);
+    g.font = `600 ${this.size}px ${cssv('--font')}`; g.fillStyle = cssv('--muted'); g.textBaseline='middle';
+    g.textAlign = this.align; g.fillText(this.text, this.align==='left'?8:c.width/2, c.height/2); tex.needsUpdate = true; }};
+  L.draw(); labels.push(L); return L;
+}
+groundLabel('default-pool · e2-standard-4', 12, 1, -3.9, -7.65);
+groundLabel('spot-pool · e2-standard-8', 10, 1, -5.2, 1.55);
+groundLabel('gpu-pool · L4', 5, 1, 6.7, 1.55, 'left', 50);
+groundLabel('File d\'attente du scheduler (Pending)', 14, 1, -4, 9.35);
+
+/* trees */
+const treeMat = themedMat('--tree'), trunkMat = new THREE.MeshStandardMaterial({color:'#8b7a66'});
+[[-13,-9],[-14,-2],[-13.5,7],[-12,12],[15.5,-8],[16,-1],[15.6,6],[16.2,11],[-4,-10.5],[3,-10.6],[9,-10.2],[11,8.6],[-9,15],[6,15.2]].forEach(([x,z])=>{
+  const s=rnd(.8,1.2);
+  const t=new THREE.Mesh(new THREE.ConeGeometry(.7*s,1.8*s,8),treeMat); t.position.set(x,1.25*s,z); t.castShadow=true; scene.add(t);
+  const k=new THREE.Mesh(new THREE.CylinderGeometry(.12,.12,.5,6),trunkMat); k.position.set(x,.25,z); scene.add(k);
+});
+
+const MAXARC=14, SEG=20;
+const arcGeo = new THREE.BufferGeometry(); arcGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MAXARC*SEG*2*3),3));
+const arcs = noRayL(new THREE.LineSegments(arcGeo, new THREE.LineBasicMaterial({color:cssv('--accent'), transparent:true, opacity:.9})));
+function noRayL(l){ l.raycast=()=>{}; l.frustumCulled=false; scene.add(l); return l; }
+const marker = new THREE.Mesh(new THREE.ConeGeometry(.28,.6,16), new THREE.MeshStandardMaterial({color:cssv('--accent')}));
+marker.rotation.x = Math.PI; marker.visible = false; scene.add(marker);
+
+const nodeGeo = new THREE.BoxGeometry(4.1,.5,4.1);
+const G = { body:new THREE.BoxGeometry(.5,.42,.4), head:new THREE.BoxGeometry(.46,.34,.4), eye:new THREE.BoxGeometry(.07,.1,.02),
+  leg:new THREE.BoxGeometry(.13,.16,.14), ant:new THREE.CylinderGeometry(.018,.018,.2,6), bulb:new THREE.SphereGeometry(.07,10,8),
+  puff:new THREE.SphereGeometry(.16,10,8), post:new THREE.BoxGeometry(.12,.55,.12), bar:new THREE.BoxGeometry(3.6,.14,.08) };
+const noRay = m => { m.raycast = ()=>{}; return m; };
+
+/* a pod is a little robot: colour = namespace, antenna light = status */
+function makePodMesh(dep){
+  const g = new THREE.Group(), inner = new THREE.Group(); inner.rotation.order='YXZ';
+  const body = new THREE.MeshStandardMaterial({color:NS[dep.ns].color, roughness:.5, transparent:true});
+  const head = new THREE.MeshStandardMaterial({color:'#F3F6F5', roughness:.45, transparent:true});
+  const dark = new THREE.MeshStandardMaterial({color:'#1C2528', roughness:.6, transparent:true});
+  const bulb = new THREE.MeshStandardMaterial({color:'#4FB57A', emissive:'#4FB57A', emissiveIntensity:.9, transparent:true});
+  const add = (geo,mat,x,y,z) => { const m=new THREE.Mesh(geo,mat); m.position.set(x,y,z); m.castShadow=true; inner.add(m); return m; };
+  add(G.leg,dark,-.12,.08,0); add(G.leg,dark,.12,.08,0);
+  add(G.body,body,0,.37,0); add(G.head,head,0,.75,0);
+  const eyes=[add(G.eye,dark,-.1,.77,.205), add(G.eye,dark,.1,.77,.205)];
+  add(G.ant,dark,0,1.0,0); add(G.bulb,bulb,0,1.13,0);
+  g.add(inner);
+  g.userData.parts = {inner, eyes, mats:[body,head,dark,bulb], body, bulb};
+  return g;
+}
+
+/* a node is a building on its plot; the building style depends on the pool */
+function buildNode(node){
+  const grp = new THREE.Group(); grp.position.set(node.x,0,node.z);
+  const plat = new THREE.Mesh(nodeGeo, new THREE.MeshStandardMaterial({color:cssv('--platform'), roughness:.7}));
+  plat.position.y=.25; plat.castShadow=plat.receiveShadow=true; grp.add(plat);
+  const box=(w,h,d,mat,x,y,z)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat); m.position.set(x,y,z); m.castShadow=m.receiveShadow=true; grp.add(m); return m; };
+  const win = new THREE.MeshStandardMaterial({color:'#2B3A41', emissive:'#F6C76B', emissiveIntensity:0});
+  node.fx = {plat, win, puffs:[], fans:[], flag:null};
+  if(node.P.gpu){
+    const wall = new THREE.MeshStandardMaterial({color:'#3E4A54', roughness:.6});
+    box(3.5,1.25,.85,wall,0,1.12,-1.55);
+    const strip = new THREE.MeshStandardMaterial({color:'#5BE39A', emissive:'#5BE39A', emissiveIntensity:.9});
+    box(3.2,.07,.02,strip,0,1.45,-1.115);
+    [-.9,.9].forEach(x=>{ const h=box(.75,.18,.6,wall,x,1.84,-1.55);
+      const blade = noRay(new THREE.Mesh(new THREE.BoxGeometry(.62,.03,.1), new THREE.MeshStandardMaterial({color:'#C9D3D8'})));
+      blade.position.set(x,1.95,-1.55); grp.add(blade); const b2=blade.clone(); b2.rotation.y=Math.PI/2; const pivot=new THREE.Group(); pivot.position.set(x,1.95,-1.55); blade.position.set(0,0,0); b2.position.set(0,0,0); pivot.add(blade); pivot.add(b2); grp.add(pivot); node.fx.fans.push(pivot); });
+  } else if(node.P.spot){
+    const canvas = new THREE.MeshStandardMaterial({color:'#EFE3CF', roughness:.9});
+    box(3.4,.45,.8,canvas,0,.72,-1.55);
+    const roofG=new THREE.Group(); roofG.position.set(0,1.2,-1.55); roofG.scale.set(4.6,1,1);
+    const cone=new THREE.Mesh(new THREE.ConeGeometry(.6,.6,4), new THREE.MeshStandardMaterial({color:'#C4574B', roughness:.85}));
+    cone.rotation.y=Math.PI/4; cone.castShadow=true; roofG.add(cone); grp.add(roofG);
+    const pole=box(.04,.7,.04,new THREE.MeshStandardMaterial({color:'#6b5a49'}),1.4,1.6,-1.55);
+    const flag=noRay(new THREE.Mesh(new THREE.PlaneGeometry(.5,.3), new THREE.MeshStandardMaterial({color:'#E0A63A', side:THREE.DoubleSide})));
+    const fp=new THREE.Group(); fp.position.set(1.42,1.8,-1.55); flag.position.x=.25; fp.add(flag); grp.add(fp); node.fx.flag=fp;
+  } else {
+    const wall = themedMat('--house', {roughness:.8});
+    box(3.4,1.05,.8,wall,0,1.02,-1.55);
+    [-1.05,-.35,.35,1.05].forEach(x=>box(.38,.32,.02,win,x,1.1,-1.14));
+    const roofG=new THREE.Group(); roofG.position.set(0,1.82,-1.55); roofG.scale.set(4.3,1,1.05);
+    const cone=new THREE.Mesh(new THREE.ConeGeometry(.6,.55,4), themedMat('--roof',{roughness:.8}));
+    cone.rotation.y=Math.PI/4; cone.castShadow=true; roofG.add(cone); grp.add(roofG);
+    box(.24,.55,.24,themedMat('--roof'),1.15,2.0,-1.7);
+    for(let i=0;i<5;i++){ const p=noRay(new THREE.Mesh(G.puff, new THREE.MeshStandardMaterial({color:'#ffffff', transparent:true, opacity:0, depthWrite:false}))); p.position.set(1.15,2.3,-1.7); grp.add(p); node.fx.puffs.push(p); }
+  }
+  // cordon barrier, shown only when the node is cordoned
+  const stripe = new THREE.MeshStandardMaterial({color:'#E0A63A'}), postM = new THREE.MeshStandardMaterial({color:'#3a3a3a'});
+  const bar = new THREE.Group();
+  [-1.85,1.85].forEach(x=>{ const p=new THREE.Mesh(G.post,postM); p.position.set(x,.78,1.95); p.castShadow=true; bar.add(p); });
+  const rail=new THREE.Mesh(G.bar,stripe); rail.position.set(0,.98,1.95); rail.castShadow=true; bar.add(rail);
+  bar.visible=false; grp.add(bar); node.fx.barrier=bar;
+  grp.userData={type:'node', ref:node};
+  scene.add(grp);
+  return grp;
+}
+
+/* ---------- nodes ---------- */
+LAYOUT.forEach(row => row.xs.forEach(x => {
+  const p = POOLS[row.pool];
+  const node = { id:'n'+S.nodes.length, name:`gke-prod-${row.pool}-${rid(4,'0123456789abcdef')}-${rid(4)}`, pool:row.pool, P:p, x, z:row.z,
+    cordoned:false, slots:new Array(12).fill(null), created:Date.now()-rnd(2,9)*86400000, kubelet:'v1.31.4-gke.1256000', zoneName:pick(['europe-west1-b','europe-west1-c','europe-west1-d']) };
+  node.mesh = buildNode(node);
+  node.label = groundLabel(node.name.split('-').slice(-1)[0], 4, .7, x, row.z+2.55, 'center', 34);
+  S.nodes.push(node);
+}));
+function nodeUsage(n){ let cpu=0, mem=0, cnt=0; S.pods.forEach(p=>{ if(p.node===n && !p.gone){ cpu+=p.dep.cpu; mem+=p.dep.mem; cnt++; }}); return {cpu, mem, cnt}; }
+function slotPos(n, s){ return {x:n.x+((s%4)-1.5)*.95, y:.5, z:n.z-.45+Math.floor(s/4)*.95}; }
+
+/* ---------- pods ---------- */
+function newPod(dep, instant){
+  const pod = { id:'p'+(podSeq++), dep, name:`${dep.name}-${dep.rs}-${rid(5)}`, node:null, slot:-1, status:'Pending', restarts:0,
+    ip:'', created:instant ? Date.now()-rnd(1,72)*3600000 : Date.now(), logs:[], prevLogs:[], events:[], gone:false, dying:false,
+    crash:false, cpuUse:0, memUse:0, phase:Math.random()*6, scale:instant?1:.01, pendingSince:Date.now() };
+  if(dep.crashy && !dep.crashAssigned){ pod.crash = true; dep.crashAssigned = true; }
+  pod.mesh = makePodMesh(dep); pod.mesh.userData.type='pod'; pod.mesh.userData.ref=pod;
+  pod.mesh.scale.setScalar(pod.scale);
+  scene.add(pod.mesh);
+  S.pods.push(pod);
+  ev(pod,'Normal','SuccessfulCreate',`Created pod: ${pod.name}`);
+  if(instant){ const n=chooseNode(pod); if(n) bind(pod,n,true); }
+  else { const q=queuePos(pod); pod.mesh.position.set(q.x, q.y, q.z); }
+  return pod;
+}
+function queuePos(pod){ const pend = S.pods.filter(p=>!p.gone && p.status==='Pending'); const i=Math.max(0,pend.indexOf(pod)); return {x:-9.6+i*1.05, y:.02, z:11.2}; }
+function candidates(pod){
+  return S.nodes.filter(n => !n.cordoned && n.P.gpu === !!pod.dep.gpu && n.slots.includes(null) && (nodeUsage(n).cpu + pod.dep.cpu) <= n.P.cpu);
+}
+function chooseNode(pod){
+  const c = candidates(pod); if(!c.length) return null;
+  const same = n => S.pods.filter(p=>p.node===n && p.dep===pod.dep && !p.gone).length;
+  // like kube-scheduler: spread replicas across hostnames first, then prefer the least allocated node
+  c.sort((a,b)=> (same(a)-same(b))*10 + nodeUsage(a).cpu/a.P.cpu - nodeUsage(b).cpu/b.P.cpu + rnd(-.05,.05));
+  return c[0];
+}
+function failReason(pod){
+  const total=S.nodes.length, cord=S.nodes.filter(n=>n.cordoned).length;
+  const taint=S.nodes.filter(n=>!n.cordoned && n.P.gpu!==!!pod.dep.gpu).length;
+  const cpu=total-cord-taint;
+  const parts=[]; if(cpu) parts.push(`${cpu} Insufficient cpu`); if(cord) parts.push(`${cord} node(s) were unschedulable`); if(taint) parts.push(`${taint} node(s) had untolerated taint`);
+  return `0/${total} nodes are available: ${parts.join(', ')}. preemption: 0/${total} nodes are available.`;
+}
+function bind(pod, n, instant){
+  const s = n.slots.indexOf(null); n.slots[s]=pod; pod.node=n; pod.slot=s;
+  pod.ip = `10.52.${S.nodes.indexOf(n)}.${Math.floor(rnd(2,250))}`;
+  ev(pod,'Normal','Scheduled',`Successfully assigned ${pod.dep.ns}/${pod.name} to ${n.name}`);
+  if(instant){
+    const t=slotPos(n,s); pod.mesh.position.set(t.x,t.y,t.z);
+    ev(pod,'Normal','Pulled',`Container image "${pod.dep.image}" already present on machine`);
+    ev(pod,'Normal','Started',`Started container ${pod.dep.name}`);
+    if(pod.crash){ pod.status='CrashLoopBackOff'; pod.restarts=Math.floor(rnd(6,14)); ev(pod,'Warning','BackOff','Back-off restarting failed container '+pod.dep.name); }
+    else pod.status='Running';
+    seedLogs(pod);
+  } else {
+    pod.status='ContainerCreating';
+    setTimeout(()=>{ if(pod.gone||pod.dying) return;
+      ev(pod,'Normal','Pulled',`Successfully pulled image "${pod.dep.image}" in ${rnd(.8,4).toFixed(1)}s`);
+      ev(pod,'Normal','Created',`Created container ${pod.dep.name}`); ev(pod,'Normal','Started',`Started container ${pod.dep.name}`);
+      pod.status='Running'; seedLogs(pod); if(pod.crash) setTimeout(()=>crashOnce(pod), rnd(2500,4500)); refreshPanel();
+    }, rnd(1000,1800));
+  }
+}
+function killPod(pod, why){
+  if(pod.dying||pod.gone) return;
+  pod.dying=true; pod.status='Terminating';
+  ev(pod,'Normal','Killing',`Stopping container ${pod.dep.name}`);
+  feed(`${why||'Pod supprimé'} : ${pod.name}`);
+  setTimeout(()=>{
+    if(pod.node) pod.node.slots[pod.slot]=null;
+    pod.gone=true; scene.remove(pod.mesh);
+    if(pod.crash) pod.dep.crashAssigned=false;
+    refreshPanel();
+  }, 900);
+  refreshPanel();
+}
+function crashOnce(pod){
+  if(pod.gone||pod.dying||!pod.crash||!pod.node) return;
+  pod.prevLogs = pod.logs.slice(); pod.restarts++;
+  pod.status='Error'; ev(pod,'Warning','BackOff','Back-off restarting failed container '+pod.dep.name);
+  feed(`${pod.name} a redémarré (${pod.restarts} redémarrages)`, 'e');
+  setTimeout(()=>{ if(!pod.gone&&!pod.dying){ pod.status='CrashLoopBackOff'; refreshPanel(); }}, 1200);
+  setTimeout(()=>{ if(!pod.gone&&!pod.dying){ pod.status='Running'; pod.logs=[]; seedLogs(pod); refreshPanel(); }}, 7000);
+  refreshPanel();
+}
+
+/* ---------- control loops ---------- */
+function reconcile(){
+  DEPS.forEach(d=>{
+    const live = S.pods.filter(p=>p.dep===d && !p.gone && !p.dying);
+    if(live.length < d.replicas){
+      for(let i=live.length;i<d.replicas;i++){ const p=newPod(d,false); feed(`ReplicaSet ${d.name}-${d.rs} a créé ${p.name}`); if(d.lastKilled){ d.lastKilled.replacedBy=p; d.lastKilled=null; } }
+    } else if(live.length > d.replicas){
+      live.sort((a,b)=>b.created-a.created).slice(0, live.length-d.replicas).forEach(p=>killPod(p,'Scale down'));
+    }
+  });
+}
+function schedule(){
+  S.pods.filter(p=>p.status==='Pending' && !p.gone && !p.dying && Date.now()-p.pendingSince>900).forEach(p=>{
+    const n = chooseNode(p);
+    if(n){ bind(p,n,false); feed(`Scheduler : ${p.name} → ${n.name.split('-').pop()}`); }
+    else if(!p.failNoted){ p.failNoted=true; ev(p,'Warning','FailedScheduling', failReason(p)); feed(`${p.name} ne peut pas être placé`, 'w'); }
+  });
+}
+function tickMetrics(){
+  S.pods.forEach(p=>{ if(p.status==='Running'){ p.cpuUse = Math.round(p.dep.cpu*rnd(.25,1.15)); p.memUse = p.dep.mem*rnd(.45,.95); } else { p.cpuUse=0; p.memUse=p.status==='Pending'?0:p.memUse*.5; } });
+}
+
+/* ---------- logs ---------- */
+const PATHS=['/api/v1/orders','/api/v1/orders/{id}','/api/v1/customers/{id}','/api/v1/quotes','/healthz','/api/v1/invoices/{id}/pdf'];
+function logLine(pod){
+  const t=new Date().toISOString(); const d=pod.dep; const id=Math.floor(rnd(1000,99999));
+  const r=Math.random();
+  switch(d.kind){
+    case 'http': { const code=r<.9?200:(r<.96?404:503); const lv=code===503?'ERROR':(code===404?'WARN ':'INFO '); const p=pick(PATHS).replace('{id}',id);
+      return [t,lv,`${pick(['GET','GET','GET','POST','PUT'])} ${p} ${code} ${Math.floor(rnd(3,code===503?900:120))}ms trace=${rid(8,'0123456789abcdef')}`]; }
+    case 'web': return [t,'INFO ',`10.52.${Math.floor(rnd(0,6))}.${Math.floor(rnd(2,250))} "GET ${pick(['/','/assets/app.js','/assets/app.css','/favicon.svg','/dashboard'])} HTTP/1.1" ${r<.95?200:304} ${Math.floor(rnd(200,48000))}`];
+    case 'worker': return [t,'INFO ',pick([`processing payment batch #${id} (${Math.floor(rnd(4,40))} items)`,`ack message from queue payments.pending offset=${id}`,`settled ${Math.floor(rnd(1,20))} transactions`,`retrying psp callback id=${id}`])];
+    case 'prom': return [t,'INFO ',pick([`caller=compact.go msg="write block" duration=${rnd(.2,2).toFixed(2)}s`,`caller=head.go msg="Head GC completed" duration=${Math.floor(rnd(20,180))}ms`,`caller=scrape.go msg="scrape ok" target=${pick(['api-gateway','orders-service','node-exporter'])}`])];
+    case 'dns': return [t,'INFO ',`10.52.${Math.floor(rnd(0,6))}.${Math.floor(rnd(2,250))}:${Math.floor(rnd(30000,60000))} - "A IN ${pick(['orders-service.production','api-gateway.production','prometheus.monitoring','argocd-repo-server.argocd'])}.svc.cluster.local. udp" NOERROR qr,aa,rd ${Math.floor(rnd(80,140))}b ${rnd(.05,.9).toFixed(3)}ms`];
+    case 'ml': return [t,'INFO ',`batch=${pick([8,16,32])} latency_ms=${Math.floor(rnd(18,75))} gpu_util=${Math.floor(rnd(40,92))}% queue=${Math.floor(rnd(0,6))}`];
+    case 'argo': return [t,'INFO ',pick([`Reconciliation completed application=${pick(['prod-apps','staging-apps','monitoring'])} dur=${Math.floor(rnd(80,600))}ms`,`Comparing app state (cluster: https://kubernetes.default.svc, namespace: ${pick(['production','staging'])})`,'git fetch origin --tags --force --prune'])];
+    default: return [t,'INFO ',`scraped ${Math.floor(rnd(20,40))} nodes/pods in ${Math.floor(rnd(30,90))}ms`];
+  }
+}
+function seedLogs(pod){
+  pod.logs.push([new Date().toISOString(),'INFO ',`Starting ${pod.dep.name} (${pod.dep.img})`]);
+  pod.logs.push([new Date().toISOString(),'INFO ',`Listening on :${pod.dep.port}`]);
+  for(let i=0;i<22;i++) pod.logs.push(logLine(pod));
+  if(pod.crash){
+    pod.logs.push([new Date().toISOString(),'ERROR','dial tcp 10.60.3.12:5432: connect: connection refused (postgres-payments)']);
+    pod.logs.push([new Date().toISOString(),'ERROR','failed to init repository: retries exhausted (5/5)']);
+    pod.logs.push([new Date().toISOString(),'FATAL','panic: cannot start without database connection']);
+    if(!pod.prevLogs.length) pod.prevLogs = pod.logs.slice();
+  }
+}
+function fmtLog(l){ const cls = /ERROR|FATAL/.test(l[1])?'lv-e':(/WARN/.test(l[1])?'lv-w':'lv-i'); return `<span class="ts">${esc(l[0])}</span> <span class="${cls}">${esc(l[1])}</span> ${esc(l[2])}`; }
+
+/* ---------- events / feed ---------- */
+function ev(pod,type,reason,msg){ pod.events.push({t:Date.now(),type,reason,msg}); }
+function feed(text, lvl=''){
+  S.feed.unshift({t:new Date(), text, lvl}); S.feed.length=Math.min(S.feed.length,5);
+  $('#feed').innerHTML = S.feed.map(f=>`<div class="${f.lvl}"><time>${hms(f.t)}</time>${esc(f.text)}</div>`).join('');
+}
+
+/* ---------- YAML ---------- */
+function deployYaml(d){
+  const live=S.pods.filter(p=>p.dep===d&&!p.gone&&!p.dying), ready=live.filter(p=>p.status==='Running').length;
+  const y=[
+`apiVersion: apps/v1`,
+`kind: Deployment`,
+`metadata:`,
+`  name: ${d.name}`,
+`  namespace: ${d.ns}`,
+`  labels:`,
+`    app.kubernetes.io/name: ${d.name}`,
+`    app.kubernetes.io/managed-by: argocd`,
+`  annotations:`,
+`    argocd.argoproj.io/tracking-id: "${d.ns}-apps:apps/Deployment:${d.ns}/${d.name}"`,
+`    deployment.kubernetes.io/revision: "${d.rev}"`,
+`spec:`,
+`  replicas: ${d.replicas}`,
+`  revisionHistoryLimit: 5`,
+`  selector:`,
+`    matchLabels:`,
+`      app.kubernetes.io/name: ${d.name}`,
+`  strategy:`,
+`    type: RollingUpdate`,
+`    rollingUpdate:`,
+`      maxSurge: 25%`,
+`      maxUnavailable: 0`,
+`  template:`,
+`    metadata:`,
+`      labels:`,
+`        app.kubernetes.io/name: ${d.name}`,
+`    spec:`,
+`      serviceAccountName: ${d.name}`];
+  if(d.replicas>1 && !d.gpu) y.push(`      topologySpreadConstraints:`,`        - maxSkew: 1`,`          topologyKey: kubernetes.io/hostname`,`          whenUnsatisfiable: ScheduleAnyway`,`          labelSelector:`,`            matchLabels:`,`              app.kubernetes.io/name: ${d.name}`);
+  if(d.gpu) y.push(`      nodeSelector:`,`        cloud.google.com/gke-accelerator: nvidia-l4`,`      tolerations:`,`        - key: nvidia.com/gpu`,`          operator: Exists`,`          effect: NoSchedule`);
+  y.push(
+`      containers:`,
+`        - name: ${d.name}`,
+`          image: ${d.image}`,
+`          ports:`,
+`            - name: ${d.port===53?'dns':'http'}`,
+`              containerPort: ${d.port}`,
+`          resources:`,
+`            requests:`,
+`              cpu: ${fmtCpu(d.cpu)}`,
+`              memory: ${fmtMem(d.mem)}`,
+`            limits:`,
+`              memory: ${fmtMem(d.mem*1.5)}`);
+  if(d.gpu) y.push(`              nvidia.com/gpu: 1`);
+  if(d.port!==53) y.push(
+`          readinessProbe:`,
+`            httpGet:`,
+`              path: /healthz`,
+`              port: http`,
+`            periodSeconds: 10`);
+  y.push(
+`status:`,
+`  observedGeneration: ${d.rev+2}`,
+`  replicas: ${live.length}`,
+`  readyReplicas: ${ready}`,
+`  availableReplicas: ${ready}`,
+`  updatedReplicas: ${live.length}`);
+  return y.join('\n');
+}
+function hlYaml(src){
+  const val = v => { const t=v.trim(); if(!t) return esc(v); let c='y-s'; if(/^-?\d+(\.\d+)?$/.test(t)) c='y-n'; else if(/^(true|false|null)$/.test(t)) c='y-b'; return esc(v.slice(0,v.indexOf(t)))+`<span class="${c}">${esc(t)}</span>`; };
+  return src.split('\n').map(line=>{
+    const m=line.match(/^(\s*)(- )?([A-Za-z0-9_.\/-]+)(:)(.*)$/);
+    if(m) return esc(m[1])+(m[2]?'<span class="y-p">- </span>':'')+`<span class="y-k">${esc(m[3])}</span><span class="y-p">:</span>`+val(m[5]);
+    return esc(line);
+  }).join('\n');
+}
+
+/* ---------- terminal ---------- */
+function termFor(pod){
+  if(!S.term[pod.id]) S.term[pod.id] = {lines:[{c:'sys', t:`$ kubectl exec -it -n ${pod.dep.ns} ${pod.name} -c ${pod.dep.name} -- /bin/sh`}], closed:false};
+  return S.term[pod.id];
+}
+function runCmd(pod, raw){
+  const c=raw.trim(), [bin,...a]=c.split(/\s+/), d=pod.dep;
+  const files = {http:'app  config  server.js  package.json  node_modules', web:'etc  usr  var  docker-entrypoint.sh', worker:'payment-worker  config.yaml  migrations', ml:'model  server.py  requirements.txt  weights.safetensors', prom:'prometheus  prometheus.yml  data', dns:'Corefile', argo:'argocd  argocd-server  helm  kustomize', generic:'metrics-server'};
+  switch(bin){
+    case '': return [];
+    case 'help': return ['Commandes simulées : ls, pwd, whoami, hostname, env, ps, df -h, cat /etc/os-release, curl localhost:'+d.port+'/healthz, clear, exit'];
+    case 'ls': return [files[d.kind]||'app'];
+    case 'pwd': return ['/app'];
+    case 'whoami': return [d.ns==='kube-system'?'nonroot':'app'];
+    case 'hostname': return [pod.name];
+    case 'env': return [`HOSTNAME=${pod.name}`,`POD_NAMESPACE=${d.ns}`,`POD_IP=${pod.ip}`,`PORT=${d.port}`,`KUBERNETES_SERVICE_HOST=10.0.0.1`,`KUBERNETES_SERVICE_PORT=443`,`NODE_NAME=${pod.node?pod.node.name:''}`];
+    case 'ps': return ['PID   USER     TIME  COMMAND',`    1 app       ${Math.floor(rnd(1,59))}:${String(Math.floor(rnd(0,59))).padStart(2,'0')} /app/${d.name}`,'   41 app       0:00 /bin/sh','   48 app       0:00 ps'];
+    case 'df': return ['Filesystem     Size  Used Avail Use% Mounted on','overlay         95G   38G   57G  40% /','tmpfs           64M     0   64M   0% /dev','/dev/sda1       95G   38G   57G  40% /etc/hosts'];
+    case 'cat': return a[0]==='/etc/os-release' ? ['NAME="Alpine Linux"','ID=alpine','VERSION_ID=3.20.3','PRETTY_NAME="Alpine Linux v3.20"'] : [{c:'err',t:`cat: can't open '${a[0]||''}': No such file or directory`}];
+    case 'curl': return pod.crash ? [{c:'err',t:`curl: (7) Failed to connect to localhost port ${d.port}: Connection refused`}] : [`{"status":"ok","pod":"${pod.name}","uptime_s":${Math.floor((Date.now()-pod.created)/1000)}}`];
+    case 'clear': return 'CLEAR';
+    case 'exit': return 'EXIT';
+    default: return [{c:'err',t:`/bin/sh: ${bin}: not found`}];
+  }
+}
+
+/* ---------- UI: stats & legend ---------- */
+function renderStats(){
+  const live=S.pods.filter(p=>!p.gone);
+  const run=live.filter(p=>p.status==='Running').length, pend=live.filter(p=>['Pending','ContainerCreating'].includes(p.status)).length, err=live.filter(p=>['CrashLoopBackOff','Error'].includes(p.status)).length;
+  $('#stats').innerHTML = `<div class="stat"><span>Nodes prêts</span><strong>${S.nodes.filter(n=>!n.cordoned).length}/${S.nodes.length}</strong></div>
+  <div class="stat"><span>Pods Running</span><strong>${run}/${live.length}</strong></div>
+  <div class="stat ${pend?'warn':''}"><span>En attente</span><strong>${pend}</strong></div>
+  <div class="stat ${err?'err':''}"><span>En erreur</span><strong>${err}</strong></div>`
+  + (S.nsFilter ? (()=>{ const ps=live.filter(p=>p.dep.ns===S.nsFilter); const nn=new Set(ps.filter(p=>p.node).map(p=>p.node)).size;
+      return `<div class="stat"><span>${esc(S.nsFilter)}</span><strong>${ps.length} pods · ${nn} nodes</strong></div>`; })() : '');
+  $('#clock').textContent = hms(new Date());
+}
+function renderLegend(){
+  const el=$('#legend'); el.classList.toggle('filtering', !!S.nsFilter);
+  el.innerHTML = Object.keys(NS).map(n=>`<button class="ns" data-ns="${n}" aria-pressed="${S.nsFilter===n}"><i style="background:${NS[n].color}"></i>${n}</button>`).join('');
+}
+$('#legend').addEventListener('click', e=>{ const b=e.target.closest('[data-ns]'); if(!b) return; S.nsFilter = S.nsFilter===b.dataset.ns ? null : b.dataset.ns; renderLegend(); renderStats(); });
+
+/* ---------- UI: panel ---------- */
+const panel = $('#panel');
+function statusCls(s){ return s==='Running'?'s-ok':(['Pending','ContainerCreating'].includes(s)?'s-warn':(s==='Terminating'?'s-mute':'s-err')); }
+function selected(){ if(!S.sel) return null; return S.sel.type==='pod' ? S.pods.find(p=>p.id===S.sel.id) : S.nodes.find(n=>n.id===S.sel.id); }
+function select(type, id, tab){ S.sel={type,id}; S.tab = tab || 'overview'; S.prev=false; S.follow=true; $('#hint').classList.add('hide'); renderPanel(); }
+function closePanel(){ S.sel=null; panel.classList.remove('open'); marker.visible=false; }
+
+function renderPanel(){
+  const o = selected();
+  if(!o){ closePanel(); return; }
+  panel.classList.add('open');
+  if(S.sel.type==='pod') renderPodPanel(o); else renderNodePanel(o);
+}
+function refreshPanel(){ if(!S.sel) return; if(S.tab==='overview' || S.tab==='events' || (S.sel.type==='pod' && selected() && selected().gone)) renderPanel(); }
+
+function renderPodPanel(p){
+  const d=p.dep;
+  const tabs=[['overview','Aperçu'],['logs','Logs'],['terminal','Terminal'],['yaml','YAML'],['events','Événements']];
+  let body='', flush=false;
+  if(p.gone){
+    body = `<div class="gone">Ce pod a été supprimé.${p.replacedBy && !p.replacedBy.gone ? ` Le ReplicaSet l'a remplacé par <button class="link" data-goto="${p.replacedBy.id}">${esc(p.replacedBy.name)}</button>.`:''}</div>`;
+  } else if(S.tab==='overview'){
+    const live=S.pods.filter(x=>x.dep===d&&!x.gone&&!x.dying).length;
+    body = `<dl class="kv">
+      <dt>Namespace</dt><dd>${esc(d.ns)}</dd>
+      <dt>Node</dt><dd>${p.node?`<button class="link" data-node="${p.node.id}">${esc(p.node.name)}</button>`:'non assigné'}</dd>
+      <dt>IP</dt><dd>${p.ip||'—'}</dd>
+      <dt>Âge</dt><dd>${age(p.created)}</dd>
+      <dt>Redémarrages</dt><dd>${p.restarts}</dd>
+      <dt>Image</dt><dd>${esc(d.image)}</dd>
+    </dl>
+    <h3>Répartition des replicas</h3>
+    ${spreadHtml(d)}
+    <h3>Géré par</h3>
+    <div class="chain"><button class="link" data-tab="yaml">Deployment ${esc(d.name)}</button><span class="sep">›</span><span>ReplicaSet ${esc(d.name)}-${d.rs}</span><span class="sep">›</span><span class="cur">ce pod</span></div>
+    <h3>Ressources</h3>
+    ${meter('CPU', fmtCpu(p.cpuUse), 'request '+fmtCpu(d.cpu), p.cpuUse/d.cpu)}
+    ${meter('Mémoire', fmtMem(p.memUse), 'limit '+fmtMem(d.mem*1.5), p.memUse/(d.mem*1.5))}
+    <h3>Actions</h3>
+    <div class="actions">
+      <button class="btn danger" data-act="delete" ${p.dying?'disabled':''}>Supprimer le pod</button>
+      <span class="stepper" role="group" aria-label="Replicas du deployment"><button data-act="scale-" aria-label="Retirer un replica">−</button><span>${d.replicas} replicas (${live} actifs)</span><button data-act="scale+" aria-label="Ajouter un replica">+</button></span>
+    </div>
+    <p class="note">Supprimer le pod le fait recréer par son ReplicaSet. Le scaling ici est local au prototype ; en vrai, ArgoCD le remettrait à la valeur de Git.</p>`;
+  } else if(S.tab==='logs'){
+    flush=true;
+    const src = S.prev ? p.prevLogs : p.logs;
+    body = `<div class="toolbar">
+      <label>Container <select aria-label="Container"><option>${esc(d.name)}</option></select></label>
+      <label><input type="checkbox" data-act="follow" ${S.follow?'checked':''}> Suivre</label>
+      ${p.restarts?`<label><input type="checkbox" data-act="prev" ${S.prev?'checked':''}> Instance précédente</label>`:''}
+    </div>
+    <pre class="code" id="logbox">${src.length?src.map(fmtLog).join('\n'):'<span class="ts">Aucun log : le container n\'a pas encore démarré.</span>'}</pre>`;
+  } else if(S.tab==='terminal'){
+    flush=true;
+    const T=termFor(p), ok=p.status==='Running';
+    const lines=T.lines.map(l=> typeof l==='string'?`<div class="out">${esc(l)}</div>`:`<div class="out ${l.c}">${esc(l.t)}</div>`).join('');
+    const err = !ok ? `<div class="out err">error: unable to upgrade connection: container ${esc(d.name)} is ${p.status==='Pending'||p.status==='ContainerCreating'?'not running yet':'not ready ('+p.status+')'}</div>` : '';
+    body = `<div class="toolbar"><span>Shell dans <b>${esc(d.name)}</b></span><span class="sp"></span>${T.closed?'<button class="btn" data-act="reconnect">Reconnecter</button>':''}</div>
+    <div class="term" id="term">${lines}${err}${ok&&!T.closed?`<div class="cmdline"><span class="ps1">/app $ </span><input id="tin" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Commande"></div>`:''}</div>`;
+  } else if(S.tab==='yaml'){
+    flush=true;
+    body = `<div class="toolbar"><span>Deployment/${esc(d.name)}</span><span class="sp"></span><span class="argo">ArgoCD : Synced</span></div>
+    <pre class="code">${hlYaml(deployYaml(d))}</pre>
+    <div class="toolbar" style="border-top:1px solid var(--line);border-bottom:0"><span class="note" style="margin:0">Lecture seule : les modifications passent par Git, sinon le selfHeal d'ArgoCD les écrase.</span></div>`;
+  } else if(S.tab==='events'){
+    body = `<table class="evt"><tbody>${p.events.slice().reverse().map(e=>`<tr><td>${age(e.t)}</td><td><span class="r ${e.type==='Warning'?'s-err':''}">${esc(e.reason)}</span><br>${esc(e.msg)}</td></tr>`).join('')}</tbody></table>`;
+  }
+  panel.innerHTML = `<div class="p-head"><div class="p-title">
+      <div class="p-kind"><i style="background:${NS[d.ns].color}"></i>Pod · ${esc(d.ns)}</div>
+      <div class="p-name">${esc(p.name)}</div>
+      <div style="margin-top:6px"><span class="badge ${statusCls(p.gone?'Terminating':p.status)}">${p.gone?'Supprimé':p.status}</span></div>
+    </div><button class="close" data-act="close" aria-label="Fermer">✕</button></div>
+    <div class="tabs" role="tablist">${tabs.map(([k,l])=>`<button class="tab" role="tab" data-tab="${k}" aria-selected="${S.tab===k}">${l}</button>`).join('')}</div>
+    <div class="p-body ${flush?'flush':''}">${body}</div>`;
+  const lb=$('#logbox'); if(lb && S.follow) lb.scrollTop=lb.scrollHeight;
+  const tm=$('#term'); if(tm){ tm.scrollTop=tm.scrollHeight; const ti=$('#tin'); if(ti && matchMedia('(pointer:fine)').matches) ti.focus({preventScroll:true}); }
+}
+function spreadHtml(d){
+  const sibs=S.pods.filter(x=>x.dep===d&&!x.gone&&!x.dying), nodes=[...new Set(sibs.filter(x=>x.node).map(x=>x.node))];
+  const pend=sibs.filter(x=>!x.node).length;
+  return `<p style="margin:0;font-size:14px">${sibs.length} replica${sibs.length>1?'s':''} sur ${nodes.length} node${nodes.length>1?'s':''}${pend?`, ${pend} en attente`:''} : ${nodes.map(n=>`<button class="link" data-node="${n.id}">${n.name.split('-').pop()}</button>`).join(', ')}</p><p class="note">Les arcs dans la vue relient ce pod à ses replicas.</p>`;
+}
+function meter(label, val, ref, ratio){ const pct=Math.max(2,Math.min(100,ratio*100)); return `<div class="meter"><div class="meter-row"><span>${label} <b>${val}</b></span><span>${ref}</span></div><div class="bar"><i class="${ratio>.9?'hot':''}" style="width:${pct}%"></i></div></div>`; }
+
+function renderNodePanel(n){
+  const u=nodeUsage(n), pods=S.pods.filter(p=>p.node===n&&!p.gone);
+  panel.innerHTML = `<div class="p-head"><div class="p-title">
+      <div class="p-kind">Node · ${esc(n.pool)}</div>
+      <div class="p-name">${esc(n.name)}</div>
+      <div style="margin-top:6px"><span class="badge ${n.cordoned?'s-warn':'s-ok'}">${n.cordoned?'Ready, SchedulingDisabled':'Ready'}</span></div>
+    </div><button class="close" data-act="close" aria-label="Fermer">✕</button></div>
+    <div class="tabs" role="tablist"><button class="tab" role="tab" aria-selected="true">Aperçu</button></div>
+    <div class="p-body">
+      <dl class="kv">
+        <dt>Machine</dt><dd>${esc(n.P.machine)}${n.P.spot?' (Spot)':''}</dd>
+        <dt>Zone</dt><dd>${n.zoneName}</dd>
+        <dt>Kubelet</dt><dd>${n.kubelet}</dd>
+        <dt>Âge</dt><dd>${age(n.created)}</dd>
+        ${n.P.gpu?'<dt>Taint</dt><dd>nvidia.com/gpu=present:NoSchedule</dd>':''}
+      </dl>
+      <h3>Capacité allouée</h3>
+      ${meter('CPU demandé', fmtCpu(u.cpu), 'sur '+fmtCpu(n.P.cpu), u.cpu/n.P.cpu)}
+      ${meter('Mémoire demandée', fmtMem(u.mem), 'sur '+fmtMem(n.P.mem), u.mem/n.P.mem)}
+      ${meter('Pods', u.cnt, 'sur 12 emplacements', u.cnt/12)}
+      <h3>Actions</h3>
+      <div class="actions">
+        <button class="btn" data-act="cordon">${n.cordoned?'Réactiver le scheduling':'Cordon'}</button>
+        <button class="btn danger" data-act="drain" ${pods.length?'':'disabled'}>Drain</button>
+      </div>
+      <h3>Pods (${pods.length})</h3>
+      ${pods.length?`<ul class="podlist">${pods.map(p=>`<li><button data-goto="${p.id}"><i style="background:${NS[p.dep.ns].color}"></i><span class="nm">${esc(p.name)}</span><span class="${statusCls(p.status)}">${p.status}</span></button></li>`).join('')}</ul>`:'<p class="note">Aucun pod sur ce node.</p>'}
+    </div>`;
+}
+
+panel.addEventListener('click', e=>{
+  const t=e.target.closest('[data-act],[data-tab],[data-goto],[data-node]'); if(!t){ const ti=$('#tin'); if(ti && e.target.closest('#term')) ti.focus(); return; }
+  const o=selected();
+  if(t.dataset.goto) return select('pod', t.dataset.goto);
+  if(t.dataset.node) return select('node', t.dataset.node);
+  if(t.dataset.tab){ S.tab=t.dataset.tab; return renderPanel(); }
+  const a=t.dataset.act;
+  if(a==='close') return closePanel();
+  if(a==='follow'){ S.follow=t.checked; return; }
+  if(a==='prev'){ S.prev=t.checked; return renderPanel(); }
+  if(!o) return;
+  if(a==='delete'){ o.dep.lastKilled=o; killPod(o,'Pod supprimé'); }
+  if(a==='scale+'){ o.dep.replicas=Math.min(12,o.dep.replicas+1); feed(`Deployment ${o.dep.name} scalé à ${o.dep.replicas}`); reconcile(); renderPanel(); }
+  if(a==='scale-'){ o.dep.replicas=Math.max(0,o.dep.replicas-1); feed(`Deployment ${o.dep.name} scalé à ${o.dep.replicas}`); reconcile(); renderPanel(); }
+  if(a==='reconnect'){ delete S.term[o.id]; renderPanel(); }
+  if(a==='cordon'){ o.cordoned=!o.cordoned; o.label.text=o.name.split('-').pop()+(o.cordoned?' · cordon':''); o.label.draw(); feed(`Node ${o.name.split('-').pop()} ${o.cordoned?'cordonné':'réactivé'}`, o.cordoned?'w':''); renderPanel(); }
+  if(a==='drain'){ o.cordoned=true; o.label.text=o.name.split('-').pop()+' · cordon'; o.label.draw();
+    const ps=S.pods.filter(p=>p.node===o&&!p.gone&&!p.dying); feed(`Drain de ${o.name.split('-').pop()} : ${ps.length} pods évincés`,'w');
+    ps.forEach((p,i)=>setTimeout(()=>killPod(p,'Évincé'), i*180)); renderPanel(); }
+});
+panel.addEventListener('keydown', e=>{
+  if(e.target.id!=='tin' || e.key!=='Enter') return;
+  const p=selected(); if(!p) return; const T=termFor(p); const cmd=e.target.value;
+  T.lines.push({c:'', t:'/app $ '+cmd});
+  const r=runCmd(p,cmd);
+  if(r==='CLEAR') T.lines=[]; else if(r==='EXIT'){ T.lines.push({c:'sys',t:'Session terminée.'}); T.closed=true; } else r.forEach(x=>T.lines.push(x));
+  renderPanel(); const ti=$('#tin'); if(ti) ti.focus({preventScroll:true});
+});
+document.addEventListener('keydown', e=>{ if(e.key==='Escape' && S.sel) closePanel(); });
+
+/* ---------- picking ---------- */
+const ray=new THREE.Raycaster(), ptr=new THREE.Vector2(); let down=null;
+renderer.domElement.addEventListener('pointerdown', e=>{ down={x:e.clientX,y:e.clientY}; });
+renderer.domElement.addEventListener('pointerup', e=>{
+  if(!down || Math.hypot(e.clientX-down.x, e.clientY-down.y)>6) return; down=null;
+  const r=renderer.domElement.getBoundingClientRect();
+  ptr.set(((e.clientX-r.left)/r.width)*2-1, -((e.clientY-r.top)/r.height)*2+1);
+  ray.setFromCamera(ptr, cam);
+  const objs=[...S.pods.filter(p=>!p.gone).map(p=>p.mesh), ...S.nodes.map(n=>n.mesh)];
+  const hit=ray.intersectObjects(objs, true)[0];
+  if(!hit){ closePanel(); return; }
+  let o=hit.object; while(o && !o.userData.type) o=o.parent;
+  if(o) select(o.userData.type, o.userData.ref.id);
+});
+
+/* ---------- theme ---------- */
+function applyTheme(){
+  scene.background = new THREE.Color(cssv('--bg'));
+  themed.forEach(t=>t.mat.color.set(cssv(t.v)));
+  marker.material.color.set(cssv('--accent')); arcs.material.color.set(cssv('--accent'));
+  hemi.groundColor.set(cssv('--ground'));
+  labels.forEach(l=>l.draw());
+}
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
+
+/* ---------- resize & loop ---------- */
+function resize(){
+  const w=innerWidth, h=innerHeight, a=w/h; renderer.setSize(w,h);
+  const vh=Math.max(23, 31/a); cam.left=-vh*a/2; cam.right=vh*a/2; cam.top=vh/2; cam.bottom=-vh/2; cam.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+
+const clock=new THREE.Clock(), cordonCol=new THREE.Color();
+function frame(){
+  const dt=Math.min(clock.getDelta(),.05), t=clock.elapsedTime, k=1-Math.exp(-dt*6);
+  const sel=selected();
+  S.pods.forEach(p=>{
+    if(p.gone) return;
+    let tg;
+    if(p.node) tg=slotPos(p.node,p.slot); else tg=queuePos(p);
+    const m=p.mesh;
+    m.position.x+=(tg.x-m.position.x)*k; m.position.z+=(tg.z-m.position.z)*k;
+    m.position.y+=(tg.y-m.position.y)*k;
+    const P=m.userData.parts, inner=P.inner, st=p.status, crashed=(st==='CrashLoopBackOff'||st==='Error');
+    // body language per status
+    let hop=0, yaw=Math.PI/4+Math.sin(t*.7+p.phase)*.3, fall=0;
+    if(st==='Running') hop=Math.abs(Math.sin(t*2.2+p.phase))*.035;
+    else if(st==='Pending'){ hop=Math.abs(Math.sin(t*4+p.phase))*.22; yaw=Math.PI/4+Math.sin(t*2+p.phase)*.6; }
+    else if(st==='ContainerCreating'){ yaw=t*6+p.phase; }
+    else if(crashed){ fall=-1.35; yaw=Math.PI/4; }
+    inner.position.y=hop;
+    inner.rotation.y = st==='ContainerCreating' ? yaw : inner.rotation.y+(yaw-inner.rotation.y)*k;
+    inner.rotation.x += (fall-inner.rotation.x)*k*.8;
+    const blink = (Math.sin(t*.9+p.phase*3)>.97) ? .15 : 1; P.eyes.forEach(e=>e.scale.y = crashed?.35:blink);
+    const target = p.dying?0.02:(st==='ContainerCreating'?.8:1);
+    p.scale+=(target-p.scale)*k; m.scale.setScalar(Math.max(.02,p.scale));
+    const dim = S.nsFilter && p.dep.ns!==S.nsFilter;
+    P.mats.forEach(mt=>{ mt.opacity = dim?.1:(st==='Pending'?.75:1); mt.depthWrite=!dim; });
+    const bc = st==='Running'?cssv('--ok'):(crashed?'#E5402A':(st==='Terminating'?'#8a9499':cssv('--warn')));
+    P.bulb.color.set(bc); P.bulb.emissive.set(bc); P.bulb.emissiveIntensity = crashed ? .4+.6*(Math.sin(t*8)>0?1:0) : .9;
+    if(crashed){ P.body.emissive.set('#e5402a'); P.body.emissiveIntensity=.2+.2*Math.sin(t*5); }
+    else if(sel===p){ P.body.emissive.set(cssv('--accent')); P.body.emissiveIntensity=.3; }
+    else P.body.emissiveIntensity=0;
+  });
+  S.nodes.forEach(n=>{
+    const base=new THREE.Color(cssv('--platform'));
+    if(n.cordoned){ cordonCol.set(cssv('--warn')); base.lerp(cordonCol,.35+.1*Math.sin(t*2)); }
+    if(sel===n){ cordonCol.set(cssv('--accent')); base.lerp(cordonCol,.2); }
+    n.fx.plat.material.color.copy(base);
+    const load=nodeUsage(n).cpu/n.P.cpu, dark=matchMedia('(prefers-color-scheme: dark)').matches;
+    n.fx.win.emissiveIntensity = dark ? .5+load*.5 : 0;
+    n.fx.puffs.forEach((pf,i)=>{ const ph=((t*.45)+i/n.fx.puffs.length)%1; pf.position.set(1.15+Math.sin(ph*4+i)*.12, 2.3+ph*1.5, -1.7+ph*.3); pf.scale.setScalar(.5+ph*1.3); pf.material.opacity=(1-ph)*.55*Math.min(1,load*1.4); });
+    n.fx.fans.forEach(f=>{ f.rotation.y += dt*(2+load*18); });
+    if(n.fx.flag) n.fx.flag.rotation.y = Math.sin(t*3+n.x)*.35;
+    n.fx.barrier.visible = n.cordoned;
+  });
+  // arcs from the selected pod to its replicas on other slots / nodes
+  const pos=arcGeo.attributes.position.array; let v=0;
+  if(sel && S.sel.type==='pod' && !sel.gone){
+    const a=sel.mesh.position;
+    S.pods.filter(p=>p!==sel && p.dep===sel.dep && !p.gone).slice(0,MAXARC).forEach(p=>{
+      const b=p.mesh.position, d=Math.hypot(b.x-a.x,b.z-a.z), h=1.4+d*.18;
+      for(let i=0;i<SEG;i++) for(const s of [i/SEG,(i+1)/SEG]){
+        pos[v++]=a.x+(b.x-a.x)*s; pos[v++]=a.y+1.25+(b.y-a.y)*s+4*h*s*(1-s); pos[v++]=a.z+(b.z-a.z)*s; }
+    });
+  }
+  arcGeo.setDrawRange(0, v/3); arcGeo.attributes.position.needsUpdate=true;
+  if(sel && !(sel.gone)){ const pos=sel.mesh.position; marker.visible=true; marker.position.set(pos.x, pos.y+(S.sel.type==='pod'?1.75:2.9)+Math.sin(t*3)*.12, pos.z); }
+  else marker.visible=false;
+  controls.update();
+  renderer.render(scene,cam);
+  requestAnimationFrame(frame);
+}
+
+/* ---------- boot ---------- */
+function boot(){
+  applyTheme(); resize();
+  DEPS.forEach(d=>{ for(let i=0;i<d.replicas;i++) newPod(d,true); });
+  tickMetrics(); renderStats(); renderLegend();
+  feed('Connecté au cluster gke-prod-europe-west1 (lecture via watch)');
+  setInterval(()=>{ reconcile(); schedule(); renderStats(); }, 700);
+  setInterval(()=>{ tickMetrics(); refreshPanel(); }, 2000);
+  setInterval(()=>{ S.pods.filter(p=>p.crash&&p.status==='Running'&&!p.gone&&!p.dying).forEach(p=>{ if(Math.random()<.5) crashOnce(p); }); }, 9000);
+  setInterval(()=>{ // background churn: a staging pod gets rolled
+    const c=S.pods.filter(p=>!p.gone&&!p.dying&&p.status==='Running'&&p.dep.ns==='staging');
+    if(c.length && Math.random()<.6){ const p=pick(c); p.dep.lastKilled=p; killPod(p,'Rollout staging'); }
+  }, 16000);
+  setInterval(()=>{ // live logs
+    S.pods.forEach(p=>{ if(p.status==='Running'&&!p.gone&&Math.random()<.5){ const l=logLine(p); p.logs.push(l); if(p.logs.length>400) p.logs.shift();
+      const o=selected(); if(o===p && S.tab==='logs' && !S.prev){ const lb=$('#logbox'); if(lb){ lb.insertAdjacentHTML('beforeend','\n'+fmtLog(l)); if(S.follow) lb.scrollTop=lb.scrollHeight; } } } });
+  }, 900);
+  setTimeout(()=>$('#hint').classList.add('hide'), 7000);
+  frame();
+}
+(document.fonts && document.fonts.ready ? Promise.race([document.fonts.ready, new Promise(r=>setTimeout(r,1500))]) : Promise.resolve()).then(boot);
+})();
+</script>
+</body>
+</html>
