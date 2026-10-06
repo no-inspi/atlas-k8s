@@ -1,0 +1,52 @@
+# Dex dans le cluster, joignable sous le même nom par le navigateur (ingress
+# sur le port 80 de l'hôte) et par les pods (réécriture CoreDNS vers l'ingress).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dex
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dex
+  namespace: dex
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: dex } }
+  template:
+    metadata: { labels: { app: dex } }
+    spec:
+      containers:
+        - name: dex
+          image: ghcr.io/dexidp/dex:v2.45.0
+          args: [dex, serve, /etc/dex/config.yaml]
+          ports: [{ name: http, containerPort: 5556 }]
+          readinessProbe: { httpGet: { path: /dex/healthz, port: http } }
+          volumeMounts: [{ name: config, mountPath: /etc/dex }]
+      volumes:
+        - name: config
+          configMap: { name: dex }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dex
+  namespace: dex
+spec:
+  selector: { app: dex }
+  ports: [{ name: http, port: 5556, targetPort: http }]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dex
+  namespace: dex
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: dex.localtest.me
+      http:
+        paths:
+          - path: /dex
+            pathType: Prefix
+            backend: { service: { name: dex, port: { name: http } } }

@@ -23,7 +23,7 @@
         "oidc": {
           "type": "object",
           "properties": {
-            "issuerURL": { "type": "string", "pattern": "^https://" },
+            "issuerURL": { "type": "string", "pattern": "^https?://" },
             "clientID": { "type": "string" },
             "clientSecret": { "type": "string" },
             "existingSecret": { "type": "string" },

@@ -1,4 +1,4 @@
-.PHONY: dev-demo dex-up dex-down run-dev e2e-auth helm-kind image image-push scan web build test test-go test-web demo dev e2e embed-dir clean kind-up kind-down scenarios run-kind test-integration
+.PHONY: kind-oidc helm-kind-oidc dev-demo dex-up dex-down run-dev e2e-auth helm-kind image image-push scan web build test test-go test-web demo dev e2e embed-dir clean kind-up kind-down scenarios run-kind test-integration
 
 BIN := bin/atlas
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -113,3 +113,14 @@ helm-kind: image
 	  -n cluster-atlas --create-namespace --wait --timeout 3m \
 	  --set image.tag=$(VERSION) --set image.pullPolicy=Never \
 	  --set auth.mode=none --set clusterName=kind-atlas
+
+# Parcours OIDC complet dans le cluster : http://atlas.localtest.me
+# (make kind-down kind-up scenarios kind-oidc helm-kind-oidc).
+kind-oidc:
+	hack/oidc/setup.sh
+
+helm-kind-oidc: image
+	kind load docker-image $(IMAGE):$(VERSION) --name atlas
+	helm upgrade --install cluster-atlas deploy/helm/cluster-atlas --kube-context $(KIND_CTX) \
+	  -n cluster-atlas --create-namespace --wait --timeout 3m \
+	  -f hack/oidc/values-kind.yaml --set image.tag=$(VERSION)

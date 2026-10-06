@@ -6,11 +6,11 @@ import { expect, test, type Page } from '@playwright/test'
 
 async function login(page: Page, email: string) {
   await page.goto('/')
-  await page.waitForURL(/localhost:5556\/dex/)
+  await page.waitForURL(/\/dex\/auth/)
   await page.locator('#login').fill(email)
   await page.locator('#password').fill('password')
   await page.locator('#submit-login').click()
-  await page.waitForURL('http://localhost:8080/')
+  await page.waitForURL((u) => u.pathname === '/' && !u.host.startsWith('dex') && !u.port.includes('5556'))
   await expect(page.getByTestId('pods-running')).toHaveText(/\d+\/\d+/)
 }
 
@@ -26,7 +26,7 @@ function recordStream(page: Page): () => string {
 test('sans session, l’API répond 401 et la page renvoie vers l’IdP', async ({ request, page }) => {
   expect((await request.get('/api/me', { maxRedirects: 0 })).status()).toBe(401)
   await page.goto('/')
-  await expect(page).toHaveURL(/localhost:5556\/dex/)
+  await expect(page).toHaveURL(/\/dex\/auth/)
 })
 
 test('alice (view sur tout le cluster) voit kube-system et les nodes', async ({ page }) => {

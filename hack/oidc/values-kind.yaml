@@ -1,0 +1,24 @@
+# Chart sur kind avec OIDC (Dex dans le cluster) et ingress-nginx, en http.
+clusterName: kind-atlas
+image:
+  pullPolicy: Never
+auth:
+  mode: oidc
+  oidc:
+    issuerURL: http://dex.localtest.me/dex
+    clientID: cluster-atlas
+    clientSecret: dev-secret-not-for-production
+    scopes: [openid, email, profile, groups]
+ingress:
+  enabled: true
+  className: nginx
+  host: atlas.localtest.me
+  tls: false
+networkPolicy:
+  # L'issuer est servi par ingress-nginx dans le cluster, en http.
+  oidcIssuer:
+    cidrs: []
+  extraEgress:
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: ingress-nginx } }
+      ports: [{ port: 80, protocol: TCP }]

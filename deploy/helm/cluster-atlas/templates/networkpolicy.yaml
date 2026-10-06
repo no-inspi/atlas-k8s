@@ -55,7 +55,8 @@ spec:
         {{- range $apiPorts }}
         - { port: {{ . }}, protocol: TCP }
         {{- end }}
-    {{- if eq .Values.auth.mode "oidc" }}
+    {{- /* Pas de CIDR : pas de règle (une règle sans « to » ouvrirait toutes les destinations). */}}
+    {{- if and (eq .Values.auth.mode "oidc") $np.oidcIssuer.cidrs }}
     - to:
         {{- range $np.oidcIssuer.cidrs }}
         - ipBlock:

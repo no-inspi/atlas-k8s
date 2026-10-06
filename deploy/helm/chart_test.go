@@ -267,6 +267,15 @@ func TestCookieKeyIsBase64Text(t *testing.T) {
 	}
 }
 
+func TestNoEgressRuleWithoutDestination(t *testing.T) {
+	np := find(mustRender(t, append(oidc, "--set", "networkPolicy.oidcIssuer.cidrs=null")...), "NetworkPolicy")
+	for _, rule := range get(np, "spec.egress").([]any) {
+		if get(rule, "to") == nil {
+			t.Errorf("règle egress sans destination (ouverte à tout) : %v", rule)
+		}
+	}
+}
+
 func TestExistingSecret(t *testing.T) {
 	docs := mustRender(t, "--set", "auth.oidc.clientID=atlas", "--set", "auth.oidc.existingSecret=mine", "--set", "publicURL=https://a")
 	if find(docs, "Secret") != nil {
