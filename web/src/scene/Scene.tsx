@@ -42,7 +42,8 @@ function CameraRig() {
     const { bounds } = layout
     const span = Math.max(bounds.width, bounds.depth * 1.3)
     const aspect = size.width / size.height
-    const viewHeight = Math.max(span * 0.8, (span * 1.15) / aspect)
+    // En portrait, on accepte de rogner le décor (arbres) pour garder des robots lisibles.
+    const viewHeight = Math.max(span * 0.8, (span * (aspect < 1 ? 0.9 : 1.15)) / aspect)
     const fit = size.height / viewHeight
     c.minZoom = fit * ZOOM_MIN
     c.maxZoom = fit * ZOOM_MAX

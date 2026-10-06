@@ -147,6 +147,7 @@ h3{font-size:13.5px;font-weight:600;margin:20px 0 8px;color:var(--ink)}
 
 /* Ajouts Cluster Atlas */
 #root{height:100%}
+.brand b{white-space:nowrap}
 .stage{position:fixed;inset:0}
 .stage canvas{display:block;touch-action:none}
 .live.reconnecting .dot{background:var(--warn);box-shadow:0 0 0 3px color-mix(in srgb,var(--warn) 25%,transparent)}

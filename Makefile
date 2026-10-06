@@ -26,7 +26,8 @@ demo: build
 
 # Backend démo sur :8080 et Vite (HMR) sur :5173, qui proxifie /api.
 dev: embed-dir
-	go run ./cmd/atlas --demo & cd web && npm run dev; kill %1
+	go build -o $(BIN) ./cmd/atlas
+	$(BIN) --demo & PID=$$!; trap "kill $$PID" EXIT INT TERM; cd web && npm run dev
 
 e2e: build
 	cd web && npx playwright test

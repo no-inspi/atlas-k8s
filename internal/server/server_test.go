@@ -13,9 +13,9 @@ import (
 )
 
 var static = fstest.MapFS{
-	"index.html":       {Data: []byte("<!doctype html><title>atlas</title>")},
-	"assets/app-1.js":  {Data: []byte("console.log(1)")},
-	"favicon.svg":      {Data: []byte("<svg/>")},
+	"index.html":      {Data: []byte("<!doctype html><title>atlas</title>")},
+	"assets/app-1.js": {Data: []byte("console.log(1)")},
+	"favicon.svg":     {Data: []byte("<svg/>")},
 }
 
 func newTest(fs fstest.MapFS) (http.Handler, *stream.Hub) {
