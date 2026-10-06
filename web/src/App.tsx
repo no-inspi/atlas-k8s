@@ -8,9 +8,11 @@ import { Feed, Hint, Legend, Stats, TopBar } from './ui/Hud'
 import { Inspector } from './inspector/Inspector'
 import { syncRoute } from './ui/route'
 import { Toasts } from './ui/Toasts'
+import { ListView } from './ui/ListView'
 import { perfEnabled } from './scene/PerfMeter'
 
 export function App() {
+  const view = useCluster((s) => s.view)
   useEffect(() => {
     apiFetch('/api/me')
       .then((r) => (r.ok ? (r.json() as Promise<Me>) : null))
@@ -24,6 +26,7 @@ export function App() {
   return (
     <>
       <div className="stage"><Scene /></div>
+      {view === 'list' && <ListView />}
       <TopBar />
       <Stats />
       <div className="bottom-left">

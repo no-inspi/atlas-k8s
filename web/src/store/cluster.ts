@@ -36,6 +36,10 @@ export interface ClusterState {
   /** Onglet actif, conservé quand on passe d'un pod à l'autre. */
   inspectorTab: InspectorTab
   yamlTarget: YamlTarget
+  /** Point de la ville à centrer (recherche) ; seq change à chaque demande. */
+  focus: { x: number; z: number; seq: number } | null
+  /** Vue principale : ville 3D ou liste accessible. */
+  view: '3d' | 'list'
   nsFilter: string | null
   feed: FeedItem[]
   toasts: Toast[]
@@ -51,6 +55,8 @@ export interface ClusterState {
   /** Résultat d'une action : notification et entrée dans le bandeau d'événements. */
   notify(text: string, level?: FeedLevel): void
   dismissToast(id: number): void
+  focusOn(x: number, z: number): void
+  setView(view: '3d' | 'list'): void
   reset(): void
 }
 
@@ -69,6 +75,8 @@ const initial = () => ({
   selection: null as Selection,
   inspectorTab: 'overview' as InspectorTab,
   yamlTarget: null as YamlTarget,
+  focus: null as { x: number; z: number; seq: number } | null,
+  view: '3d' as '3d' | 'list',
   nsFilter: null,
   feed: [] as FeedItem[],
   toasts: [] as Toast[],
@@ -160,6 +168,8 @@ export const useCluster = create<ClusterState>()(
       }))
     },
     dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
+    setView: (view) => set({ view }),
+    focusOn: (x, z) => set((s) => ({ focus: { x, z, seq: (s.focus?.seq ?? 0) + 1 } })),
 
     reset: () => set(initial()),
   })),

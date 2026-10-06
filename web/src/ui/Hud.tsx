@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { clusterColors } from '../scene/colors'
 import { legendItems } from './legend'
+import { Search } from './Search'
+import { applyTheme, loadTheme, nextTheme, type ThemeChoice } from './theme'
 import { postureFor } from '../scene/posture'
 import { useCluster } from '../store/cluster'
 
@@ -25,6 +27,9 @@ export function TopBar() {
         <b>Cluster Atlas</b>
         {me && <span className="ctx">{me.cluster}</span>}
       </div>
+      <Search />
+      <ViewToggle />
+      <ThemeToggle />
       <div className={`live ${live ? '' : 'reconnecting'}`} role="status">
         <span className="dot" />
         <span className="lbl">{live ? 'Live' : connection === 'connecting' ? 'Connexion…' : 'Reconnexion…'}</span>{' '}
@@ -38,6 +43,29 @@ export function TopBar() {
         </div>
       )}
     </header>
+  )
+}
+
+function ViewToggle() {
+  const view = useCluster((s) => s.view)
+  const setView = useCluster((s) => s.setView)
+  return (
+    <button className="top-btn" aria-pressed={view === 'list'} onClick={() => setView(view === 'list' ? '3d' : 'list')}
+      title={view === 'list' ? 'Revenir à la ville 3D' : 'Afficher la liste accessible au clavier'}>
+      {view === 'list' ? 'Ville 3D' : 'Liste'}
+    </button>
+  )
+}
+
+const THEME_LABEL: Record<ThemeChoice, string> = { system: 'Thème : système', light: 'Thème : clair', dark: 'Thème : sombre' }
+
+function ThemeToggle() {
+  const [choice, setChoice] = useState<ThemeChoice>(loadTheme)
+  useEffect(() => applyTheme(choice), [choice])
+  return (
+    <button className="top-btn" onClick={() => setChoice(nextTheme)} aria-label={`${THEME_LABEL[choice]} (changer)`} title={THEME_LABEL[choice]}>
+      {choice === 'dark' ? '☾' : choice === 'light' ? '☀' : '◐'}
+    </button>
   )
 }
 

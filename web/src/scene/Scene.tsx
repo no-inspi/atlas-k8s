@@ -24,7 +24,7 @@ const ZOOM_MAX = 3.2
  */
 function CameraRig() {
   const controls = useRef<OrbitControlsImpl>(null)
-  const { camera, size } = useThree()
+  const { camera, size, invalidate } = useThree()
   const framed = useRef('')
 
   useEffect(() => {
@@ -58,6 +58,31 @@ function CameraRig() {
     }
     camera.updateProjectionMatrix()
     c.update()
+  })
+
+  // Recherche : glisse la caméra vers l'objet trouvé et zoome assez pour le lire.
+  const focus = useCluster((s) => s.focus)
+  const flight = useRef<{ from: THREE.Vector3; to: THREE.Vector3; zoom0: number; zoom1: number; t: number } | null>(null)
+  useEffect(() => {
+    const c = controls.current
+    if (!focus || !c) return
+    const fit = c.minZoom / ZOOM_MIN
+    flight.current = { from: c.target.clone(), to: new THREE.Vector3(focus.x, 0, focus.z), zoom0: camera.zoom, zoom1: Math.max(camera.zoom, fit * 2), t: 0 }
+    invalidate()
+  }, [focus, camera, invalidate])
+  useFrame((_, delta) => {
+    const f = flight.current, c = controls.current
+    if (!f || !c) return
+    f.t = Math.min(1, f.t + delta / 0.5)
+    const e = 1 - Math.pow(1 - f.t, 3)
+    const next = f.from.clone().lerp(f.to, e)
+    camera.position.add(next.clone().sub(c.target))
+    c.target.copy(next)
+    camera.zoom = f.zoom0 + (f.zoom1 - f.zoom0) * e
+    camera.updateProjectionMatrix()
+    c.update()
+    if (f.t < 1) invalidate()
+    else flight.current = null
   })
 
   return (
