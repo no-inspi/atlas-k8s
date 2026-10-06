@@ -19,6 +19,7 @@ test: test-go test-web
 test-go: embed-dir
 	go vet ./...
 	go test -race ./...
+	go test -count=1 ./deploy/helm  # les templates Helm échappent au cache de go test
 
 test-web:
 	cd web && npm test

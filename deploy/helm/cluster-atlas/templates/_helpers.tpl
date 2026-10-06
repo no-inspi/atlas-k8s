@@ -43,6 +43,9 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if not .Values.auth.oidc.clientID -}}
 {{- fail "auth.oidc.clientID est requis avec auth.mode=oidc" -}}
 {{- end -}}
+{{- if not (or .Values.publicURL (include "atlas.publicURL" .)) -}}
+{{- fail "auth.mode=oidc : activez ingress ou httpRoute, ou renseignez publicURL (URL de retour OIDC)" -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 

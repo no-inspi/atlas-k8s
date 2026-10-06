@@ -1,4 +1,6 @@
-package auth
+// Package authtest fournit un fournisseur OIDC de test (discovery, JWKS,
+// endpoint token avec vérification PKCE, ID tokens signés RS256).
+package authtest
 
 import (
 	"crypto/rand"
@@ -15,15 +17,16 @@ import (
 	jose "github.com/go-jose/go-jose/v4"
 )
 
-// testIdP est un fournisseur OIDC minimal : discovery, JWKS et endpoint token
+// IdP est un fournisseur OIDC minimal : discovery, JWKS et endpoint token
 // qui vérifie le code_verifier PKCE avant de délivrer un ID token signé.
-type testIdP struct {
-	srv    *httptest.Server
-	key    *rsa.PrivateKey
-	mu     sync.Mutex
-	codes  map[string]pendingCode
-	client string
-	secret string
+type IdP struct {
+	URL      string
+	ClientID string
+	Secret   string
+	srv      *httptest.Server
+	key      *rsa.PrivateKey
+	mu       sync.Mutex
+	codes    map[string]pendingCode
 }
 
 type pendingCode struct {
@@ -31,13 +34,13 @@ type pendingCode struct {
 	challenge string
 }
 
-func newTestIdP(t *testing.T) *testIdP {
+func NewIdP(t testing.TB) *IdP {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
 	}
-	idp := &testIdP{key: key, codes: map[string]pendingCode{}, client: "atlas", secret: "s3cret"}
+	idp := &IdP{key: key, codes: map[string]pendingCode{}, ClientID: "atlas", Secret: "s3cret"}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -55,7 +58,7 @@ func newTestIdP(t *testing.T) *testIdP {
 	})
 	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
-		if u, p, _ := r.BasicAuth(); u != idp.client || p != idp.secret {
+		if u, p, _ := r.BasicAuth(); u != idp.ClientID || p != idp.Secret {
 			http.Error(w, `{"error":"invalid_client"}`, http.StatusUnauthorized)
 			return
 		}
@@ -76,16 +79,17 @@ func newTestIdP(t *testing.T) *testIdP {
 		})
 	})
 	idp.srv = httptest.NewServer(mux)
+	idp.URL = idp.srv.URL
 	t.Cleanup(idp.srv.Close)
 	return idp
 }
 
-func (idp *testIdP) sign(t *testing.T, claims map[string]any) string {
+func (idp *IdP) sign(t testing.TB, claims map[string]any) string {
 	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: idp.key}, (&jose.SignerOptions{}).WithHeader("kid", "k1"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	full := map[string]any{"iss": idp.srv.URL, "aud": idp.client, "sub": "user-1",
+	full := map[string]any{"iss": idp.srv.URL, "aud": idp.ClientID, "sub": "user-1",
 		"iat": time.Now().Unix(), "exp": time.Now().Add(time.Hour).Unix()}
 	for k, v := range claims {
 		full[k] = v
@@ -99,8 +103,9 @@ func (idp *testIdP) sign(t *testing.T, claims map[string]any) string {
 	return s
 }
 
-// issueCode prépare un code d'autorisation pour le challenge PKCE donné.
-func (idp *testIdP) issueCode(code, challenge string, claims map[string]any) {
+// IssueCode prépare un code d'autorisation pour le challenge PKCE donné ;
+// le token endpoint l'échangera contre un ID token portant ces claims.
+func (idp *IdP) IssueCode(code, challenge string, claims map[string]any) {
 	idp.mu.Lock()
 	idp.codes[code] = pendingCode{claims: claims, challenge: challenge}
 	idp.mu.Unlock()

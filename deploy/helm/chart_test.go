@@ -81,7 +81,7 @@ func get(v any, path string) any {
 	return v
 }
 
-var oidc = []string{"--set", "auth.oidc.clientID=atlas", "--set", "auth.oidc.clientSecret=s3cret"}
+var oidc = []string{"--set", "auth.oidc.clientID=atlas", "--set", "auth.oidc.clientSecret=s3cret", "--set", "publicURL=https://atlas.corp"}
 
 func TestDefaultRender(t *testing.T) {
 	docs := mustRender(t, oidc...)
@@ -100,6 +100,17 @@ func TestDefaultRender(t *testing.T) {
 func TestOIDCRequiresClientID(t *testing.T) {
 	if _, err := render(t); err == nil || !strings.Contains(err.Error(), "auth.oidc.clientID") {
 		t.Fatalf("attendu un refus sans clientID, reçu %v", err)
+	}
+}
+
+func TestOIDCRequiresAPublicURL(t *testing.T) {
+	if _, err := render(t, "--set", "auth.oidc.clientID=atlas"); err == nil || !strings.Contains(err.Error(), "publicURL") {
+		t.Fatalf("attendu un refus sans URL publique, reçu %v", err)
+	}
+	docs := mustRender(t, oidc...)
+	env := get(find(docs, "Deployment"), "spec.template.spec.containers.0.env").([]any)
+	if !hasEnv(env, "ATLAS_PUBLIC_URL", "https://atlas.corp") || !hasEnv(env, "ATLAS_OIDC_SCOPES", "openid,email,profile") {
+		t.Errorf("env = %v", env)
 	}
 }
 
@@ -188,7 +199,7 @@ func TestHighAvailability(t *testing.T) {
 }
 
 func TestIngressAndHTTPRoute(t *testing.T) {
-	docs := mustRender(t, append(oidc, "--set", "ingress.enabled=true", "--set", "ingress.host=atlas.corp",
+	docs := mustRender(t, append(oidc[:4:4], "--set", "ingress.enabled=true", "--set", "ingress.host=atlas.corp",
 		"--set", "ingress.certManager.clusterIssuer=letsencrypt")...)
 	ing := find(docs, "Ingress")
 	ann := get(ing, "metadata.annotations").(map[string]any)
@@ -257,7 +268,7 @@ func TestCookieKeyIsBase64Text(t *testing.T) {
 }
 
 func TestExistingSecret(t *testing.T) {
-	docs := mustRender(t, "--set", "auth.oidc.clientID=atlas", "--set", "auth.oidc.existingSecret=mine")
+	docs := mustRender(t, "--set", "auth.oidc.clientID=atlas", "--set", "auth.oidc.existingSecret=mine", "--set", "publicURL=https://a")
 	if find(docs, "Secret") != nil {
 		t.Error("aucun Secret ne doit être créé avec existingSecret")
 	}

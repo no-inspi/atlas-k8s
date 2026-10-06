@@ -12,19 +12,21 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/no-inspi/cluster-atlas/internal/auth/authtest"
 )
 
 type fixture struct {
-	idp  *testIdP
+	idp  *authtest.IdP
 	auth *Auth
 	h    http.Handler
 }
 
 func newFixture(t *testing.T, mutate ...func(*Config)) *fixture {
 	t.Helper()
-	idp := newTestIdP(t)
+	idp := authtest.NewIdP(t)
 	cfg := Config{
-		IssuerURL: idp.srv.URL, ClientID: idp.client, ClientSecret: idp.secret,
+		IssuerURL: idp.URL, ClientID: idp.ClientID, ClientSecret: idp.Secret,
 		PublicURL: "https://atlas.test", Scopes: []string{"openid", "email", "profile"},
 		UsernameClaim: "email", GroupsClaim: "groups", GroupsPrefix: "oidc:",
 		SessionTTL: 8 * time.Hour, CookieKey: testKey(9),
@@ -77,14 +79,14 @@ func (f *fixture) login(t *testing.T, returnTo string, claims map[string]any) *h
 	}
 	loc, _ := url.Parse(rec.Header().Get("Location"))
 	q := loc.Query()
-	if !strings.HasPrefix(loc.String(), f.idp.srv.URL+"/authorize") || q.Get("code_challenge_method") != "S256" ||
+	if !strings.HasPrefix(loc.String(), f.idp.URL+"/authorize") || q.Get("code_challenge_method") != "S256" ||
 		q.Get("redirect_uri") != f.auth.cfg.PublicURL+"/auth/callback" || q.Get("state") == "" || q.Get("nonce") == "" {
 		t.Fatalf("redirection vers l'IdP inattendue : %s", loc)
 	}
 	if _, ok := claims["nonce"]; !ok {
 		claims["nonce"] = q.Get("nonce")
 	}
-	f.idp.issueCode("code-1", q.Get("code_challenge"), claims)
+	f.idp.IssueCode("code-1", q.Get("code_challenge"), claims)
 	cb := httptest.NewRequest("GET", "/auth/callback?code=code-1&state="+url.QueryEscape(q.Get("state")), nil)
 	return f.do(cb, cookie(rec, oauthCookie))
 }

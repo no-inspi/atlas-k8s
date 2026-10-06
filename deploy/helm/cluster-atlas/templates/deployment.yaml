@@ -58,7 +58,7 @@ spec:
             - name: ATLAS_AUTH_MODE
               value: {{ .Values.auth.mode | quote }}
             - name: ATLAS_PUBLIC_URL
-              value: {{ include "atlas.publicURL" . | quote }}
+              value: {{ .Values.publicURL | default (include "atlas.publicURL" .) | quote }}
             - name: ATLAS_OIDC_ISSUER_URL
               value: {{ .Values.auth.oidc.issuerURL | quote }}
             - name: ATLAS_OIDC_CLIENT_ID
@@ -79,6 +79,8 @@ spec:
               value: {{ .Values.auth.oidc.groupsClaim | quote }}
             - name: ATLAS_OIDC_GROUPS_PREFIX
               value: {{ .Values.auth.oidc.groupsPrefix | quote }}
+            - name: ATLAS_OIDC_SCOPES
+              value: {{ join "," .Values.auth.oidc.scopes | quote }}
             - name: ATLAS_SESSION_TTL
               value: {{ .Values.auth.sessionTTL | quote }}
             - name: ATLAS_EXEC_ENABLED

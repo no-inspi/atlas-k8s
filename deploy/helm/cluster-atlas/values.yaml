@@ -28,7 +28,13 @@ auth:
     # Préfixe ajouté aux groupes envoyés en Impersonate-Group : les RoleBindings
     # doivent viser les mêmes noms (par ex. « oidc:sre »).
     groupsPrefix: "oidc:"
+    # Google refuse le scope « groups » ; Dex, Keycloak et Entra ID l'acceptent.
+    scopes: [openid, email, profile]
   sessionTTL: 8h
+
+# URL de l'application vue du navigateur ; vide : déduite de l'Ingress ou du
+# HTTPRoute. À renseigner pour un accès sans exposition (port-forward).
+publicURL: ""
 
 features:
   exec:

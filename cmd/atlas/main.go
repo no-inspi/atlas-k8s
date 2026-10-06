@@ -11,12 +11,16 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 
+	"github.com/no-inspi/cluster-atlas/internal/access"
+	"github.com/no-inspi/cluster-atlas/internal/auth"
 	"github.com/no-inspi/cluster-atlas/internal/demo"
 	"github.com/no-inspi/cluster-atlas/internal/kube"
 	"github.com/no-inspi/cluster-atlas/internal/server"
@@ -44,6 +48,13 @@ func env(key, def string) string {
 type flags struct {
 	addr, metricsAddr, clusterName, authMode, kubeconfig, kubeContext, poolLabel string
 	demo                                                                         bool
+	oidc                                                                         oidcFlags
+}
+
+type oidcFlags struct {
+	issuer, clientID, clientSecret, cookieKey, publicURL string
+	usernameClaim, groupsClaim, groupsPrefix, scopes     string
+	sessionTTL                                           time.Duration
 }
 
 func parseFlags() flags {
@@ -56,6 +67,18 @@ func parseFlags() flags {
 	flag.StringVar(&f.kubeconfig, "kubeconfig", env("KUBECONFIG", ""), "kubeconfig hors cluster (vide : in-cluster ou ~/.kube/config)")
 	flag.StringVar(&f.kubeContext, "context", env("ATLAS_CONTEXT", ""), "contexte du kubeconfig")
 	flag.StringVar(&f.poolLabel, "pool-label", env("ATLAS_POOL_LABEL", ""), "label désignant le node pool (vide : détection automatique)")
+	o := &f.oidc
+	flag.StringVar(&o.issuer, "oidc-issuer-url", env("ATLAS_OIDC_ISSUER_URL", ""), "issuer OIDC")
+	flag.StringVar(&o.clientID, "oidc-client-id", env("ATLAS_OIDC_CLIENT_ID", ""), "client ID OIDC")
+	flag.StringVar(&o.clientSecret, "oidc-client-secret", env("ATLAS_OIDC_CLIENT_SECRET", ""), "client secret OIDC (préférer la variable d'environnement)")
+	flag.StringVar(&o.cookieKey, "cookie-key", env("ATLAS_COOKIE_KEY", ""), "clé de chiffrement des cookies : base64 de 32 octets (préférer la variable d'environnement)")
+	flag.StringVar(&o.publicURL, "public-url", env("ATLAS_PUBLIC_URL", ""), "URL de l'application vue du navigateur (URL de retour OIDC)")
+	flag.StringVar(&o.usernameClaim, "oidc-username-claim", env("ATLAS_OIDC_USERNAME_CLAIM", "email"), "claim du nom d'utilisateur")
+	flag.StringVar(&o.groupsClaim, "oidc-groups-claim", env("ATLAS_OIDC_GROUPS_CLAIM", "groups"), "claim des groupes")
+	flag.StringVar(&o.groupsPrefix, "oidc-groups-prefix", env("ATLAS_OIDC_GROUPS_PREFIX", "oidc:"), "préfixe des groupes impersonnés")
+	flag.StringVar(&o.scopes, "oidc-scopes", env("ATLAS_OIDC_SCOPES", "openid,email,profile"), "scopes OIDC, séparés par des virgules")
+	ttl, _ := time.ParseDuration(env("ATLAS_SESSION_TTL", "8h"))
+	flag.DurationVar(&o.sessionTTL, "session-ttl", ttl, "durée de vie d'une session")
 	flag.Parse()
 	return f
 }
@@ -80,12 +103,28 @@ func run() error {
 		hub.MarkReady()
 		go sim.Run(ctx)
 	} else {
-		if f.authMode != "none" {
-			return errors.New("authentification OIDC disponible au jalon 4 ; en développement, lancez avec --auth-mode=none")
+		rc, err := kube.RestConfig(f.kubeconfig, f.kubeContext)
+		if err != nil {
+			return fmt.Errorf("connexion à l'API server : %w", err)
 		}
-		log.Warn("authentification désactivée (--auth-mode=none) : réservé au développement")
-		cfg.User = "anonymous"
-		if err := startClusterSource(ctx, f, hub, log); err != nil {
+		client, err := kubernetes.NewForConfig(rc)
+		if err != nil {
+			return err
+		}
+		switch f.authMode {
+		case "none":
+			log.Warn("authentification désactivée (--auth-mode=none) : réservé au développement")
+			cfg.User, cfg.Kube = "anonymous", client
+		case "oidc":
+			if cfg.Auth, err = newAuth(ctx, f.oidc, log); err != nil {
+				return err
+			}
+			cfg.Reviewer = access.NewReviewer(client)
+			cfg.Clients = access.NewClients(rc)
+		default:
+			return fmt.Errorf("--auth-mode inconnu %q (oidc | none)", f.authMode)
+		}
+		if err := startClusterSource(ctx, f, rc, client, hub, log); err != nil {
 			return err
 		}
 	}
@@ -115,16 +154,29 @@ func run() error {
 	return srv.Shutdown(shutdown)
 }
 
+func newAuth(ctx context.Context, o oidcFlags, log *slog.Logger) (*auth.Auth, error) {
+	if o.issuer == "" || o.clientID == "" {
+		return nil, errors.New("auth-mode=oidc : --oidc-issuer-url et --oidc-client-id sont requis (ou --auth-mode=none en développement)")
+	}
+	key, err := auth.ParseKey(o.cookieKey)
+	if err != nil {
+		return nil, fmt.Errorf("%w (ATLAS_COOKIE_KEY ; générer avec : openssl rand -base64 32)", err)
+	}
+	var scopes []string
+	for _, sc := range strings.Split(o.scopes, ",") {
+		if sc = strings.TrimSpace(sc); sc != "" {
+			scopes = append(scopes, sc)
+		}
+	}
+	return auth.New(ctx, auth.Config{
+		IssuerURL: o.issuer, ClientID: o.clientID, ClientSecret: o.clientSecret, PublicURL: o.publicURL,
+		Scopes: scopes, UsernameClaim: o.usernameClaim, GroupsClaim: o.groupsClaim, GroupsPrefix: o.groupsPrefix,
+		SessionTTL: o.sessionTTL, CookieKey: key,
+	}, log)
+}
+
 // startClusterSource branche les informers et metrics-server sur le hub.
-func startClusterSource(ctx context.Context, f flags, hub *stream.Hub, log *slog.Logger) error {
-	rc, err := kube.RestConfig(f.kubeconfig, f.kubeContext)
-	if err != nil {
-		return fmt.Errorf("connexion à l'API server : %w", err)
-	}
-	client, err := kubernetes.NewForConfig(rc)
-	if err != nil {
-		return err
-	}
+func startClusterSource(ctx context.Context, f flags, rc *rest.Config, client kubernetes.Interface, hub *stream.Hub, log *slog.Logger) error {
 	mc, err := metricsclient.NewForConfig(rc)
 	if err != nil {
 		return err

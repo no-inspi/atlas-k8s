@@ -1,5 +1,5 @@
 Cluster Atlas {{ .Chart.AppVersion }} est installé dans le namespace {{ .Release.Namespace }}.
-{{- $url := include "atlas.publicURL" . }}
+{{- $url := .Values.publicURL | default (include "atlas.publicURL" .) }}
 {{ if $url }}
 Ouvrez {{ $url }} et connectez-vous avec le SSO de votre organisation.
 Les droits affichés sont ceux de vos RoleBindings : chaque requête est faite
