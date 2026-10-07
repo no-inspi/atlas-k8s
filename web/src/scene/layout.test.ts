@@ -84,6 +84,14 @@ describe('layoutCity', () => {
       for (const a of c.avenues) expect(a.x - a.width / 2).toBeCloseTo(left - GATE_ZONE)
       expect(c.bounds.x - c.bounds.width / 2).toBeLessThanOrEqual(left - GATE_ZONE + 1e-6)
     })
+
+    it('englobe les avenues dans ses limites', () => {
+      const c = layoutCity(nodes, geo)
+      for (const a of c.avenues) {
+        expect(c.bounds.x - c.bounds.width / 2).toBeLessThanOrEqual(a.x - a.width / 2 + 1e-6)
+        expect(c.bounds.x + c.bounds.width / 2).toBeGreaterThanOrEqual(a.x + a.width / 2 - 1e-6)
+      }
+    })
   })
 })
 

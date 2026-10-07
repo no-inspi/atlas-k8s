@@ -167,7 +167,8 @@ export function layoutCity(nodes: Node[], geo: PlotGeometry): CityLayout {
   const queue: Rect = { x: 0, z: depth / 2 + 3.4, width: Math.max(14, width * 0.8), depth: 2.6 }
   return {
     districts, plots, queue, avenues, geometry: geo,
-    bounds: { x: -GATE_ZONE / 2, z: 1.7, width: width + GATE_ZONE, depth: depth + 3.4 * 2 },
+    // Comme les avenues : l'entrée des portes à l'ouest, une unité de plus à l'est.
+    bounds: { x: (1 - GATE_ZONE) / 2, z: 1.7, width: width + GATE_ZONE + 1, depth: depth + 3.4 * 2 },
   }
 }
 
