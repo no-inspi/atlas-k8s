@@ -9,7 +9,7 @@ const BADGE: Record<string, string> = { ok: 's-ok', warn: 's-warn', err: 's-err'
 const NET_STATUS: Record<string, string> = {
   down: 's-err', Lost: 's-err', Failed: 's-err', 'Service introuvable': 's-err', 'non programmé': 's-err',
   degraded: 's-warn', Pending: 's-warn', 'route cassée': 's-warn', 'route refusée': 's-warn', 'listener non prêt': 's-warn',
-  Released: 's-mute', Available: 's-mute',
+  Released: 's-mute', Available: 's-mute', Bound: 's-mute',
 }
 
 function statusClass(n: TreeNode): string {

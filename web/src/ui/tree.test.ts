@@ -113,4 +113,25 @@ describe('Gateway API et PV', () => {
       ['pv-old-uploads', { type: 'pv', key: 'pv-old-uploads' }, 'Released'],
     ])
   })
+
+  it('signale une route refusée et un listener non prêt sur la porte', () => {
+    const refused = route({ source: 'HTTPRoute', group: 'gateway.networking.k8s.io', gate: 'infra/a', gates: ['infra/a'] })
+    refused.rules[0].backend.state = 'refused'
+    const tree = buildTree({
+      ...st,
+      routes: new Map([['HTTPRoute/production/storefront', refused]]),
+      gateways: new Map([
+        ['infra/a', gateway({ namespace: 'infra', name: 'a' })],
+        ['infra/b', gateway({ namespace: 'infra', name: 'b', listeners: [{ name: 'https', protocol: 'HTTPS', port: 443, attachedRoutes: 0, ready: 'false' }] })],
+      ]),
+    })
+    const gates = tree.find((g) => g.label === 'Entrées')!
+    expect(gates.children!.map((g) => [g.label, g.status])).toEqual([['infra/a', 'route refusée'], ['infra/b', 'listener non prêt']])
+    expect(gates.children![0].children![0].status).toBe('route refusée')
+  })
+
+  it('une classe de stockage sans PVC ne compte que des PV', () => {
+    const storage = buildTree({ ...st, persistentVolumes: new Map([['pv-x', pv({ name: 'pv-x', storageClass: 'cold' })]]) }).find((g) => g.label === 'Stockage')!
+    expect(storage.children![0].detail).toBe('1 PV')
+  })
 })
