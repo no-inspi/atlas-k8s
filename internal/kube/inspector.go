@@ -17,9 +17,9 @@ import (
 	"github.com/no-inspi/atlas-k8s/internal/model"
 )
 
-// EventSource fournit les événements d'un pod depuis le cache partagé.
+// EventSource fournit les événements d'un objet depuis le cache partagé.
 type EventSource interface {
-	PodEvents(namespace, name string) []model.Event
+	ObjectEvents(namespace, kind, name string) []model.Event
 }
 
 // Authorize répond « l'utilisateur a-t-il ce droit ? » (Reviewer.Allowed).
@@ -108,12 +108,12 @@ func (in *Inspector) Logs(ctx context.Context, u access.User, ns, pod string, o 
 	return kc.CoreV1().Pods(ns).GetLogs(pod, opts).Stream(ctx)
 }
 
-func (in *Inspector) Events(ctx context.Context, u access.User, ns, pod string) ([]model.Event, error) {
+func (in *Inspector) Events(ctx context.Context, u access.User, kind, ns, name string) ([]model.Event, error) {
 	if in.authorize != nil && !in.authorize(ctx, u, access.Attributes{Verb: "list", Resource: "events", Namespace: ns}) {
 		return nil, apierrors.NewForbidden(schema.GroupResource{Resource: "events"}, "",
 			fmt.Errorf("User %q cannot list resource \"events\" in API group \"\" in the namespace %q", u.Name, ns))
 	}
-	evs := in.events.PodEvents(ns, pod)
+	evs := in.events.ObjectEvents(ns, kind, name)
 	inspect.SortEvents(evs)
 	return evs, nil
 }

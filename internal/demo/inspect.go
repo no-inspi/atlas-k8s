@@ -216,9 +216,12 @@ func (s *Sim) Owners(_ context.Context, _ access.User, ns, name string) ([]inspe
 	return append(chain, inspect.RefFor("Pod", ns, name)), nil
 }
 
-func (s *Sim) Events(_ context.Context, _ access.User, ns, name string) ([]model.Event, error) {
+func (s *Sim) Events(_ context.Context, _ access.User, kind, ns, name string) ([]model.Event, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if kind != "Pod" {
+		return s.netEvents(kind, ns, name), nil
+	}
 	p := s.findPod(ns, name)
 	if p == nil {
 		return []model.Event{}, nil
@@ -227,6 +230,9 @@ func (s *Sim) Events(_ context.Context, _ access.User, ns, name string) ([]model
 	inspect.SortEvents(evs)
 	return evs, nil
 }
+
+// netEvents : complété à la tâche 10 (PVC en attente).
+func (s *Sim) netEvents(kind, ns, name string) []model.Event { return []model.Event{} }
 
 func (s *Sim) Logs(ctx context.Context, _ access.User, ns, name string, o inspect.LogOptions) (io.ReadCloser, error) {
 	s.mu.Lock()

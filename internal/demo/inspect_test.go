@@ -72,7 +72,7 @@ func TestDemoYAML(t *testing.T) {
 func TestDemoEvents(t *testing.T) {
 	s, sink := start(13)
 	crashy := findPod(sink, "production", "payment-worker", "CrashLoopBackOff")
-	evs, _ := s.Events(context.Background(), anyone, "production", crashy.Name)
+	evs, _ := s.Events(context.Background(), anyone, "Pod", "production", crashy.Name)
 	reasons := map[string]bool{}
 	for _, e := range evs {
 		reasons[e.Reason] = true
@@ -94,7 +94,7 @@ func TestDemoEvents(t *testing.T) {
 			pending = p
 		}
 	}
-	evs, _ = s.Events(context.Background(), anyone, "production", pending.Name)
+	evs, _ = s.Events(context.Background(), anyone, "Pod", "production", pending.Name)
 	if len(evs) == 0 || evs[0].Reason != "FailedScheduling" || evs[0].Type != "Warning" {
 		t.Errorf("FailedScheduling attendu : %+v", evs)
 	}

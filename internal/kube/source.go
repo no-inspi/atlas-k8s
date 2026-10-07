@@ -497,9 +497,9 @@ func slimContainers(cs []corev1.Container) {
 	}
 }
 
-// PodEvents renvoie les événements d'un pod depuis le cache partagé.
-func (s *Source) PodEvents(namespace, name string) []model.Event {
-	objs, _ := s.events.ByIndex(indexByInvolved, namespace+"/Pod/"+name)
+// ObjectEvents renvoie les événements d'un objet depuis le cache partagé.
+func (s *Source) ObjectEvents(namespace, kind, name string) []model.Event {
+	objs, _ := s.events.ByIndex(indexByInvolved, namespace+"/"+kind+"/"+name)
 	out := make([]model.Event, 0, len(objs))
 	for _, o := range objs {
 		out = append(out, ConvertEvent(o.(*corev1.Event)))

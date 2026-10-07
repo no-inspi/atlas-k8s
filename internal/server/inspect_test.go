@@ -69,4 +69,10 @@ func TestInspectorRoutes(t *testing.T) {
 	if rec.Code != 200 || len(evs.Events) == 0 {
 		t.Errorf("events = %d %+v", rec.Code, evs)
 	}
+	if rec := get(h, "/api/namespaces/production/secrets/x/events"); rec.Code != 400 {
+		t.Errorf("événements d'un Secret = %d, attendu 400", rec.Code)
+	}
+	if rec := get(h, "/api/namespaces/production/services/api-gateway/events"); rec.Code != 200 {
+		t.Errorf("événements d'un Service = %d", rec.Code)
+	}
 }

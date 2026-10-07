@@ -34,7 +34,7 @@ func (f *fakeBackend) Owners(context.Context, access.User, string, string) ([]in
 func (f *fakeBackend) YAML(context.Context, access.User, inspect.Ref) (inspect.Doc, error) {
 	return inspect.Doc{}, nil
 }
-func (f *fakeBackend) Events(context.Context, access.User, string, string) ([]model.Event, error) {
+func (f *fakeBackend) Events(context.Context, access.User, string, string, string) ([]model.Event, error) {
 	return nil, nil
 }
 func (f *fakeBackend) Logs(_ context.Context, _ access.User, _, _ string, o inspect.LogOptions) (io.ReadCloser, error) {
