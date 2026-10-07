@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { World } from './world'
 import { BLOCK_MIN, DEFAULT_VIEW, type PodView } from './podView'
-import { node, pod, route, service, volume } from '../store/fixtures'
+import { gateway, node, pod, pv, route, service, volume } from '../store/fixtures'
 
 const state = (version: number, nodes = [node()], pods = [pod()]) => ({
   version,
@@ -176,5 +176,33 @@ describe('réseau et stockage', () => {
     expect(w.positionOf('service', 'production/api')).toEqual(expect.objectContaining({ x: expect.any(Number) }))
     expect(w.positionOf('route', 'Ingress/production/storefront')).toEqual(w.positionOf('gate', 'nginx'))
     expect(w.positionOf('volume', 'absent')).toBeNull()
+  })
+
+  it('ajoute les portes Gateway et les citernes vides', () => {
+    const w = new World()
+    w.update({
+      ...st(1),
+      gateways: new Map([['infra/public', gateway()], ['kube-system/sys', gateway({ namespace: 'kube-system', name: 'sys' })]]),
+      persistentVolumes: new Map([['pv-1', pv()]]),
+    })
+    expect([...w.net!.gates.keys()]).toEqual(['infra/public', 'nginx']) // kube-system masqué
+    expect(w.gates.find((g) => g.name === 'infra/public')!.gateway?.class).toBe('eg')
+    expect(w.net!.orphans.map((o) => o.key)).toEqual(['pv-1'])
+    expect(w.positionOf('gateway', 'infra/public')).toEqual(w.positionOf('gate', 'infra/public'))
+    expect(w.positionOf('pv', 'pv-1')).toEqual(expect.objectContaining({ x: expect.any(Number) }))
+    expect(w.positionOf('pv', 'absent')).toBeNull()
+    const f = w.focusFor({ type: 'gateway', key: 'infra/public', name: 'public' }, null, null)
+    expect(f.dim).toBe(true)
+    expect(f.path!.has('gate:infra/public')).toBe(true)
+    expect(w.focusFor({ type: 'pv', key: 'pv-1', name: 'pv-1' }, null, null).dim).toBe(true)
+  })
+
+  it('redispose quand un PV orphelin apparaît', () => {
+    const w = new World()
+    w.update(st(1))
+    const before = w.net
+    w.update({ ...st(2), persistentVolumes: new Map([['pv-1', pv()]]) })
+    expect(w.net).not.toBe(before)
+    expect(w.net!.orphans).toHaveLength(1)
   })
 })

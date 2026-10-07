@@ -1,4 +1,7 @@
-import { routeKey, serviceKey, volumeKey, type Node, type Pod, type Route, type Service, type Volume } from '../api/types'
+import {
+  gatewayKey, pvKey, routeKey, serviceKey, volumeKey,
+  type Gateway, type Node, type PersistentVolume, type Pod, type Route, type Service, type Volume,
+} from '../api/types'
 import type { ClusterState, Selection, SelectionType } from '../store/cluster'
 import { gatesOf, type Gate } from '../store/net'
 import { buildLinks, pathOf, type Link } from './links'
@@ -40,7 +43,7 @@ const severity = (p: Pod) => ({ err: 3, warn: 2, mute: 1, done: 1, ok: 0 })[post
 const ownerKey = (p: Pod) => (p.owner.kind ? `${p.owner.kind}/${p.owner.name}` : `Pod/${p.name}`)
 
 type WorldInput = Pick<ClusterState, 'version' | 'nodes' | 'pods' | 'namespaces'>
-  & Partial<Pick<ClusterState, 'services' | 'routes' | 'volumes'>>
+  & Partial<Pick<ClusterState, 'services' | 'routes' | 'volumes' | 'gateways' | 'persistentVolumes'>>
   & { podView?: PodView; nsFilter?: string | null }
 
 export interface Focus {
@@ -53,7 +56,7 @@ export interface Focus {
 }
 
 const NO_FOCUS: Focus = { path: null, hover: null, dim: false }
-const NET_SELECTIONS: ReadonlySet<SelectionType> = new Set(['service', 'route', 'volume', 'gate'])
+const NET_SELECTIONS: ReadonlySet<SelectionType> = new Set(['service', 'route', 'volume', 'gate', 'gateway', 'pv'])
 
 /** Occupant d'une place : un pod, ou une pile (représentant et membres). */
 interface Occupant {
@@ -82,6 +85,8 @@ export class World {
   services: Service[] = []
   routes: Route[] = []
   volumes: Volume[] = []
+  /** PV sans PVC (cluster-scoped : jamais filtrés par namespace). */
+  persistentVolumes: PersistentVolume[] = []
   gates: Gate[] = []
   net: NetLayout | null = null
   links: Link[] = []
@@ -133,7 +138,10 @@ export class World {
     this.services = [...(st.services?.values() ?? [])].filter((s) => shown(s.namespace))
     this.routes = [...(st.routes?.values() ?? [])].filter((r) => shown(r.namespace))
     this.volumes = [...(st.volumes?.values() ?? [])].filter((v) => shown(v.namespace))
-    this.gates = gatesOf(this.routes)
+    this.persistentVolumes = [...(st.persistentVolumes?.values() ?? [])]
+    const gateways = new Map<string, Gateway>()
+    for (const g of st.gateways?.values() ?? []) if (shown(g.namespace)) gateways.set(gatewayKey(g), g)
+    this.gates = gatesOf(this.routes, gateways)
     const city = this.city
     if (!city) {
       this.net = null
@@ -144,13 +152,15 @@ export class World {
       this.services.map(serviceKey).sort().join(','),
       this.gates.map((g) => g.name).join(','),
       this.volumes.map((v) => `${volumeKey(v)}@${v.storageClass}@${v.requested}`).sort().join(','),
+      this.persistentVolumes.map((p) => `${pvKey(p)}@${p.storageClass}@${p.capacity}`).sort().join(','),
     ].join('|')
     if (key !== this.netKey) {
       this.netKey = key
       this.net = layoutNetwork(city,
         this.services.map((s) => ({ key: serviceKey(s), namespace: s.namespace, name: s.name })),
         this.gates.map((g) => g.name),
-        this.volumes.map((v) => ({ key: volumeKey(v), namespace: v.namespace, name: v.name, storageClass: v.storageClass, requested: v.requested })))
+        this.volumes.map((v) => ({ key: volumeKey(v), namespace: v.namespace, name: v.name, storageClass: v.storageClass, requested: v.requested })),
+        this.persistentVolumes.map((p) => ({ key: pvKey(p), name: p.name, storageClass: p.storageClass, capacity: p.capacity })))
       // La ville s'agrandit des entrepôts (cadrage de la caméra, sol, arbres).
       this.layout = { ...city, bounds: this.net.bounds }
     }
@@ -194,10 +204,10 @@ export class World {
         const r = this.routes.find((x) => routeKey(x) === key)
         return r ? at(net?.gates.get(r.gate)) : null
       }
+      case 'gateway': return at(net?.gates.get(key))
+      case 'pv': return at(net?.orphans.find((o) => o.key === key))
       case 'node': return at(this.layout?.plots.get(key))
       case 'pod': return at(podPositions.get(key) ?? this.targets.get(key))
-      case 'gateway':
-      case 'pv': return null // positions ajoutées avec la scène (tâches suivantes)
     }
   }
 
