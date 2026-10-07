@@ -216,3 +216,21 @@ func TestConvertGRPCRoute(t *testing.T) {
 		t.Errorf("route = %+v", r)
 	}
 }
+
+func TestConvertHTTPRouteSameGatewayTwice(t *testing.T) {
+	gw := []any{map[string]any{"name": "public", "namespace": "infra"}}
+	spec := map[string]any{"parentRefs": gw,
+		"rules": []any{map[string]any{"backendRefs": []any{map[string]any{"name": "api", "port": int64(0)}}}}}
+	acc := parentStatus("infra", "public", condOf("Accepted", "True", "Accepted"))
+	ref := parentStatus("infra", "public", condOf("Accepted", "False", "NotAllowedByListeners"))
+	for _, order := range [][]any{{acc, ref}, {ref, acc}} {
+		r := ConvertGatewayRoute(unstr(gwAPI, "HTTPRoute", "prod", "shop", spec, map[string]any{"parents": order}), model.SourceHTTPRoute, nil)
+		if r.Rules[0].Backend.State != model.BackendOK || len(r.Parents) != 2 || r.Rules[0].Backend.Port != "" {
+			t.Errorf("deux entrées, une acceptée : %+v", r)
+		}
+	}
+	r := ConvertGatewayRoute(unstr(gwAPI, "HTTPRoute", "prod", "shop", spec, map[string]any{"parents": []any{ref, ref}}), model.SourceHTTPRoute, nil)
+	if r.Rules[0].Backend.State != model.BackendRefused {
+		t.Errorf("toutes refusées = %+v", r)
+	}
+}

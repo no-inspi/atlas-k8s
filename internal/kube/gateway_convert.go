@@ -183,8 +183,8 @@ func gatewayBackend(routeNS string, m map[string]any, exists ServiceExists) mode
 	if g, _ := m["group"].(string); g != "" && g != "core" {
 		b.Kind += "." + g
 	}
-	if p, ok := m["port"]; ok && p != nil {
-		b.Port = fmt.Sprint(toInt(p))
+	if p := toInt(m["port"]); p > 0 {
+		b.Port = fmt.Sprint(p)
 	}
 	if b.Kind == "Service" {
 		b.State = backendState(exists, b.Namespace, b.Service)
@@ -207,7 +207,10 @@ func ConvertGatewayRoute(u *unstructured.Unstructured, source string, exists Ser
 	}
 	r.Gate = r.Gates[0]
 
-	byGate := map[string]model.RouteParent{}
+	// Une porte peut avoir plusieurs entrées (sectionName, contrôleurs) : elle
+	// n'est refusée que si toutes refusent.
+	notRefused := map[string]bool{}
+	seen := map[string]bool{}
 	unresolved := false
 	ps, _, _ := unstructured.NestedSlice(u.Object, "status", "parents")
 	for _, p := range ps {
@@ -231,12 +234,15 @@ func ConvertGatewayRoute(u *unstructured.Unstructured, source string, exists Ser
 			rp.Reason = rr
 		}
 		r.Parents = append(r.Parents, rp)
-		byGate[key] = rp
+		seen[key] = true
+		if rp.Accepted != model.CondFalse {
+			notRefused[key] = true
+		}
 		unresolved = unresolved || rp.ResolvedRefs == model.CondFalse
 	}
 	refused := r.Gate != model.NoGateway
 	for _, g := range r.Gates {
-		if p, ok := byGate[g]; !ok || p.Accepted != model.CondFalse {
+		if !seen[g] || notRefused[g] {
 			refused = false
 		}
 	}
