@@ -1,6 +1,8 @@
 package kube
 
 import (
+	"reflect"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -265,5 +267,51 @@ func TestRoutesCarryTheirGate(t *testing.T) {
 	u := ingressRoute("traefik.io", "mon", "grafana", []any{})
 	if r := ConvertIngressRoute(u, nil); len(r.Gates) != 1 || r.Gates[0] != "traefik" {
 		t.Errorf("IngressRoute : gates %v", r.Gates)
+	}
+}
+
+func pvObj(name string, phase corev1.PersistentVolumePhase, claim string) *corev1.PersistentVolume {
+	p := &corev1.PersistentVolume{ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: corev1.PersistentVolumeSpec{StorageClassName: "standard-rwo", PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimRetain,
+			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			Capacity:    corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("10Gi")}},
+		Status: corev1.PersistentVolumeStatus{Phase: phase}}
+	if ns, n, ok := strings.Cut(claim, "/"); ok {
+		p.Spec.ClaimRef = &corev1.ObjectReference{Kind: "PersistentVolumeClaim", Namespace: ns, Name: n}
+	}
+	return p
+}
+
+func TestConvertPV(t *testing.T) {
+	m := ConvertPV(pvObj("pv-1", corev1.VolumeReleased, "prod/old"))
+	want := model.PersistentVolume{Name: "pv-1", StorageClass: "standard-rwo", Capacity: 10 << 30, AccessModes: []string{"ReadWriteOnce"},
+		ReclaimPolicy: "Retain", Phase: "Released", ClaimRef: "prod/old"}
+	if !reflect.DeepEqual(m, want) {
+		t.Errorf("pv = %+v", m)
+	}
+	if empty := ConvertPV(&corev1.PersistentVolume{ObjectMeta: metav1.ObjectMeta{Name: "x"}}); empty.AccessModes == nil || empty.Phase != "Pending" {
+		t.Errorf("PV neuf = %+v", empty)
+	}
+}
+
+func TestPublishPV(t *testing.T) {
+	exists := func(ns, name string) bool { return ns == "prod" && name == "data" }
+	cases := []struct {
+		pv     *corev1.PersistentVolume
+		exists ClaimExists
+		want   bool
+	}{
+		{pvObj("a", corev1.VolumeAvailable, ""), exists, true},
+		{pvObj("r", corev1.VolumeReleased, "prod/old"), exists, true},
+		{pvObj("f", corev1.VolumeFailed, "prod/data"), exists, true},
+		{pvObj("b", corev1.VolumeBound, "prod/data"), exists, false},
+		{pvObj("d", corev1.VolumeBound, "prod/gone"), exists, true},
+		{pvObj("d", corev1.VolumeBound, "prod/gone"), nil, false}, // PVC non listables : on ne sait pas
+		{pvObj("p", corev1.VolumePending, ""), exists, false},
+	}
+	for _, c := range cases {
+		if got := PublishPV(c.pv, c.exists); got != c.want {
+			t.Errorf("%s (%s, exists %v) : %v", c.pv.Name, c.pv.Status.Phase, c.exists != nil, got)
+		}
 	}
 }

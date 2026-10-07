@@ -559,3 +559,39 @@ func claimVolumes(vs []corev1.Volume) []corev1.Volume {
 	}
 	return out
 }
+
+// ConvertPV réduit un PersistentVolume ; ClaimRef : « ns/name » du PVC qui l'a réclamé.
+func ConvertPV(pv *corev1.PersistentVolume) model.PersistentVolume {
+	m := model.PersistentVolume{Name: pv.Name, StorageClass: pv.Spec.StorageClassName, Phase: string(pv.Status.Phase),
+		ReclaimPolicy: string(pv.Spec.PersistentVolumeReclaimPolicy), AccessModes: []string{}}
+	if m.Phase == "" {
+		m.Phase = string(corev1.VolumePending)
+	}
+	if q, ok := pv.Spec.Capacity[corev1.ResourceStorage]; ok {
+		m.Capacity = q.Value()
+	}
+	for _, a := range pv.Spec.AccessModes {
+		m.AccessModes = append(m.AccessModes, string(a))
+	}
+	if c := pv.Spec.ClaimRef; c != nil && c.Name != "" {
+		m.ClaimRef = c.Namespace + "/" + c.Name
+	}
+	return m
+}
+
+// ClaimExists : « ce PVC existe-t-il ? ». nil quand les PVC ne sont pas listables.
+type ClaimExists func(namespace, name string) bool
+
+// PublishPV : un PV n'est publié que s'il n'est lié à aucun PVC existant
+// (Available, Released, Failed, ou Bound à un PVC disparu). Sans lecture des
+// PVC, un PV Bound n'est jamais publié.
+func PublishPV(pv *corev1.PersistentVolume, exists ClaimExists) bool {
+	switch pv.Status.Phase {
+	case corev1.VolumeAvailable, corev1.VolumeReleased, corev1.VolumeFailed:
+		return true
+	case corev1.VolumeBound:
+		c := pv.Spec.ClaimRef
+		return exists != nil && c != nil && !exists(c.Namespace, c.Name)
+	}
+	return false
+}
