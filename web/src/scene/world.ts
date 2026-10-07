@@ -196,6 +196,8 @@ export class World {
       }
       case 'node': return at(this.layout?.plots.get(key))
       case 'pod': return at(podPositions.get(key) ?? this.targets.get(key))
+      case 'gateway':
+      case 'pv': return null // positions ajoutées avec la scène (tâches suivantes)
     }
   }
 

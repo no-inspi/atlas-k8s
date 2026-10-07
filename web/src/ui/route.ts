@@ -90,6 +90,8 @@ function routeFor(sel: Selection, st: ClusterState): Route {
       const [source, namespace, name] = sel.key.split('/')
       return { type: 'route', source: source as 'Ingress' | 'IngressRoute', namespace, name }
     }
+    case 'gateway':
+    case 'pv': return null // liens profonds ajoutés avec la tâche des routes
   }
 }
 
