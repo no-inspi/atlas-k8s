@@ -81,7 +81,10 @@ describe('layoutCity', () => {
     it('commence à l’ouest de la ville, où se tiennent les portes', () => {
       const c = layoutCity(nodes, geo)
       const left = Math.min(...c.districts.map((d) => d.x - d.width / 2))
+      const right = Math.max(...c.districts.map((d) => d.x + d.width / 2))
       for (const a of c.avenues) expect(a.x - a.width / 2).toBeCloseTo(left - GATE_ZONE)
+      // À l'est, l'avenue déborde de deux unités : la rue est des conduites y passe.
+      for (const a of c.avenues) expect(a.x + a.width / 2).toBeCloseTo(right + 2)
       expect(c.bounds.x - c.bounds.width / 2).toBeLessThanOrEqual(left - GATE_ZONE + 1e-6)
     })
 

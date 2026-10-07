@@ -52,11 +52,17 @@ function CameraRig() {
     const fit = size.height / viewHeight
     c.minZoom = fit * ZOOM_MIN
     c.maxZoom = fit * ZOOM_MAX
+    // Caméra orthographique : sa distance ne change pas l'image, mais elle doit
+    // dépasser la demi-diagonale de la ville (entrepôts compris), sans quoi le
+    // plan proche rogne le sol au premier plan.
+    const dist = Math.max(80, Math.hypot(bounds.width, bounds.depth))
+    camera.far = dist * 3
     if (first) {
       c.target.set(bounds.x, 0, bounds.z)
-      camera.position.copy(CAMERA_DIR).multiplyScalar(80).add(c.target)
+      camera.position.copy(CAMERA_DIR).multiplyScalar(dist).add(c.target)
       camera.zoom = fit
     } else {
+      camera.position.sub(c.target).setLength(dist).add(c.target)
       camera.zoom = THREE.MathUtils.clamp(camera.zoom, c.minZoom, c.maxZoom)
     }
     camera.updateProjectionMatrix()

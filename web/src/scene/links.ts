@@ -1,6 +1,6 @@
 import { routeKey, serviceKey, volumeKey, type Pod, type Route, type Service, type Volume } from '../api/types'
 import { ALLEY, type CityLayout } from './layout'
-import type { NetLayout } from './netLayout'
+import { TANK_PITCH, type NetLayout } from './netLayout'
 
 // Liens au sol, tracés en angles droits par les avenues, la rue ouest (portes),
 // la rue est (entrepôts) et l'allée à l'est de chaque parcelle : jamais à
@@ -57,6 +57,7 @@ export function buildLinks(i: LinkInput): Link[] {
 
   // Lignes principales : une par couple (porte, Service), toutes routes confondues.
   const mains = new Map<string, Link>()
+  const brokenSeen = new Set<string>() // une route cassée par (porte, route, namespace manquant)
   for (const r of i.routes) {
     const gate = net.gates.get(r.gate)
     if (!gate) continue
@@ -66,6 +67,9 @@ export function buildLinks(i: LinkInput): Link[] {
       if (b.kind !== 'Service') continue
       const sk = `${b.namespace}/${b.service}`
       if (b.state === 'missing') {
+        const id = `${r.gate}|${rk}|${b.namespace}`
+        if (brokenSeen.has(id)) continue
+        brokenSeen.add(id)
         const seg = net.segments.find((s) => s.ns === b.namespace)
         const lane = net.lanes[seg?.avenue ?? 0]
         const x = seg ? seg.x0 : net.westX + 1.2
@@ -108,12 +112,13 @@ export function buildLinks(i: LinkInput): Link[] {
   for (const v of i.volumes) {
     const tank = net.tanks.get(volumeKey(v))
     if (!tank) continue
+    const row = tank.z - TANK_PITCH / 2 // entre deux rangées de citernes : jamais à travers une autre
     for (const uid of v.pods) {
       const a = anchor(uid)
       if (!a) continue
       const la = net.lanes[a.avenue]
       out.push({ family: 'data', live: a.p.displayStatus === 'Running', keys: [`volume:${volumeKey(v)}`, `pod:${uid}`],
-        points: dedupe([[tank.x, tank.z], [net.eastX, tank.z], [net.eastX, la.data], ...toPod(city, la.data, a.t, a.plot, 0.2)]) })
+        points: dedupe([[tank.x, tank.z], [tank.x, row], [net.eastX, row], [net.eastX, la.data], ...toPod(city, la.data, a.t, a.plot, 0.2)]) })
     }
   }
   return out
@@ -123,16 +128,17 @@ const typeOf = (k: string) => k.slice(0, k.indexOf(':'))
 
 /**
  * Chemin d'un objet (« type:clé ») : ce qui s'allume quand on le sélectionne.
- * Porte ou route → Services → pods → volumes ; Service → portes, pods →
+ * Porte ou route → Services → pods → volumes (une route n'entraîne pas les
+ * autres routes de ses lignes) ; Service → portes, pods →
  * volumes ; pod → Services → portes, et volumes ; volume → pods → Services.
  */
 export function pathOf(sel: string, links: Link[]): Set<string> {
   const out = new Set([sel])
-  const via = (from: Set<string>, fams: Family[]) => {
+  const via = (from: Set<string>, fams: Family[], keep = (_k: string) => true) => {
     const added = new Set<string>()
     for (const l of links)
       if (fams.includes(l.family) && l.keys.some((k) => from.has(k)))
-        for (const k of l.keys) if (!out.has(k)) { out.add(k); added.add(k) }
+        for (const k of l.keys) if (keep(k) && !out.has(k)) { out.add(k); added.add(k) }
     return added
   }
   const only = (s: Set<string>, type: string) => new Set([...s].filter((k) => typeOf(k) === type))
@@ -140,7 +146,10 @@ export function pathOf(sel: string, links: Link[]): Set<string> {
   switch (typeOf(sel)) {
     case 'gate':
     case 'route': {
-      const svcs = only(via(self, ['main', 'broken']), 'service')
+      // Une ligne principale est partagée par les routes vers un même Service :
+      // d'une route, on ne prend que ses objets, pas les routes sœurs.
+      const first = via(self, ['main', 'broken'], (k) => typeOf(sel) !== 'route' || typeOf(k) !== 'route')
+      const svcs = only(first, 'service')
       via(only(via(svcs, ['fibre']), 'pod'), ['data'])
       break
     }

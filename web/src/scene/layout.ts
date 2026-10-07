@@ -61,6 +61,8 @@ const MIN_PLOT = 4.1
 export const AVENUE = 3.6
 /** Entrée ouest de la première avenue, où se tiennent les portes. */
 export const GATE_ZONE = 4.5
+/** Débord des avenues à l'est de la ville : la rue est (conduites des entrepôts) y passe. */
+const AVENUE_EAST = 2
 
 /** Places par parcelle : 1,5 × le max observé, multiple de 4, entre 12 et 48. */
 export function slotCapacity(maxPodsPerNode: number): number {
@@ -162,13 +164,13 @@ export function layoutCity(nodes: Node[], geo: PlotGeometry): CityLayout {
   }
 
   const avenues: Avenue[] = avenueTops.map((top) => ({
-    x: (1 - GATE_ZONE) / 2, z: oz + top + AVENUE / 2, width: width + GATE_ZONE + 1, depth: AVENUE,
+    x: (AVENUE_EAST - GATE_ZONE) / 2, z: oz + top + AVENUE / 2, width: width + GATE_ZONE + AVENUE_EAST, depth: AVENUE,
   }))
   const queue: Rect = { x: 0, z: depth / 2 + 3.4, width: Math.max(14, width * 0.8), depth: 2.6 }
   return {
     districts, plots, queue, avenues, geometry: geo,
-    // Comme les avenues : l'entrée des portes à l'ouest, une unité de plus à l'est.
-    bounds: { x: (1 - GATE_ZONE) / 2, z: 1.7, width: width + GATE_ZONE + 1, depth: depth + 3.4 * 2 },
+    // Comme les avenues : l'entrée des portes à l'ouest, la rue est à l'est.
+    bounds: { x: (AVENUE_EAST - GATE_ZONE) / 2, z: 1.7, width: width + GATE_ZONE + AVENUE_EAST, depth: depth + 3.4 * 2 },
   }
 }
 

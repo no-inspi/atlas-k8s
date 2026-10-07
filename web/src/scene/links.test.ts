@@ -3,7 +3,7 @@ import { routeKey, serviceKey, volumeKey, type Pod } from '../api/types'
 import { node, pod, route, service, volume } from '../store/fixtures'
 import { layoutCity, plotGeometry } from './layout'
 import { buildLinks, isLit, pathOf, type Link } from './links'
-import { layoutNetwork } from './netLayout'
+import { layoutNetwork, TANK_PITCH } from './netLayout'
 
 const nodes = [node({ name: 'n1', pool: 'p' }), node({ name: 'n2', pool: 'p' })]
 const city = layoutCity(nodes, plotGeometry(12))
@@ -56,7 +56,23 @@ describe('buildLinks', () => {
     const [d] = fam('data')
     expect(d.keys).toEqual(['volume:production/data-db-0', 'pod:db'])
     expect(d.live).toBe(true)
-    expect(d.points[1][0]).toBe(net.eastX)
+    const t = net.tanks.get('production/data-db-0')!
+    // D'abord entre deux rangées de citernes, puis vers la rue est : jamais à travers une citerne.
+    expect(d.points[1]).toEqual([t.x, t.z - TANK_PITCH / 2])
+    expect(d.points[2]).toEqual([net.eastX, t.z - TANK_PITCH / 2])
+  })
+
+  it('la rue est passe sur l’avenue', () => {
+    for (const a of city.avenues) expect(a.x + a.width / 2).toBeGreaterThan(net.eastX)
+  })
+
+  it('une seule route cassée par porte, route et namespace manquant', () => {
+    const twice = route({ name: 'admin2', source: 'IngressRoute', group: 'traefik.io', gate: 'traefik', rules: [
+      { match: 'Host(`a`)', backend: { namespace: 'production', service: 'ghost', kind: 'Service', state: 'missing' } },
+      { match: 'Host(`b`)', backend: { namespace: 'production', service: 'phantom', kind: 'Service', state: 'missing' } },
+    ] })
+    const ls = buildLinks({ city, net, services: [], routes: [twice], volumes: [], pods: new Map(), targets })
+    expect(ls.filter((l) => l.family === 'broken')).toHaveLength(1)
   })
 
   it('ne trace que des segments horizontaux ou verticaux', () => {
@@ -82,6 +98,12 @@ describe('pathOf', () => {
   it('d’un pod : ses Services, leurs portes et ses volumes', () => {
     expect([...pathOf('pod:db', links)].sort()).toEqual(['pod:db', 'service:production/db', 'volume:production/data-db-0'])
     expect([...pathOf('pod:a', links)]).toEqual(expect.arrayContaining(['service:production/api', 'gate:nginx']))
+  })
+
+  it('d’une route : ses Services, pas les autres routes de la même ligne', () => {
+    const p = pathOf(`route:${routeKey(shop)}`, links)
+    expect([...p]).toEqual(expect.arrayContaining(['gate:nginx', 'service:production/api', 'pod:a']))
+    expect(p.has(`route:${routeKey(shop2)}`)).toBe(false)
   })
 
   it('un lien est allumé quand tous ses objets (hors routes) sont sur le chemin', () => {
