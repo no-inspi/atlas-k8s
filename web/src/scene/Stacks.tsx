@@ -7,37 +7,39 @@ import { world } from './world'
 // Compteurs des piles (« ×12 ») au-dessus du bloc qui représente les pods d'un
 // workload sur un node trop chargé.
 
-const cache = new Map<string, THREE.CanvasTexture>()
+const cache = new Map<string, { tex: THREE.CanvasTexture; aspect: number }>()
 
-function counterTexture(text: string, theme: Theme): THREE.CanvasTexture {
+/** Pastille de texte (compteur « ×12 », nom de porte) ; aspect = largeur / hauteur. */
+export function pillTexture(text: string, theme: Theme): { tex: THREE.CanvasTexture; aspect: number } {
   const key = `${text}|${theme.ink}|${theme.bg}`
-  let tex = cache.get(key)
-  if (tex) return tex
+  let hit = cache.get(key)
+  if (hit) return hit
   const c = document.createElement('canvas')
-  c.width = 128
   c.height = 64
+  c.width = Math.max(128, 40 + text.length * 19)
   const g = c.getContext('2d')!
   g.fillStyle = theme.ink
   g.beginPath()
-  g.roundRect(4, 8, 120, 48, 24)
+  g.roundRect(4, 8, c.width - 8, 48, 24)
   g.fill()
   g.fillStyle = theme.bg
   g.font = `700 32px ${theme.font}`
   g.textAlign = 'center'
   g.textBaseline = 'middle'
-  g.fillText(text, 64, 33)
-  tex = new THREE.CanvasTexture(c)
+  g.fillText(text, c.width / 2, 33)
+  const tex = new THREE.CanvasTexture(c)
   tex.colorSpace = THREE.SRGBColorSpace
+  hit = { tex, aspect: c.width / c.height }
   if (cache.size > 200) cache.clear()
-  cache.set(key, tex)
-  return tex
+  cache.set(key, hit)
+  return hit
 }
 
 export function Stacks({ theme }: { theme: Theme }) {
   useCluster((s) => s.version)
   world.update(useCluster.getState())
   const stacks = world.stacks
-  const items = useMemo(() => stacks.map((st) => ({ ...st, tex: counterTexture(`×${st.count}`, theme) })), [stacks, theme])
+  const items = useMemo(() => stacks.map((st) => ({ ...st, tex: pillTexture(`×${st.count}`, theme).tex })), [stacks, theme])
   return (
     <group>
       {items.map((st) => (
