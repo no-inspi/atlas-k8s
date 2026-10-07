@@ -192,3 +192,66 @@ func TestNestedTraefikServiceChangeReachesRoute(t *testing.T) {
 		return last.Service == "api" && last.Via == "prod/loop-a" && last.State == model.BackendOK
 	})
 }
+
+// Type démarré tard : la CRD TraefikService est installée après les routes et
+// les TraefikService ; la route passe de missing à ok.
+func TestTraefikServiceKindStartedLate(t *testing.T) {
+	client := fake.NewClientset(netFixtures()...)
+	tsGVR := gvrTraefikService("traefik.io")
+	dyn := servedDyn(client, kindsOf(irGVR),
+		traefikService("prod", "outer", map[string]any{"weighted": map[string]any{"services": []any{
+			map[string]any{"name": "split", "kind": "TraefikService"}}}}),
+		traefikService("prod", "split", map[string]any{"weighted": map[string]any{"services": []any{
+			map[string]any{"name": "api", "port": int64(80)}}}}),
+		checkoutRoute(toTS("outer")))
+	_, sk := startSourceWith(t, client, Options{Dynamic: dyn})
+	eventually(t, "route publiée", func() bool { _, ok := sk.get(stream.KindRoute, "IngressRoute/prod/checkout"); return ok })
+	if r := routeOf(t, sk, "IngressRoute/prod/checkout"); len(r.Rules) != 1 || r.Rules[0].Backend.State != model.BackendMissing {
+		t.Fatalf("avant la CRD : %+v", r.Rules)
+	}
+	if _, err := dyn.Resource(gvrCRD).Create(context.Background(), crdObject(kindsOf(tsGVR)[0], true), metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "route résolue après la CRD", func() bool {
+		r := routeOf(t, sk, "IngressRoute/prod/checkout")
+		return len(r.Rules) == 1 && r.Rules[0].Backend.Service == "api" && r.Rules[0].Backend.Via == "prod/outer" &&
+			r.Rules[0].Backend.State == model.BackendOK
+	})
+}
+
+// GRPCRoute, et routes Traefik de l'ancien groupe traefik.containo.us
+// (IngressRouteUDP, IngressRoute vers un TraefikService du même groupe).
+func TestGRPCRouteAndContainoTraefikInSource(t *testing.T) {
+	const old = "traefik.containo.us"
+	client := fake.NewClientset(netFixtures()...)
+	dyn := servedDyn(client, kindsOf(gvrGRPCRoute, gvrTraefikService(old), gvrIngressRoute(old), gvrIngressRouteUDP(old)),
+		unstr(gwAPI, "GRPCRoute", "prod", "orders", map[string]any{
+			"parentRefs": []any{map[string]any{"name": "public", "namespace": "infra"}},
+			"rules":      []any{map[string]any{"backendRefs": []any{map[string]any{"name": "api", "port": int64(9000)}}}}}, nil),
+		unstr(old+"/v1alpha1", "TraefikService", "prod", "split", map[string]any{"weighted": map[string]any{"services": []any{
+			map[string]any{"name": "api", "port": int64(80), "weight": int64(1)},
+			map[string]any{"name": "ghost", "port": int64(80), "weight": int64(1)},
+		}}}, nil),
+		ingressRoute(old, "prod", "legacy", []any{map[string]any{"match": "Host(`l.example.com`)", "services": []any{toTS("split")}}}),
+		unstr(old+"/v1alpha1", "IngressRouteUDP", "prod", "dns", map[string]any{"routes": []any{
+			map[string]any{"services": []any{map[string]any{"name": "api", "port": int64(53)}}}}}, nil),
+	)
+	_, sk := startSourceWith(t, client, Options{Dynamic: dyn})
+	eventually(t, "routes publiées", func() bool {
+		_, g := sk.get(stream.KindRoute, "GRPCRoute/prod/orders")
+		_, l := sk.get(stream.KindRoute, "IngressRoute/prod/legacy")
+		_, u := sk.get(stream.KindRoute, "IngressRouteUDP/prod/dns")
+		return g && l && u
+	})
+	if g := routeOf(t, sk, "GRPCRoute/prod/orders"); g.Gate != "infra/public" || g.Rules[0].Backend.State != model.BackendOK || g.Rules[0].Backend.Port != "9000" {
+		t.Errorf("GRPCRoute = %+v", g)
+	}
+	if l := routeOf(t, sk, "IngressRoute/prod/legacy"); len(l.Rules) != 2 || l.Rules[0].Backend.Via != "prod/split" ||
+		w(l.Rules[0].Backend) != 500 || l.Rules[1].Backend.State != model.BackendMissing {
+		t.Errorf("IngressRoute containo.us = %+v", l.Rules)
+	}
+	if u := routeOf(t, sk, "IngressRouteUDP/prod/dns"); u.Gate != "traefik" || u.Group != old || u.Rules[0].Backend.Port != "53" ||
+		u.Rules[0].Backend.State != model.BackendOK {
+		t.Errorf("IngressRouteUDP = %+v", u)
+	}
+}

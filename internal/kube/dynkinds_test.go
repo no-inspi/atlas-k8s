@@ -51,6 +51,9 @@ func fakeDynamic(objs ...runtime.Object) *dynamicfake.FakeDynamicClient {
 }
 
 // registryGVR : type du registre d'un objet (groupe, version, kind en minuscules suivi de « s »).
+// Le pluriel « kind + s » est une hypothèse : à revoir si le registre accueille
+// un type au pluriel irrégulier (kind en -y, -s…), dont les objets passeraient
+// sinon par la devinette du client factice.
 func registryGVR(u *unstructured.Unstructured) (schema.GroupVersionResource, bool) {
 	gvk := u.GroupVersionKind()
 	for _, k := range dynKinds {
