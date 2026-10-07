@@ -20,11 +20,12 @@ type fakeSink struct {
 	log        []string
 	metrics    *model.Metrics
 	statuses   map[string][]string // uid -> statuts successifs
+	net        map[string]any      // « kind|clé » : Services, routes, volumes
 }
 
 func newSink() *fakeSink {
 	return &fakeSink{nodes: map[string]model.Node{}, pods: map[string]model.Pod{},
-		workloads: map[string]model.Workload{}, statuses: map[string][]string{}}
+		workloads: map[string]model.Workload{}, statuses: map[string][]string{}, net: map[string]any{}}
 }
 
 func (f *fakeSink) Upsert(kind stream.Kind, key string, obj any) {
@@ -42,10 +43,16 @@ func (f *fakeSink) Upsert(kind stream.Kind, key string, obj any) {
 		f.workloads[key] = o
 	case model.Namespace:
 		f.namespaces = append(f.namespaces, o.Name)
+	case model.Service, model.Route, model.Volume:
+		f.net[string(kind)+"|"+key] = o
 	}
 }
 
 func (f *fakeSink) Delete(kind stream.Kind, key string, obj any) {
+	if kind == stream.KindService || kind == stream.KindRoute || kind == stream.KindVolume {
+		delete(f.net, string(kind)+"|"+key)
+		return
+	}
 	if kind == stream.KindPod {
 		f.log = append(f.log, "delete "+obj.(model.Pod).Name)
 		delete(f.pods, key)
@@ -329,5 +336,60 @@ func TestScaledCluster(t *testing.T) {
 	}
 	if len(sink.namespaces) < 50 {
 		t.Errorf("namespaces = %d", len(sink.namespaces))
+	}
+}
+
+func TestDemoNetworkAndStorage(t *testing.T) {
+	s, sink := start(5)
+	api := sink.net["service|production/api-gateway"].(model.Service)
+	if api.Health != model.HealthOK || len(api.Endpoints) != 3 || api.Type != "LoadBalancer" || len(api.LoadBalancer) != 1 {
+		t.Errorf("api-gateway = %+v", api)
+	}
+	if h := sink.net["service|staging/checkout-preview"].(model.Service).Health; h != model.HealthDown {
+		t.Errorf("checkout-preview (image introuvable) = %s, attendu down", h)
+	}
+	if h := sink.net["service|production/stripe-api"].(model.Service).Health; h != model.HealthExternal {
+		t.Errorf("stripe-api = %s", h)
+	}
+	if !sink.net["service|production/postgres-payments"].(model.Service).Headless {
+		t.Error("postgres-payments doit être headless")
+	}
+	shop := sink.net["route|Ingress/production/storefront"].(model.Route)
+	if shop.Gate != "nginx" || shop.Rules[0].Backend.State != model.BackendOK {
+		t.Errorf("storefront = %+v", shop)
+	}
+	admin := sink.net["route|IngressRoute/production/admin"].(model.Route)
+	if admin.Gate != "traefik" || admin.Group != "traefik.io" || admin.Rules[0].Backend.State != model.BackendMissing {
+		t.Errorf("admin = %+v", admin)
+	}
+	pg := sink.net["volume|production/data-postgres-payments-0"].(model.Volume)
+	if pg.Phase != "Bound" || len(pg.Pods) != 1 || pg.StorageClass != "standard-rwo" {
+		t.Errorf("data-postgres-payments-0 = %+v", pg)
+	}
+	if v := sink.net["volume|staging/uploads-preview"].(model.Volume); v.Phase != "Pending" || len(v.Pods) != 0 {
+		t.Errorf("uploads-preview = %+v", v)
+	}
+
+	// Les endpoints suivent les pods.
+	_ = s.Scale(context.Background(), anyone, "production", "Deployment", "api-gateway", 1)
+	advance(s, t0, 5*time.Second)
+	if n := len(sink.net["service|production/api-gateway"].(model.Service).Endpoints); n != 1 {
+		t.Errorf("après scale à 1 : %d endpoints", n)
+	}
+}
+
+func TestScaledCatalogHasNetwork(t *testing.T) {
+	c := catalogFor(Scale{Nodes: 10, PodsPerNode: 30}) // 10 équipes
+	if len(c.services) != len(services)+40 || len(c.volumes) != len(volumes)+20 {
+		t.Errorf("services = %d, volumes = %d", len(c.services), len(c.volumes))
+	}
+	traefik := 0
+	for _, r := range c.routes {
+		if r.Source == "IngressRoute" {
+			traefik++
+		}
+	}
+	if traefik != 3+3 { // grafana, admin, argocd, puis les équipes 3, 6 et 9
+		t.Errorf("IngressRoute = %d", traefik)
 	}
 }

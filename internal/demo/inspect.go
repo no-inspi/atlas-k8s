@@ -231,9 +231,6 @@ func (s *Sim) Events(_ context.Context, _ access.User, kind, ns, name string) ([
 	return evs, nil
 }
 
-// netEvents : complété à la tâche 10 (PVC en attente).
-func (s *Sim) netEvents(kind, ns, name string) []model.Event { return []model.Event{} }
-
 func (s *Sim) Logs(ctx context.Context, _ access.User, ns, name string, o inspect.LogOptions) (io.ReadCloser, error) {
 	s.mu.Lock()
 	p := s.findPod(ns, name)
@@ -337,6 +334,8 @@ func (s *Sim) YAML(_ context.Context, _ access.User, ref inspect.Ref) (inspect.D
 				obj, argo = s.replicaSetObject(w), w.def.Argo
 			}
 		}
+	case "Service", "PersistentVolumeClaim", "Ingress", "IngressRoute":
+		obj = s.netObject(ref)
 	default:
 		for _, w := range s.workloads {
 			if w.def.Kind == ref.Kind && w.def.NS == ref.Namespace && w.def.Name == ref.Name {

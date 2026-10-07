@@ -167,3 +167,35 @@ func TestDemoPreviousLogs(t *testing.T) {
 }
 
 var _ inspect.Backend = (*Sim)(nil)
+
+func TestDemoNetworkInspector(t *testing.T) {
+	s, _ := start(5)
+	ctx := context.Background()
+	yamlOf := func(r inspect.Ref) string {
+		t.Helper()
+		doc, err := s.YAML(ctx, anyone, r)
+		if err != nil {
+			t.Fatalf("%+v : %v", r, err)
+		}
+		return doc.YAML
+	}
+	if y := yamlOf(inspect.Ref{Version: "v1", Kind: "Service", Namespace: "production", Name: "api-gateway"}); !strings.Contains(y, "kind: Service") || !strings.Contains(y, "type: LoadBalancer") {
+		t.Errorf("Service :\n%s", y)
+	}
+	if y := yamlOf(inspect.Ref{Group: "networking.k8s.io", Version: "v1", Kind: "Ingress", Namespace: "production", Name: "storefront"}); !strings.Contains(y, "ingressClassName: nginx") {
+		t.Errorf("Ingress :\n%s", y)
+	}
+	if y := yamlOf(inspect.Ref{Group: "traefik.io", Version: "v1alpha1", Kind: "IngressRoute", Namespace: "monitoring", Name: "grafana"}); !strings.Contains(y, "Host(`grafana.example.com`)") {
+		t.Errorf("IngressRoute :\n%s", y)
+	}
+	if y := yamlOf(inspect.Ref{Version: "v1", Kind: "PersistentVolumeClaim", Namespace: "staging", Name: "uploads-preview"}); !strings.Contains(y, "phase: Pending") {
+		t.Errorf("PVC :\n%s", y)
+	}
+	if _, err := s.YAML(ctx, anyone, inspect.Ref{Version: "v1", Kind: "Service", Namespace: "production", Name: "absent"}); err == nil {
+		t.Error("Service absent : erreur attendue")
+	}
+	evs, _ := s.Events(ctx, anyone, "PersistentVolumeClaim", "staging", "uploads-preview")
+	if len(evs) != 1 || evs[0].Reason != "WaitForFirstConsumer" {
+		t.Errorf("événements du PVC en attente = %+v", evs)
+	}
+}

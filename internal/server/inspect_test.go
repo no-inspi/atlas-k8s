@@ -75,4 +75,7 @@ func TestInspectorRoutes(t *testing.T) {
 	if rec := get(h, "/api/namespaces/production/services/api-gateway/events"); rec.Code != 200 {
 		t.Errorf("événements d'un Service = %d", rec.Code)
 	}
+	if rec := get(h, "/api/yaml/traefik.io/v1alpha1/IngressRoute/monitoring/grafana"); rec.Code != 200 || !strings.Contains(rec.Body.String(), "IngressRoute") {
+		t.Errorf("yaml d'une IngressRoute = %d", rec.Code)
+	}
 }
