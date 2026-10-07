@@ -6,6 +6,8 @@ CTX="${CTX:-kind-atlas}"
 NODES="${NODES:-100}"
 PODS="${PODS:-3000}"
 KWOK="${KWOK:-v0.8.0}"
+SERVICES_PER_DEPLOY="${SERVICES_PER_DEPLOY:-4}"
+PVCS="${PVCS:-150}"
 k() { kubectl --context "$CTX" "$@"; }
 
 k apply -f "https://github.com/kubernetes-sigs/kwok/releases/download/$KWOK/kwok.yaml"
@@ -70,9 +72,37 @@ spec:
           image: registry.k8s.io/pause:3.10
           resources: { requests: { cpu: 100m, memory: 64Mi } }
 YAML
+    s=1
+    while [ "$s" -le "$SERVICES_PER_DEPLOY" ]; do
+      cat <<YAML
+---
+apiVersion: v1
+kind: Service
+metadata: { name: load-$(printf %03d "$d")-$s, namespace: load-test }
+spec:
+  selector: { app: load-$(printf %03d "$d") }
+  ports: [{ port: 80 }]
+YAML
+      s=$((s + 1))
+    done
     d=$((d + 1))
   done
 } | k apply -f - >/dev/null
+# PVC sans consommateur (Pending) : des citernes dans les entrepôts.
+v=1
+{
+  while [ "$v" -le "$PVCS" ]; do
+    cat <<YAML
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: data-$(printf %03d "$v"), namespace: load-test }
+spec: { accessModes: [ReadWriteOnce], resources: { requests: { storage: 1Gi } } }
+YAML
+    v=$((v + 1))
+  done
+} | k apply -f - >/dev/null
+echo "$((DEPLOYS * SERVICES_PER_DEPLOY)) Services et $PVCS PVC créés dans load-test"
 echo "$((DEPLOYS * 30)) pods demandés dans load-test ($DEPLOYS Deployments) ; attente…"
 until [ "$(k -n load-test get pods --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l | tr -d ' ')" -ge "$PODS" ]; do sleep 5; done
 echo "$PODS pods Running sur $NODES nodes kwok"
