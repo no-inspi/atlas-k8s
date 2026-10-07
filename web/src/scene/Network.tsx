@@ -1,9 +1,9 @@
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
-import { serviceKey, volumeKey, type Service } from '../api/types'
+import { pvKey, serviceKey, volumeKey, type PersistentVolume, type Service } from '../api/types'
 import { useCluster } from '../store/cluster'
-import { gateSignal, healthSignal, volumeSignal, worst, type Signal } from './health'
+import { gateSignal, healthSignal, pvSignal, volumeSignal, worst, type Signal } from './health'
 import { Part, opacityBasicMaterial, opacityMaterial, roundCapacity } from './instanced'
 import { pickables } from './pick'
 import { LOD_PX } from './Pods'
@@ -13,9 +13,10 @@ import { tick } from './tick'
 import { world } from './world'
 
 // Infrastructure de la ville : relais (Services) sur les avenues, portes
-// (contrôleurs d'entrée) à l'ouest, citernes (PVC) dans les entrepôts. Une
-// InstancedMesh par pièce : quelques draw calls quel que soit le nombre d'objets.
-// Vu de loin, un relais par tronçon (pire voyant du groupe) avec un compteur.
+// (contrôleurs d'entrée et Gateways) à l'ouest, citernes (PVC) et citernes
+// vides (PV sans PVC) dans les entrepôts. Une InstancedMesh par pièce :
+// quelques draw calls quel que soit le nombre d'objets. Vu de loin, un relais
+// par tronçon (pire voyant du groupe) avec un compteur.
 
 const up = (g: THREE.BufferGeometry, h: number) => g.translate(0, h / 2, 0)
 const GEOMETRY = {
@@ -28,12 +29,16 @@ const GEOMETRY = {
   gateLintel: up(new THREE.BoxGeometry(0.42, 0.32, 1), 0.32),
   tankBody: up(new THREE.CylinderGeometry(1, 1, 1, 28), 1),
   tankCap: up(new THREE.CylinderGeometry(1.02, 1.02, 0.08, 28), 0.08),
+  // Citerne vide : cylindre ouvert dessiné en fil de fer.
+  orphanBody: up(new THREE.CylinderGeometry(1, 1, 1, 16, 2, true), 1),
 }
 type PartName = keyof typeof GEOMETRY
 const NAMES = Object.keys(GEOMETRY) as PartName[]
 /** Pièces lumineuses (non éclairées) : voyants. */
 const GLOW: ReadonlySet<PartName> = new Set(['beacon', 'tankCap'])
-const PICKABLE: PartName[] = ['relayRing', 'relayBase', 'signPanel', 'gatePost', 'gateLintel', 'tankBody']
+/** Pièces en fil de fer (citernes vides). */
+const WIRE: ReadonlySet<PartName> = new Set(['orphanBody'])
+const PICKABLE: PartName[] = ['relayRing', 'relayBase', 'signPanel', 'gatePost', 'gateLintel', 'tankBody', 'orphanBody']
 const TANK_H = 1.4
 const GATE_SPAN = 1.9 // écart entre les piliers d'une porte, le long de z
 const WHITE = new THREE.Color('#ffffff')
@@ -46,6 +51,7 @@ export function Network({ theme, reducedMotion }: { theme: Theme; reducedMotion:
   const materials = useMemo(() => ({
     solid: opacityMaterial({ color: '#ffffff', roughness: 0.55, metalness: 0.1 }),
     glow: opacityBasicMaterial({ color: '#ffffff' }),
+    wire: opacityBasicMaterial({ color: '#ffffff', wireframe: true }),
   }), [])
   const parts = useRef(new Map<PartName, Part>())
   const capacity = useRef(0)
@@ -68,14 +74,16 @@ export function Network({ theme, reducedMotion }: { theme: Theme; reducedMotion:
     parts.current.forEach((p) => p.dispose())
     materials.solid.dispose()
     materials.glow.dispose()
+    materials.wire.dispose()
   }, [materials])
 
   const ensure = (n: number) => {
     if (n <= capacity.current) return
     parts.current.forEach((p) => { group.current?.remove(p.mesh); p.dispose() })
     capacity.current = roundCapacity(n, 64)
-    parts.current = new Map(NAMES.map((name) => [name, new Part(GEOMETRY[name], GLOW.has(name) ? materials.glow : materials.solid,
-      capacity.current, { opacity: true, name, castShadow: !GLOW.has(name) })]))
+    const materialOf = (name: PartName) => (WIRE.has(name) ? materials.wire : GLOW.has(name) ? materials.glow : materials.solid)
+    parts.current = new Map(NAMES.map((name) => [name, new Part(GEOMETRY[name], materialOf(name),
+      capacity.current, { opacity: true, name, castShadow: !GLOW.has(name) && !WIRE.has(name) })]))
     parts.current.forEach((p) => group.current?.add(p.mesh))
   }
 
@@ -90,7 +98,7 @@ export function Network({ theme, reducedMotion }: { theme: Theme; reducedMotion:
     const net = world.net
     const isFar = camera.zoom < LOD_PX
     if (isFar !== far) setFar(isFar)
-    ensure(Math.max(1, (net?.relays.size ?? 0) + 2 * (net?.gates.size ?? 0) + (net?.tanks.size ?? 0)))
+    ensure(Math.max(1, (net?.relays.size ?? 0) + 2 * (net?.gates.size ?? 0) + (net?.tanks.size ?? 0) + (net?.orphans.length ?? 0)))
     // Pas d'animation avec reduced motion, onglet caché ou vue lointaine.
     const still = reducedMotion || document.hidden || isFar
     const b = built.current
@@ -193,17 +201,22 @@ export function Network({ theme, reducedMotion }: { theme: Theme; reducedMotion:
         if (it.sig === 'err') blink.push(i)
       }
 
-      // Portes : deux piliers et un linteau ; orange si une de leurs routes est cassée.
+      // Portes : deux piliers et un linteau. Porte déduite : accent, orange si
+      // une route est cassée ou refusée. Porte Gateway : son voyant (vert →
+      // accent, orange, rouge, gris sans statut ou Gateway invisible).
       for (const g of world.gates) {
         const slot = net.gates.get(g.name)
         if (!slot) continue
         const key = `gate:${g.name}`
-        const a = alpha(key)
-        c.copy(gateSignal(g) === 'warn' ? colors.signal.warn : colors.accent)
-        if (key === selKey) c.lerp(WHITE, 0.35)
-        put('gatePost', slot.x, 0, slot.z - GATE_SPAN / 2, 1, 1, 1, c, a, key)
-        put('gatePost', slot.x, 0, slot.z + GATE_SPAN / 2, 1, 1, 1, c, a, key)
-        put('gateLintel', slot.x, 2.1, slot.z, 1, 1, GATE_SPAN + 0.35, c, a, key)
+        // Un Gateway visible s'ouvre dans son propre inspecteur.
+        const pick = g.gateway ? `gateway:${g.name}` : key
+        const a = alpha(key, g.gateway?.namespace)
+        const sig = gateSignal(g)
+        c.copy(sig === 'ok' ? colors.accent : colors.signal[sig])
+        if (key === selKey || pick === selKey) c.lerp(WHITE, 0.35)
+        put('gatePost', slot.x, 0, slot.z - GATE_SPAN / 2, 1, 1, 1, c, a, pick)
+        put('gatePost', slot.x, 0, slot.z + GATE_SPAN / 2, 1, 1, 1, c, a, pick)
+        put('gateLintel', slot.x, 2.1, slot.z, 1, 1, GATE_SPAN + 0.35, c, a, pick)
       }
 
       // Citernes : grises si Bound, translucides orange si Pending, rouges si Lost.
@@ -216,6 +229,23 @@ export function Network({ theme, reducedMotion }: { theme: Theme; reducedMotion:
         const body = key === selKey ? colors.accent : sig === 'ok' ? colors.tank : colors.signal[sig]
         put('tankBody', slot.x, 0, slot.z, slot.r, TANK_H, slot.r, body, sig === 'warn' ? a * 0.45 : a, key)
         put('tankCap', slot.x, TANK_H, slot.z, slot.r, 1, slot.r, colors.signal[sig], a)
+      }
+
+      // Citernes vides (PV sans PVC) : fil de fer gris, rouge si Failed ;
+      // panneau gris devant une PV Released (données conservées, à réclamer).
+      const pvs = new Map<string, PersistentVolume>(world.persistentVolumes.map((x) => [pvKey(x), x]))
+      for (const o of net.orphans) {
+        const pv = pvs.get(o.key)
+        if (!pv) continue
+        const key = `pv:${o.key}`
+        const a = alpha(key, pv.claimRef?.split('/')[0])
+        const color = key === selKey ? colors.accent : pvSignal(pv) === 'err' ? colors.signal.err : colors.muted
+        put('orphanBody', o.x, 0, o.z, o.r, TANK_H, o.r, color, a, key)
+        if (pv.phase === 'Released') {
+          const z = o.z + o.r + 0.25
+          put('signPost', o.x, 0, z, 1, 1, 1, colors.muted, a)
+          put('signPanel', o.x, 0.9, z, 1, 1, 1, colors.muted, a, key)
+        }
       }
     }
 
