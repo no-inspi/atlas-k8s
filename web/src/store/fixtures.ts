@@ -35,9 +35,9 @@ export function service(over: Partial<Service> = {}): Service {
 }
 
 export function route(over: Partial<Route> = {}): Route {
-  const gate = over.gate ?? 'nginx'
+  const gate = over.gate ?? over.gates?.[0] ?? 'nginx'
   return {
-    source: 'Ingress', group: 'networking.k8s.io', namespace: 'production', name: 'storefront', gate, gates: [gate],
+    source: 'Ingress', group: 'networking.k8s.io', namespace: 'production', name: 'storefront', gate, gates: over.gates ?? [gate],
     rules: [{ host: 'shop.example.com', path: '/', backend: { namespace: 'production', service: 'api', port: '80', kind: 'Service', state: 'ok' } }],
     ...over,
   }
