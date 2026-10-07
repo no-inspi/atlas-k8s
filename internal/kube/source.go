@@ -187,6 +187,7 @@ func (s *Source) Run(ctx context.Context) error {
 		return nil
 	}
 	if err := s.markAll(); err != nil {
+		s.shutdown()
 		return err
 	}
 	s.reconcile()

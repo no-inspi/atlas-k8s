@@ -95,7 +95,8 @@ func (s *Source) dynRunning() []*dynInformer {
 
 // startDyn démarre l'informer d'un type si la sonde l'autorise, attend sa
 // synchronisation, l'inscrit puis marque tous ses objets. Sans effet s'il
-// tourne déjà.
+// tourne déjà. Il démarre le type hors du suivi des types voulus (wantDyn) :
+// réservé aux tests ; le code de production passe par wantDyn.
 func (s *Source) startDyn(ctx context.Context, k dynKind) bool {
 	ok, _ := s.tryStartDyn(ctx, k)
 	return ok
