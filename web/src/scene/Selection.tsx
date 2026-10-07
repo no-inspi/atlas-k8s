@@ -59,6 +59,13 @@ export function Selection({ theme }: { theme: Theme }) {
         marker.visible = true
         marker.position.set(p.x, 3.4 + Math.sin(t * 3) * 0.12, p.z - world.layout.geometry.depth / 2 + 0.5)
       }
+    } else if (sel) {
+      const at = world.positionOf(sel.type, sel.key)
+      if (at) {
+        marker.visible = true
+        const h = sel.type === 'gate' || sel.type === 'route' ? 3.4 : sel.type === 'volume' ? 2.3 : 1.3
+        marker.position.set(at.x, h + Math.sin(t * 3) * 0.12, at.z)
+      }
     }
     geo.setDrawRange(0, v / 3)
     geo.attributes.position.needsUpdate = true
