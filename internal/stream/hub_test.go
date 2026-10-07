@@ -214,3 +214,17 @@ func TestSnapshotCarriesNetworkAndStorage(t *testing.T) {
 		t.Fatalf("snapshot = %+v", m)
 	}
 }
+
+func TestSnapshotCarriesGatewaysAndPersistentVolumes(t *testing.T) {
+	h := newTestHub(16)
+	h.Upsert(KindGateway, "infra/public", model.Gateway{Namespace: "infra", Name: "public"})
+	h.Upsert(KindGateway, "infra/internal", model.Gateway{Namespace: "infra", Name: "internal"})
+	h.Upsert(KindPersistentVolume, "pv-b", model.PersistentVolume{Name: "pv-b"})
+	h.Upsert(KindPersistentVolume, "pv-a", model.PersistentVolume{Name: "pv-a"})
+	init, sub := h.Subscribe(0)
+	defer sub.Close()
+	m := init[0]
+	if len(m.Gateways) != 2 || m.Gateways[0].Name != "internal" || len(m.PersistentVolumes) != 2 || m.PersistentVolumes[0].Name != "pv-a" {
+		t.Fatalf("snapshot = %+v", m)
+	}
+}

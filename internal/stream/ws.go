@@ -166,7 +166,8 @@ func (v *view) snapshot(ctx context.Context, m Message) Message {
 	v.pods, v.nodes = map[string]bool{}, map[string]bool{}
 	s := Message{Type: "snapshot", Rev: m.Rev,
 		Nodes: []model.Node{}, Pods: []model.Pod{}, Workloads: []model.Workload{}, Namespaces: []model.Namespace{},
-		Services: []model.Service{}, Routes: []model.Route{}, Volumes: []model.Volume{}}
+		Services: []model.Service{}, Routes: []model.Route{}, Volumes: []model.Volume{},
+		Gateways: []model.Gateway{}, PersistentVolumes: []model.PersistentVolume{}}
 	for _, n := range m.Nodes {
 		if v.f.Allow(ctx, KindNode, n) {
 			v.nodes[n.Name] = true
@@ -204,6 +205,16 @@ func (v *view) snapshot(ctx context.Context, m Message) Message {
 			s.Volumes = append(s.Volumes, o)
 		}
 	}
+	for _, o := range m.Gateways {
+		if v.f.Allow(ctx, KindGateway, o) {
+			s.Gateways = append(s.Gateways, o)
+		}
+	}
+	for _, o := range m.PersistentVolumes {
+		if v.f.Allow(ctx, KindPersistentVolume, o) {
+			s.PersistentVolumes = append(s.PersistentVolumes, o)
+		}
+	}
 	return s
 }
 
@@ -218,7 +229,7 @@ func (v *view) delta(ctx context.Context, m Message) (Message, bool) {
 	case model.Node:
 		known, id = v.nodes, o.Name
 	}
-	if known == nil { // workloads, namespaces, Services, routes et volumes : visibles selon le droit courant
+	if known == nil { // workloads, namespaces, objets réseau et stockage : visibles selon le droit courant
 		return m, v.f.Allow(ctx, m.Kind, m.Obj)
 	}
 	if m.Type == "delete" {
