@@ -5,10 +5,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/no-inspi/atlas-k8s/internal/demo"
 	"github.com/no-inspi/atlas-k8s/internal/model"
 	"github.com/no-inspi/atlas-k8s/internal/stream"
@@ -77,5 +79,17 @@ func TestInspectorRoutes(t *testing.T) {
 	}
 	if rec := get(h, "/api/yaml/traefik.io/v1alpha1/IngressRoute/monitoring/grafana"); rec.Code != 200 || !strings.Contains(rec.Body.String(), "IngressRoute") {
 		t.Errorf("yaml d'une IngressRoute = %d", rec.Code)
+	}
+}
+
+func TestNsParam(t *testing.T) {
+	for url, want := range map[string]string{"/x/_/y": "", "/x/production/y": "production"} {
+		r := chi.NewRouter()
+		var got string
+		r.Get("/x/{ns}/y", func(w http.ResponseWriter, req *http.Request) { got = nsParam(req) })
+		r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", url, nil))
+		if got != want {
+			t.Errorf("nsParam(%s) = %q, attendu %q", url, got, want)
+		}
 	}
 }

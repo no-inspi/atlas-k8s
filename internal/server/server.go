@@ -301,6 +301,16 @@ func (s *server) owner(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"chain": chain})
 }
 
+// nsParam : namespace de l'URL ; « _ » désigne un objet sans namespace
+// (PersistentVolume, GatewayClass). Un namespace Kubernetes ne peut pas
+// s'appeler « _ » (noms DNS-1123), la traduction est sans ambiguïté.
+func nsParam(r *http.Request) string {
+	if ns := chi.URLParam(r, "ns"); ns != "_" {
+		return ns
+	}
+	return ""
+}
+
 // events : /api/namespaces/{ns}/{resource}/{name}/events (pods, services, persistentvolumeclaims, ingresses, ingressroutes…).
 func (s *server) events(w http.ResponseWriter, r *http.Request) {
 	kind, ok := inspect.KindForResource(chi.URLParam(r, "resource"))
@@ -308,7 +318,7 @@ func (s *server) events(w http.ResponseWriter, r *http.Request) {
 		apiError(w, inspect.ErrUnsupportedKind)
 		return
 	}
-	evs, err := s.cfg.Inspect.Events(r.Context(), s.user(r), kind, chi.URLParam(r, "ns"), chi.URLParam(r, "name"))
+	evs, err := s.cfg.Inspect.Events(r.Context(), s.user(r), kind, nsParam(r), chi.URLParam(r, "name"))
 	if err != nil {
 		apiError(w, err)
 		return
@@ -324,7 +334,7 @@ func (s *server) yaml(w http.ResponseWriter, r *http.Request) {
 	}
 	doc, err := s.cfg.Inspect.YAML(r.Context(), s.user(r), inspect.Ref{
 		Group: group, Version: chi.URLParam(r, "version"), Kind: chi.URLParam(r, "kind"),
-		Namespace: chi.URLParam(r, "ns"), Name: chi.URLParam(r, "name"),
+		Namespace: nsParam(r), Name: chi.URLParam(r, "name"),
 	})
 	if err != nil {
 		apiError(w, err)

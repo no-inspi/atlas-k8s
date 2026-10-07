@@ -66,6 +66,17 @@ var Kinds = []Kind{
 	{"networking.k8s.io", "v1", "Ingress", "ingresses"},
 	{"traefik.io", "v1alpha1", "IngressRoute", "ingressroutes"},
 	{"traefik.containo.us", "v1alpha1", "IngressRoute", "ingressroutes"},
+	{"gateway.networking.k8s.io", "v1", "Gateway", "gateways"},
+	{"gateway.networking.k8s.io", "v1", "GatewayClass", "gatewayclasses"},
+	{"gateway.networking.k8s.io", "v1", "HTTPRoute", "httproutes"},
+	{"gateway.networking.k8s.io", "v1", "GRPCRoute", "grpcroutes"},
+	{"traefik.io", "v1alpha1", "IngressRouteTCP", "ingressroutetcps"},
+	{"traefik.containo.us", "v1alpha1", "IngressRouteTCP", "ingressroutetcps"},
+	{"traefik.io", "v1alpha1", "IngressRouteUDP", "ingressrouteudps"},
+	{"traefik.containo.us", "v1alpha1", "IngressRouteUDP", "ingressrouteudps"},
+	{"traefik.io", "v1alpha1", "TraefikService", "traefikservices"},
+	{"traefik.containo.us", "v1alpha1", "TraefikService", "traefikservices"},
+	{"", "v1", "PersistentVolume", "persistentvolumes"},
 }
 
 // KindForResource : kind désigné par la ressource d'une URL (« services » → Service).
