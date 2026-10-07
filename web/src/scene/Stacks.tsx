@@ -13,7 +13,12 @@ const cache = new Map<string, { tex: THREE.CanvasTexture; aspect: number }>()
 export function pillTexture(text: string, theme: Theme): { tex: THREE.CanvasTexture; aspect: number } {
   const key = `${text}|${theme.ink}|${theme.bg}`
   let hit = cache.get(key)
-  if (hit) return hit
+  if (hit) {
+    // Récemment utilisée : en fin de file, loin de l'éviction.
+    cache.delete(key)
+    cache.set(key, hit)
+    return hit
+  }
   const c = document.createElement('canvas')
   c.height = 64
   c.width = Math.max(128, 40 + text.length * 19)
@@ -30,7 +35,13 @@ export function pillTexture(text: string, theme: Theme): { tex: THREE.CanvasText
   const tex = new THREE.CanvasTexture(c)
   tex.colorSpace = THREE.SRGBColorSpace
   hit = { tex, aspect: c.width / c.height }
-  if (cache.size > 200) cache.clear()
+  // Éviction de la plus ancienne : sa texture GPU est libérée (three la renverrait
+  // au GPU si un sprite l'utilisait encore).
+  if (cache.size >= 200) {
+    const [oldKey, old] = cache.entries().next().value!
+    cache.delete(oldKey)
+    old.tex.dispose()
+  }
   cache.set(key, hit)
   return hit
 }

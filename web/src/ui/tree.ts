@@ -28,6 +28,13 @@ export interface VisibleItem {
 
 const byLabel = (a: TreeNode, b: TreeNode) => a.label.localeCompare(b.label)
 
+/** Ajoute x à la liste de k (sans recopier la liste). */
+function pushTo<T>(m: Map<string, T[]>, k: string, x: T) {
+  const list = m.get(k)
+  if (list) list.push(x)
+  else m.set(k, [x])
+}
+
 const podItem = (p: Pod): TreeNode => ({ id: `pod:${p.uid}`, label: p.name, status: p.displayStatus, select: { type: 'pod', key: p.uid } })
 
 export function buildTree(st: {
@@ -39,7 +46,9 @@ export function buildTree(st: {
   for (const p of pods) {
     const owner = p.owner.kind ? workloadKey({ kind: p.owner.kind, namespace: p.namespace, name: p.owner.name }) : ''
     const ws = byNs.get(p.namespace) ?? new Map<string, Pod[]>()
-    ws.set(owner, [...(ws.get(owner) ?? []), p])
+    const list = ws.get(owner)
+    if (list) list.push(p)
+    else ws.set(owner, [p])
     byNs.set(p.namespace, ws)
   }
   const namespaces: TreeNode[] = [...byNs].map(([ns, ws]) => {
@@ -57,7 +66,7 @@ export function buildTree(st: {
   }).sort(byLabel)
 
   const podsOnNode = new Map<string, Pod[]>()
-  for (const p of pods) if (p.nodeName) podsOnNode.set(p.nodeName, [...(podsOnNode.get(p.nodeName) ?? []), p])
+  for (const p of pods) if (p.nodeName) pushTo(podsOnNode, p.nodeName, p)
   const nodes: TreeNode[] = [...st.nodes.values()].map((n) => ({
     id: `node:${n.name}`, label: n.name, detail: `${n.pool} · ${podsOnNode.get(n.name)?.length ?? 0} pods`,
     status: n.unschedulable ? 'SchedulingDisabled' : undefined,
@@ -86,7 +95,7 @@ export function buildTree(st: {
   const services = [...(st.services?.values() ?? [])]
   if (services.length) {
     const byNs = new Map<string, Service[]>()
-    for (const s of services) byNs.set(s.namespace, [...(byNs.get(s.namespace) ?? []), s])
+    for (const s of services) pushTo(byNs, s.namespace, s)
     roots.push({
       id: 'group:services', label: 'Services', detail: `${services.length}`,
       children: [...byNs].map(([ns, ss]) => ({
@@ -104,7 +113,7 @@ export function buildTree(st: {
   const volumes = [...(st.volumes?.values() ?? [])]
   if (volumes.length) {
     const byClass = new Map<string, Volume[]>()
-    for (const v of volumes) byClass.set(v.storageClass || '(aucune)', [...(byClass.get(v.storageClass || '(aucune)') ?? []), v])
+    for (const v of volumes) pushTo(byClass, v.storageClass || '(aucune)', v)
     roots.push({
       id: 'group:storage', label: 'Stockage', detail: `${volumes.length}`,
       children: [...byClass].map(([c, vs]) => ({

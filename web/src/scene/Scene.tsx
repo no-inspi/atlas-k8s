@@ -245,7 +245,7 @@ export function Scene() {
       <Network theme={theme} reducedMotion={reducedMotion} />
       <Pods theme={theme} reducedMotion={reducedMotion} />
       <Stacks theme={theme} />
-      <Selection theme={theme} />
+      <Selection theme={theme} reducedMotion={reducedMotion} />
       <CameraRig />
       <Picker />
       <StoreInvalidator />

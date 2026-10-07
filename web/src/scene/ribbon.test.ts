@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ribbon } from './GroundLinks'
+import { ribbon, writeAlpha } from './GroundLinks'
 
 describe('ribbon', () => {
   it('quatre sommets et deux triangles par segment, abscisse curviligne continue', () => {
@@ -14,5 +14,33 @@ describe('ribbon', () => {
 
   it('accepte des liens sans segment', () => {
     expect(ribbon([{ points: [[1, 1]], alpha: 1, live: false }], 0.1, 0).index.length).toBe(0)
+  })
+
+  it('écrit les coins dans l’ordre attendu', () => {
+    const r = ribbon([{ points: [[0, 0], [2, 0]], alpha: 1, live: true }], 0.2, 0)
+    // Segment le long de x, débord d'une demi-largeur (0,1) de chaque côté.
+    expect([...r.position].map((x) => Math.round(x * 100) / 100)).toEqual([-0.1, 0, 0.1, -0.1, 0, -0.1, 2.1, 0, 0.1, 2.1, 0, -0.1])
+    expect([...r.index]).toEqual([0, 1, 2, 1, 3, 2])
+  })
+})
+
+describe('writeAlpha', () => {
+  const items = [
+    { points: [[0, 0], [1, 0], [1, 1]] as [number, number][], alpha: 1, live: true },
+    { points: [[5, 5]] as [number, number][], alpha: 1, live: true }, // sans segment : aucun sommet
+    { points: [[0, 0], [0, 3]] as [number, number][], alpha: 1, live: true },
+  ]
+
+  it('réécrit l’opacité de chaque polyligne sans toucher aux positions', () => {
+    const r = ribbon(items, 0.1, 0)
+    const before = [...r.position]
+    expect(writeAlpha(r.alpha, items, (i) => (i === 2 ? 0.1 : 1))).toBe(true)
+    expect([...r.alpha].map((a) => Math.round(a * 10) / 10)).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 0.1, 0.1, 0.1, 0.1])
+    expect([...r.position]).toEqual(before)
+  })
+
+  it('signale l’absence de changement', () => {
+    const r = ribbon(items, 0.1, 0)
+    expect(writeAlpha(r.alpha, items, () => 1)).toBe(false)
   })
 })

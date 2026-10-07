@@ -16,6 +16,8 @@ export interface Link {
   keys: string[]
   /** Paquets ou gouttes qui circulent (endpoint ready, pod Running). */
   live: boolean
+  /** Namespace du lien (Service, backend de la route ou PVC) : les chips de namespace l'estompent. */
+  ns: string
   /** Route cassée : position du panneau « ? ». */
   sign?: Pt
 }
@@ -73,7 +75,7 @@ export function buildLinks(i: LinkInput): Link[] {
         const seg = net.segments.find((s) => s.ns === b.namespace)
         const lane = net.lanes[seg?.avenue ?? 0]
         const x = seg ? seg.x0 : net.westX + 1.2
-        out.push({ family: 'broken', keys: [`gate:${r.gate}`, rk], live: false, sign: [x, lane.main],
+        out.push({ family: 'broken', ns: b.namespace, keys: [`gate:${r.gate}`, rk], live: false, sign: [x, lane.main],
           points: dedupe([[gate.x + 0.3, gate.z], [net.westX, gate.z], [net.westX, lane.main], [x, lane.main]]) })
         continue
       }
@@ -86,7 +88,7 @@ export function buildLinks(i: LinkInput): Link[] {
         continue
       }
       const lane = net.lanes[relay.avenue]
-      mains.set(id, { family: 'main', live: true, keys: [`gate:${r.gate}`, `service:${sk}`, rk],
+      mains.set(id, { family: 'main', ns: relay.ns, live: true, keys: [`gate:${r.gate}`, `service:${sk}`, rk],
         points: dedupe([[gate.x + 0.3, gate.z], [net.westX, gate.z], [net.westX, lane.main], [relay.x, lane.main], [relay.x, relay.z]]) })
     }
   }
@@ -103,7 +105,7 @@ export function buildLinks(i: LinkInput): Link[] {
       const head: Pt[] = relay.avenue === a.avenue
         ? [[relay.x, relay.z], [relay.x, lr.fibre]]
         : [[relay.x, relay.z], [relay.x, lr.fibre], [net.westX, lr.fibre], [net.westX, la.fibre]]
-      out.push({ family: 'fibre', live: e.ready, keys: [`service:${serviceKey(s)}`, `pod:${e.podUID}`],
+      out.push({ family: 'fibre', ns: s.namespace, live: e.ready, keys: [`service:${serviceKey(s)}`, `pod:${e.podUID}`],
         points: dedupe([...head, ...toPod(city, la.fibre, a.t, a.plot, -0.2)]) })
     }
   }
@@ -117,7 +119,7 @@ export function buildLinks(i: LinkInput): Link[] {
       const a = anchor(uid)
       if (!a) continue
       const la = net.lanes[a.avenue]
-      out.push({ family: 'data', live: a.p.displayStatus === 'Running', keys: [`volume:${volumeKey(v)}`, `pod:${uid}`],
+      out.push({ family: 'data', ns: v.namespace, live: a.p.displayStatus === 'Running', keys: [`volume:${volumeKey(v)}`, `pod:${uid}`],
         points: dedupe([[tank.x, tank.z], [tank.x, row], [net.eastX, row], [net.eastX, la.data], ...toPod(city, la.data, a.t, a.plot, 0.2)]) })
     }
   }

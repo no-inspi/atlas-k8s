@@ -2,7 +2,7 @@ import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { useCluster } from '../store/cluster'
-import { isLit, type Family } from './links'
+import { isLit, type Family, type Link, type Pt } from './links'
 import { LOD_PX, questionTexture } from './Pods'
 import type { Theme } from './theme'
 import { tick } from './tick'
@@ -10,8 +10,8 @@ import { world } from './world'
 
 // Liens au sol : rubans plats (deux triangles par segment) sur lesquels un
 // shader fait défiler des paquets (réseau) ou des gouttes (data). Une
-// géométrie par famille, reconstruite seulement quand les liens, la sélection,
-// le survol ou le niveau de détail changent.
+// géométrie par famille : positions reconstruites quand les liens changent,
+// opacité seule réécrite quand la sélection, le survol ou le filtre changent.
 
 const WIDTH: Record<Family, number> = { main: 0.12, broken: 0.1, fibre: 0.08, data: 0.16 }
 const Y: Record<Family, number> = { main: 0.03, broken: 0.031, fibre: 0.032, data: 0.033 }
@@ -32,40 +32,64 @@ export interface Ribbon {
   index: Uint32Array
 }
 
+export interface RibbonItem { points: readonly Pt[]; alpha: number; live: boolean }
+
 /** Rubans de largeur w le long des polylignes ; dist : abscisse curviligne (motif continu aux coudes). */
-export function ribbon(items: { points: [number, number][]; alpha: number; live: boolean }[], w: number, y: number): Ribbon {
+export function ribbon(items: readonly RibbonItem[], w: number, y: number): Ribbon {
   let segs = 0
   for (const it of items) segs += Math.max(0, it.points.length - 1)
   const position = new Float32Array(segs * 12), dist = new Float32Array(segs * 4)
   const alpha = new Float32Array(segs * 4), live = new Float32Array(segs * 4), index = new Uint32Array(segs * 6)
+  const h = w / 2
   let v = 0, k = 0
   for (const it of items) {
+    const a = it.alpha, on = it.live ? 1 : 0
     let d = 0
     for (let i = 0; i + 1 < it.points.length; i++) {
-      const [x0, z0] = it.points[i], [x1, z1] = it.points[i + 1]
+      const p0 = it.points[i], p1 = it.points[i + 1]
+      const x0 = p0[0], z0 = p0[1], x1 = p1[0], z1 = p1[1]
       const len = Math.hypot(x1 - x0, z1 - z0) || 1e-6
       const ux = (x1 - x0) / len, uz = (z1 - z0) / len
-      const nx = -uz * w / 2, nz = ux * w / 2
+      const nx = -uz * h, nz = ux * h
       // Chaque segment déborde d'une demi-largeur : les coudes restent fermés.
-      const ex = ux * w / 2, ez = uz * w / 2
-      const corners: [number, number, number][] = [
-        [x0 - ex + nx, z0 - ez + nz, d], [x0 - ex - nx, z0 - ez - nz, d],
-        [x1 + ex + nx, z1 + ez + nz, d + len], [x1 + ex - nx, z1 + ez - nz, d + len],
-      ]
-      for (const [x, z, dd] of corners) {
-        position.set([x, y, z], v * 3)
-        dist[v] = dd
-        alpha[v] = it.alpha
-        live[v] = it.live ? 1 : 0
-        v++
-      }
-      const b = v - 4
-      index.set([b, b + 1, b + 2, b + 1, b + 3, b + 2], k)
+      const ex = ux * h, ez = uz * h
+      let o = v * 3
+      position[o++] = x0 - ex + nx; position[o++] = y; position[o++] = z0 - ez + nz
+      position[o++] = x0 - ex - nx; position[o++] = y; position[o++] = z0 - ez - nz
+      position[o++] = x1 + ex + nx; position[o++] = y; position[o++] = z1 + ez + nz
+      position[o++] = x1 + ex - nx; position[o++] = y; position[o] = z1 + ez - nz
+      dist[v] = dist[v + 1] = d
+      dist[v + 2] = dist[v + 3] = d + len
+      alpha.fill(a, v, v + 4)
+      live.fill(on, v, v + 4)
+      index[k] = v; index[k + 1] = v + 1; index[k + 2] = v + 2
+      index[k + 3] = v + 1; index[k + 4] = v + 3; index[k + 5] = v + 2
+      v += 4
       k += 6
       d += len
     }
   }
   return { position, dist, alpha, live, index }
+}
+
+/**
+ * Réécrit l'opacité de chaque polyligne d'un ruban déjà construit (mêmes
+ * polylignes, même ordre), sans toucher aux positions. Renvoie true si une
+ * valeur a changé.
+ */
+export function writeAlpha(alpha: Float32Array, items: readonly { points: readonly Pt[] }[], value: (i: number) => number): boolean {
+  let v = 0, changed = false
+  for (let i = 0; i < items.length; i++) {
+    const n = Math.max(0, items[i].points.length - 1) * 4
+    if (!n) continue
+    const a = value(i)
+    if (alpha[v] !== Math.fround(a)) {
+      alpha.fill(a, v, v + n)
+      changed = true
+    }
+    v += n
+  }
+  return changed
 }
 
 const vertexShader = /* glsl */ `
@@ -127,30 +151,61 @@ export function Links({ theme, reducedMotion }: { theme: Theme; reducedMotion: b
     }))
   }, [theme])
   useEffect(() => () => meshes.forEach((m) => { m.geometry.dispose(); (m.material as THREE.Material).dispose() }), [meshes])
-  // Dernière construction : clé de focus, liens et meshes (un changement de thème recrée les meshes).
-  const built = useRef<{ key: string; links: unknown; meshes: unknown }>({ key: '', links: null, meshes: null })
+  /**
+   * Dernière construction. Positions : seulement quand les liens (ou les meshes,
+   * recréés au changement de thème) changent ; fibres : aussi quand le focus ou
+   * le niveau de détail change (elles n'existent que sur le chemin) ; sinon on
+   * ne réécrit que l'opacité.
+   */
+  const built = useRef<{ links: Link[] | null; meshes: unknown; fibreKey: string; alphaKey: string; drawn: Map<Family, Link[]>; fibres: Link[] }>({
+    links: null, meshes: null, fibreKey: '', alphaKey: '', drawn: new Map(), fibres: [],
+  })
   const question = useMemo(questionTexture, [])
+  useEffect(() => () => question.dispose(), [question])
 
   useFrame(({ clock, camera, invalidate }) => {
     const st = useCluster.getState()
     world.update(st)
     const focus = world.focusFor(st.selection, st.hoverNet, st.hover?.uid ?? null)
     const far = camera.zoom < LOD_PX
-    const key = `${st.selection?.type}:${st.selection?.key}|${st.hoverNet}|${st.hover?.uid}|${far}`
+    const nsFilter = st.nsFilter
+    const focusKey = `${st.selection?.type}:${st.selection?.key}|${st.hoverNet}|${st.hover?.uid}`
+    const fibreKey = `${focusKey}|${far}`
+    const alphaKey = `${focusKey}|${nsFilter}`
+    const alphaOf = (l: Link) =>
+      nsFilter && l.ns !== nsFilter ? 0.1 : focus.dim && focus.path && !isLit(l, focus.path) ? 0.2 : 1
+    const setGeometry = (f: Family, ls: Link[]) => {
+      const mesh = meshes.get(f)!
+      mesh.geometry.dispose()
+      mesh.geometry = geometryOf(ribbon(ls.map((l) => ({ points: l.points, alpha: alphaOf(l), live: l.family === 'broken' || l.live })), WIDTH[f], Y[f]))
+    }
     const b = built.current
-    if (key !== b.key || world.links !== b.links || meshes !== b.meshes) {
-      built.current = { key, links: world.links, meshes }
-      const byFamily = new Map<Family, { points: [number, number][]; alpha: number; live: boolean }[]>(FAMILIES.map((f) => [f, []]))
-      for (const l of world.links) {
-        const lit = (!!focus.path && isLit(l, focus.path)) || (!!focus.hover && isLit(l, focus.hover))
-        // Fibres : seulement sur le chemin sélectionné ou survolé, et de près.
-        if (l.family === 'fibre' && (!lit || far)) continue
-        const alpha = focus.dim && focus.path && !isLit(l, focus.path) ? 0.2 : 1
-        byFamily.get(l.family)!.push({ points: l.points, alpha, live: l.family === 'broken' || l.live })
-      }
-      for (const [f, mesh] of meshes) {
-        mesh.geometry.dispose()
-        mesh.geometry = geometryOf(ribbon(byFamily.get(f)!, WIDTH[f], Y[f]))
+    const topology = world.links !== b.links || meshes !== b.meshes
+    const rebuilt = new Set<Family>()
+    if (topology) {
+      b.links = world.links
+      b.meshes = meshes
+      b.drawn = new Map(FAMILIES.map((f) => [f, []]))
+      b.fibres = []
+      for (const l of world.links) (l.family === 'fibre' ? b.fibres : b.drawn.get(l.family)!).push(l)
+      for (const f of FAMILIES) if (f !== 'fibre') { setGeometry(f, b.drawn.get(f)!); rebuilt.add(f) }
+    }
+    if (topology || fibreKey !== b.fibreKey) {
+      b.fibreKey = fibreKey
+      // Fibres : seulement sur le chemin sélectionné ou survolé, et de près.
+      const lit = far ? [] : b.fibres.filter((l) =>
+        (!!focus.path && isLit(l, focus.path)) || (!!focus.hover && isLit(l, focus.hover)))
+      b.drawn.set('fibre', lit)
+      setGeometry('fibre', lit)
+      rebuilt.add('fibre')
+    }
+    if (alphaKey !== b.alphaKey) {
+      b.alphaKey = alphaKey
+      for (const f of FAMILIES) {
+        if (rebuilt.has(f)) continue
+        const ls = b.drawn.get(f)!
+        const attr = meshes.get(f)!.geometry.getAttribute('aAlpha') as THREE.BufferAttribute | undefined
+        if (attr && writeAlpha(attr.array as Float32Array, ls, (i) => alphaOf(ls[i]))) attr.needsUpdate = true
       }
     }
     if (!reducedMotion && !document.hidden && !far && world.links.length) {
@@ -161,13 +216,14 @@ export function Links({ theme, reducedMotion }: { theme: Theme; reducedMotion: b
   })
 
   useCluster((s) => s.version)
+  const nsFilter = useCluster((s) => s.nsFilter)
   const signs = world.links.filter((l) => l.sign)
   return (
     <>
       {[...meshes.values()].map((m, i) => <primitive key={i} object={m} />)}
       {signs.map((l, i) => (
         <sprite key={`sign-${i}`} position={[l.sign![0], 0.6, l.sign![1]]} scale={[0.45, 0.45, 1]} raycast={() => null} renderOrder={10}>
-          <spriteMaterial map={question} depthTest={false} transparent />
+          <spriteMaterial map={question} depthTest={false} transparent opacity={nsFilter && l.ns !== nsFilter ? 0.1 : 1} />
         </sprite>
       ))}
     </>

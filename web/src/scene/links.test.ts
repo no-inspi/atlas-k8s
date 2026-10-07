@@ -75,6 +75,24 @@ describe('buildLinks', () => {
     expect(ls.filter((l) => l.family === 'broken')).toHaveLength(1)
   })
 
+  it('porte le namespace du Service, du backend de la route ou du PVC', () => {
+    const svc = service({ namespace: 'shop', name: 'web', endpoints: [{ podUID: 'a', ready: true }] })
+    const vol = volume({ namespace: 'db', name: 'pg', pods: ['db'] })
+    const n2 = layoutNetwork(city, [{ key: serviceKey(svc), namespace: 'shop', name: 'web' }], ['nginx', 'traefik'],
+      [{ key: volumeKey(vol), namespace: 'db', name: 'pg', storageClass: vol.storageClass, requested: vol.requested }])
+    // Route déclarée dans « edge », vers un Service de « shop » et un Service manquant de « ghosts ».
+    const r = route({ namespace: 'edge', name: 'front', rules: [
+      { host: 'a', path: '/', backend: { namespace: 'shop', service: 'web', port: '80', kind: 'Service', state: 'ok' } },
+      { host: 'b', path: '/', backend: { namespace: 'ghosts', service: 'nope', port: '80', kind: 'Service', state: 'missing' } },
+    ] })
+    const ls = buildLinks({ city, net: n2, services: [svc], routes: [r], volumes: [vol], pods: new Map(pods.map((p) => [p.uid, p])), targets })
+    const nsOf = (f: Link['family']) => ls.filter((l) => l.family === f).map((l) => l.ns)
+    expect(nsOf('main')).toEqual(['shop'])
+    expect(nsOf('broken')).toEqual(['ghosts'])
+    expect(nsOf('fibre')).toEqual(['shop'])
+    expect(nsOf('data')).toEqual(['db'])
+  })
+
   it('ne trace que des segments horizontaux ou verticaux', () => {
     for (const l of links)
       for (let i = 1; i < l.points.length; i++) {
