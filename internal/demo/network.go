@@ -187,6 +187,9 @@ func serviceModel(d serviceDef, pods []*simPod) model.Service {
 
 func withBackendStates(r model.Route, exists map[string]bool) model.Route {
 	out := r
+	if len(out.Gates) == 0 {
+		out.Gates = []string{r.Gate}
+	}
 	out.Rules = make([]model.Rule, len(r.Rules))
 	for i, rule := range r.Rules {
 		b := rule.Backend

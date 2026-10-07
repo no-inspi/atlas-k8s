@@ -252,3 +252,15 @@ func TestConvertIngressPortNameAndNoHTTP(t *testing.T) {
 		t.Errorf("règles = %+v", r.Rules)
 	}
 }
+
+func TestRoutesCarryTheirGate(t *testing.T) {
+	cls := "nginx"
+	i := &networkingv1.Ingress{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "prod"}, Spec: networkingv1.IngressSpec{IngressClassName: &cls}}
+	if r := ConvertIngress(i, "nginx", nil); len(r.Gates) != 1 || r.Gates[0] != "nginx" || r.Gate != "nginx" {
+		t.Errorf("Ingress : gate %q, gates %v", r.Gate, r.Gates)
+	}
+	u := ingressRoute("traefik.io", "mon", "grafana", []any{})
+	if r := ConvertIngressRoute(u, nil); len(r.Gates) != 1 || r.Gates[0] != "traefik" {
+		t.Errorf("IngressRoute : gates %v", r.Gates)
+	}
+}

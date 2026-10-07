@@ -370,6 +370,11 @@ func TestDemoNetworkAndStorage(t *testing.T) {
 		t.Errorf("uploads-preview = %+v", v)
 	}
 
+	for k, o := range sink.net {
+		if r, ok := o.(model.Route); ok && (len(r.Gates) == 0 || r.Gates[0] != r.Gate) {
+			t.Errorf("%s : gates %v, gate %q", k, r.Gates, r.Gate)
+		}
+	}
 	// Les endpoints suivent les pods.
 	_ = s.Scale(context.Background(), anyone, "production", "Deployment", "api-gateway", 1)
 	advance(s, t0, 5*time.Second)

@@ -74,3 +74,39 @@ func TestNetworkKeys(t *testing.T) {
 		t.Errorf("VolumeKey = %s", k)
 	}
 }
+
+func TestGatewayAndPersistentVolumeKeys(t *testing.T) {
+	if k := GatewayKey(Gateway{Namespace: "infra", Name: "public"}); k != "infra/public" {
+		t.Errorf("GatewayKey = %s", k)
+	}
+	if k := PersistentVolumeKey(PersistentVolume{Name: "pv-1"}); k != "pv-1" {
+		t.Errorf("PersistentVolumeKey = %s", k)
+	}
+}
+
+func TestRouteJSONCarriesGatesAndOmitsOptionalFields(t *testing.T) {
+	r := Route{Source: SourceIngress, Namespace: "prod", Name: "web", Gate: "nginx", Gates: []string{"nginx"},
+		Rules: []Rule{{Backend: Backend{Namespace: "prod", Service: "api", Kind: "Service", State: BackendOK}}}}
+	b, _ := json.Marshal(r)
+	s := string(b)
+	if !strings.Contains(s, `"gates":["nginx"]`) {
+		t.Errorf("gates absent : %s", s)
+	}
+	for _, f := range []string{"weight", "mirror", "percent", "via", "parents"} {
+		if strings.Contains(s, `"`+f+`"`) {
+			t.Errorf("%s doit être omis : %s", f, s)
+		}
+	}
+	w, _ := json.Marshal(Backend{Kind: "Service", State: BackendOK, Weight: Weight(900), Via: "prod/canary"})
+	if z, _ := json.Marshal(Backend{Kind: "Service", State: BackendOK, Weight: Weight(0)}); !strings.Contains(string(z), `"weight":0`) {
+		t.Errorf("un poids nul doit être publié : %s", z)
+	}
+	if !strings.Contains(string(w), `"weight":900`) || !strings.Contains(string(w), `"via":"prod/canary"`) {
+		t.Errorf("backend = %s", w)
+	}
+	g, _ := json.Marshal(Gateway{Namespace: "infra", Name: "public", Accepted: CondTrue, Programmed: CondUnknown,
+		Listeners: []Listener{{Name: "http", Protocol: "HTTP", Port: 80, Ready: CondFalse}}})
+	if gs := string(g); !strings.Contains(gs, `"programmed":"unknown"`) || !strings.Contains(gs, `"attachedRoutes":0`) || !strings.Contains(gs, `"ready":"false"`) {
+		t.Errorf("gateway = %s", gs)
+	}
+}

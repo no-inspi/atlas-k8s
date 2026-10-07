@@ -126,7 +126,8 @@ func backendState(exists ServiceExists, ns, name string) string {
 }
 
 func ConvertIngress(i *networkingv1.Ingress, gate string, exists ServiceExists) model.Route {
-	r := model.Route{Source: "Ingress", Group: "networking.k8s.io", Namespace: i.Namespace, Name: i.Name, Gate: gate, Rules: []model.Rule{}}
+	r := model.Route{Source: model.SourceIngress, Group: "networking.k8s.io", Namespace: i.Namespace, Name: i.Name,
+		Gate: gate, Gates: []string{gate}, Rules: []model.Rule{}}
 	add := func(host, path string, b *networkingv1.IngressBackend) {
 		if b == nil || b.Service == nil {
 			return // backend « resource » : hors jalon
@@ -180,7 +181,8 @@ func ConvertIngressRoute(u *unstructured.Unstructured, exists ServiceExists) mod
 	if gate == "" {
 		gate = traefikGate
 	}
-	r := model.Route{Source: "IngressRoute", Group: u.GroupVersionKind().Group, Namespace: u.GetNamespace(), Name: u.GetName(), Gate: gate, Rules: []model.Rule{}}
+	r := model.Route{Source: model.SourceIngressRoute, Group: u.GroupVersionKind().Group, Namespace: u.GetNamespace(), Name: u.GetName(),
+		Gate: gate, Gates: []string{gate}, Rules: []model.Rule{}}
 	routes, _, _ := unstructured.NestedSlice(u.Object, "spec", "routes")
 	for _, ro := range routes {
 		rm, ok := ro.(map[string]any)
