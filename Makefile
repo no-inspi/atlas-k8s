@@ -134,8 +134,10 @@ scenarios: crds
 run-kind: build
 	$(BIN) --auth-mode=none --context $(KIND_CTX) --cluster-name kind-atlas
 
-test-integration: embed-dir
-	go test -tags integration -count=1 -v ./internal/kube -run Live
+# Contexte forcé sur kind : les tests suppriment et réinstallent des CRD.
+test-integration: embed-dir crds
+	ATLAS_CONTEXT=$(KIND_CTX) GATEWAY_API_CRDS=$(abspath $(GATEWAY_API_CRDS)) TRAEFIK_CRDS=$(abspath $(TRAEFIK_CRDS)) \
+		go test -tags integration -count=1 -v ./internal/kube -run Live
 
 # --- Image et chart --------------------------------------------------------
 
