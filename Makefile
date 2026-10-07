@@ -1,4 +1,4 @@
-.PHONY: deploy load-up load-down kind-oidc helm-kind-oidc dev-demo dex-up dex-down run-dev e2e-auth helm-kind image image-push scan web build test test-go test-web demo dev e2e embed-dir clean kind-up kind-down scenarios run-kind test-integration crds
+.PHONY: deploy load-up load-down kind-oidc helm-kind-oidc dev-demo dex-up dex-down run-dev e2e-auth helm-kind image image-push scan web build test test-go test-web demo dev e2e embed-dir clean kind-up kind-down scenarios run-kind test-integration crds scenarios-restore
 
 BIN := bin/atlas
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -121,23 +121,42 @@ crds: $(GATEWAY_API_CRDS) $(TRAEFIK_CRDS)
 
 scenarios: crds
 	kubectl --context $(KIND_CTX) apply -f hack/scenarios/
-	kubectl --context $(KIND_CTX) apply --server-side -f $(TRAEFIK_CRDS)
-	kubectl --context $(KIND_CTX) apply --server-side -f $(GATEWAY_API_CRDS)
-	kubectl --context $(KIND_CTX) wait --for condition=established --timeout=60s \
+	$(RESTORE_SCENARIOS)
+
+# CRD tierces et scénarios qui en dépendent : ce que test-integration retire.
+# Une seule ligne shell, réutilisée telle quelle par test-integration (sans
+# make imbriqué, qui ferait exécuter la recette même sous make -n).
+RESTORE_SCENARIOS = kubectl --context $(KIND_CTX) apply --server-side -f $(TRAEFIK_CRDS) \
+	&& kubectl --context $(KIND_CTX) apply --server-side -f $(GATEWAY_API_CRDS) \
+	&& kubectl --context $(KIND_CTX) wait --for condition=established --timeout=60s \
 		crd/ingressroutes.traefik.io crd/ingressroutetcps.traefik.io crd/ingressrouteudps.traefik.io crd/traefikservices.traefik.io \
-		crd/gateways.gateway.networking.k8s.io crd/httproutes.gateway.networking.k8s.io crd/grpcroutes.gateway.networking.k8s.io
-	kubectl --context $(KIND_CTX) apply -f hack/scenarios-traefik/
-	kubectl --context $(KIND_CTX) apply -f hack/scenarios-gateway/gateways.yaml
-	hack/scenarios-gateway/status.sh $(KIND_CTX)
+		crd/gatewayclasses.gateway.networking.k8s.io crd/gateways.gateway.networking.k8s.io \
+		crd/httproutes.gateway.networking.k8s.io crd/grpcroutes.gateway.networking.k8s.io \
+	&& kubectl --context $(KIND_CTX) apply -f hack/scenarios-traefik/ \
+	&& kubectl --context $(KIND_CTX) apply -f hack/scenarios-gateway/gateways.yaml \
+	&& hack/scenarios-gateway/status.sh $(KIND_CTX)
+
+scenarios-restore: crds
+	$(RESTORE_SCENARIOS)
 
 # Atlas contre le cluster kind, sans authentification (jalon 4 : OIDC via Dex).
 run-kind: build
 	$(BIN) --auth-mode=none --context $(KIND_CTX) --cluster-name kind-atlas
 
-# Contexte forcé sur kind : les tests suppriment et réinstallent des CRD.
+# Contexte forcé sur kind : les tests suppriment et réinstallent des CRD. Quoi
+# qu'il arrive (échec, délai de 5 min, Ctrl+C), les objets des tests sont
+# retirés et les CRD et scénarios réappliqués ; le code de sortie est celui de go test (1 si la remise en état
+# échoue après des tests verts).
 test-integration: embed-dir crds
+	@status=0; trap 'status=130' INT TERM; \
 	ATLAS_CONTEXT=$(KIND_CTX) GATEWAY_API_CRDS=$(abspath $(GATEWAY_API_CRDS)) TRAEFIK_CRDS=$(abspath $(TRAEFIK_CRDS)) \
-		go test -tags integration -count=1 -v ./internal/kube -run Live
+		go test -tags integration -count=1 -timeout 5m -v ./internal/kube -run Live || status=$$?; \
+	trap - INT TERM; \
+	echo "remise en état du cluster $(KIND_CTX)"; \
+	kubectl --context $(KIND_CTX) delete namespace atlas-it atlas-it-svc atlas-it-gw atlas-it-traefik --ignore-not-found --wait=false; \
+	kubectl --context $(KIND_CTX) delete pv atlas-it-orphan --ignore-not-found --wait=false; \
+	{ $(RESTORE_SCENARIOS); } || { echo "remise en état incomplète"; [ $$status -ne 0 ] || status=1; }; \
+	exit $$status
 
 # --- Image et chart --------------------------------------------------------
 

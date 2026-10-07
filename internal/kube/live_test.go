@@ -6,6 +6,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -16,14 +17,17 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/no-inspi/atlas-k8s/internal/model"
 	"github.com/no-inspi/atlas-k8s/internal/stream"
 )
 
 // liveContext : contexte kube des tests d'intégration (ATLAS_CONTEXT, kind-atlas
-// par défaut). Ces tests créent des objets et suppriment des CRD : tout contexte
-// qui n'est pas un cluster kind est refusé.
+// par défaut). Ces tests créent des objets et suppriment des CRD : un contexte
+// n'est accepté que s'il s'appelle kind-… ET que son API server, lu dans le
+// kubeconfig (mêmes règles de chargement que kubectl), est en boucle locale.
+// À lire une fois par test, avant tout t.Cleanup qui en dépend.
 func liveContext(t *testing.T) string {
 	t.Helper()
 	c := os.Getenv("ATLAS_CONTEXT")
@@ -33,13 +37,34 @@ func liveContext(t *testing.T) string {
 	if !strings.HasPrefix(c, "kind-") {
 		t.Fatalf("ATLAS_CONTEXT=%q refusé : les tests d'intégration ne visent qu'un cluster kind (kind-…)", c)
 	}
+	raw, err := clientcmd.NewDefaultClientConfigLoadingRules().Load()
+	if err != nil {
+		t.Skipf("kubeconfig illisible : %v", err)
+	}
+	kc, ok := raw.Contexts[c]
+	if !ok {
+		t.Skipf("pas de contexte %q dans le kubeconfig : make kind-up", c)
+	}
+	cl, ok := raw.Clusters[kc.Cluster]
+	if !ok {
+		t.Fatalf("contexte %q refusé : cluster %q absent du kubeconfig", c, kc.Cluster)
+	}
+	u, err := url.Parse(cl.Server)
+	if err != nil {
+		t.Fatalf("contexte %q refusé : serveur %q illisible : %v", c, cl.Server, err)
+	}
+	switch u.Hostname() {
+	case "127.0.0.1", "localhost", "::1":
+	default:
+		t.Fatalf("contexte %q refusé : serveur %q hors boucle locale (pas un cluster kind)", c, cl.Server)
+	}
 	return c
 }
 
-// startLive branche une source et un hub sur le cluster kind (liveContext).
-func startLive(t *testing.T) (*kubernetes.Clientset, *stream.Subscription, context.Context) {
+// startLive branche une source et un hub sur le cluster du contexte kctx (liveContext).
+func startLive(t *testing.T, kctx string) (*kubernetes.Clientset, *stream.Subscription, context.Context) {
 	t.Helper()
-	rc, err := RestConfig("", liveContext(t))
+	rc, err := RestConfig("", kctx)
 	if err != nil {
 		t.Skipf("pas de cluster : %v", err)
 	}
@@ -62,21 +87,21 @@ func startLive(t *testing.T) (*kubernetes.Clientset, *stream.Subscription, conte
 	return client, sub, ctx
 }
 
-// kubectl lance kubectl sur le contexte des tests ; stdin : manifeste éventuel (« -f - »).
-func kubectl(t *testing.T, stdin string, args ...string) {
+// kubectl lance kubectl sur le contexte kctx (liveContext) ; stdin : manifeste éventuel (« -f - »).
+func kubectl(t *testing.T, kctx, stdin string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("kubectl", append([]string{"--context", liveContext(t)}, args...)...)
+	cmd := exec.Command("kubectl", append([]string{"--context", kctx}, args...)...)
 	cmd.Stdin = strings.NewReader(stdin)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("kubectl %s : %v\n%s", strings.Join(args, " "), err, out)
 	}
 }
 
-// restore : commande de remise en état (kubectl sur le contexte des tests, ou
-// script qui le reçoit en argument), journalisée sans faire échouer le test.
-func restore(t *testing.T, args ...string) {
+// restore : commande kubectl de remise en état sur kctx, pour les t.Cleanup :
+// journalisée en cas d'erreur, sans t.Fatal.
+func restore(t *testing.T, kctx string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("kubectl", append([]string{"--context", liveContext(t)}, args...)...)
+	cmd := exec.Command("kubectl", append([]string{"--context", kctx}, args...)...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Logf("remise en état : kubectl %s : %v\n%s", strings.Join(args, " "), err, out)
 	}
@@ -132,7 +157,7 @@ func waitFor(t *testing.T, sub *stream.Subscription, what string, match func(str
 // cluster (make kind-up). Mesure jusqu'au lot diffusé par le hub, regroupement
 // de 250 ms compris.
 func TestLiveLatency(t *testing.T) {
-	client, sub, ctx := startLive(t)
+	client, sub, ctx := startLive(t, liveContext(t))
 
 	const ns = "atlas-it"
 	_, _ = client.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}, metav1.CreateOptions{})
@@ -172,7 +197,7 @@ func TestLiveLatency(t *testing.T) {
 
 // TestLiveServiceEndpoints : supprimer un pod endpoint met à jour son Service en moins de 2 s.
 func TestLiveServiceEndpoints(t *testing.T) {
-	client, sub, ctx := startLive(t)
+	client, sub, ctx := startLive(t, liveContext(t))
 	const ns = "atlas-it-svc"
 	_, _ = client.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}, metav1.CreateOptions{})
 	t.Cleanup(func() { _ = client.CoreV1().Namespaces().Delete(context.Background(), ns, metav1.DeleteOptions{}) })
@@ -240,52 +265,63 @@ const gatewayProgrammed = `{"status":{"conditions":[` +
 // TestLiveGatewayCRDHot : Atlas démarre sans la Gateway API ; une HTTPRoute
 // créée après l'installation des CRD est diffusée en moins de 5 s, le statut
 // écrit sur son Gateway aussi, et supprimer la CRD retire la route du flux.
-// Les scénarios Gateway API (make scenarios) sont remis en place à la fin.
+//
+// Supprimer les CRD Gateway API emporte TOUS les objets Gateway API du cluster
+// kind (GatewayClass, Gateways, HTTPRoute, GRPCRoute, ReferenceGrant), pas
+// seulement ceux du test : seuls les scénarios (hack/scenarios-gateway/) sont
+// recréés à la fin, tout autre objet Gateway API ajouté à la main est perdu.
 func TestLiveGatewayCRDHot(t *testing.T) {
 	crds := manifest(t, "GATEWAY_API_CRDS")
 	kctx := liveContext(t)
-	// Retire les CRD (et avec elles les objets des scénarios), remis en place à la fin.
 	t.Cleanup(func() {
-		restore(t, "delete", "namespace", "atlas-it-gw", "--ignore-not-found", "--wait=true")
-		restore(t, "apply", "--server-side", "-f", crds)
-		restore(t, "wait", "--for", "condition=established", "--timeout=60s",
+		restore(t, kctx, "delete", "namespace", "atlas-it-gw", "--ignore-not-found", "--wait=true")
+		restore(t, kctx, "apply", "--server-side", "-f", crds)
+		restore(t, kctx, "wait", "--for", "condition=established", "--timeout=60s",
 			"crd/gatewayclasses.gateway.networking.k8s.io", "crd/gateways.gateway.networking.k8s.io",
 			"crd/httproutes.gateway.networking.k8s.io", "crd/grpcroutes.gateway.networking.k8s.io")
-		restore(t, "apply", "-f", "../../hack/scenarios-gateway/gateways.yaml")
+		restore(t, kctx, "apply", "-f", "../../hack/scenarios-gateway/gateways.yaml")
 		if out, err := exec.Command("../../hack/scenarios-gateway/status.sh", kctx).CombinedOutput(); err != nil {
 			t.Logf("remise en état : status.sh : %v\n%s", err, out)
 		}
 	})
-	kubectl(t, "", "delete", "--ignore-not-found", "--wait=true", "-f", crds)
-	_, sub, _ := startLive(t)
+	kubectl(t, kctx, "", "delete", "--ignore-not-found", "--wait=true", "-f", crds)
+	_, sub, _ := startLive(t, kctx)
 
-	kubectl(t, "", "apply", "--server-side", "-f", crds)
-	kubectl(t, "", "wait", "--for", "condition=established", "--timeout=60s",
+	kubectl(t, kctx, "", "apply", "--server-side", "-f", crds)
+	kubectl(t, kctx, "", "wait", "--for", "condition=established", "--timeout=60s",
 		"crd/gateways.gateway.networking.k8s.io", "crd/httproutes.gateway.networking.k8s.io")
+	// Chronomètres partis AVANT kubectl : waitFor ne commence à lire le flux
+	// qu'après le retour de kubectl, et le message peut déjà être diffusé ;
+	// le délai mesuré majore donc celui vu par un client (aller-retour de
+	// kubectl compris), ce qui rend le seuil de 5 s plus strict, pas plus lâche.
 	start := time.Now()
-	kubectl(t, gatewayFixture, "apply", "-f", "-")
+	kubectl(t, kctx, gatewayFixture, "apply", "-f", "-")
 	_ = waitFor(t, sub, "HTTPRoute après l'installation des CRD", isRoute("upsert", model.SourceHTTPRoute, "atlas-it-gw", "web", func(r model.Route) bool {
 		b := backends(r)
 		return len(r.Gates) == 1 && r.Gates[0] == "atlas-it-gw/gw" &&
 			w(b["web"]) == 900 && w(b["web-canary"]) == 100 && b["web-canary"].State == model.BackendMissing
 	}))
-	seen := time.Since(start)
-	t.Logf("HTTPRoute visible %v après sa création (CRD installées après le démarrage)", seen)
-	if seen > 5*time.Second {
-		t.Errorf("HTTPRoute visible en %v (> 5 s)", seen)
+	visible := time.Since(start)
+	t.Logf("HTTPRoute visible %v après sa création (CRD installées après le démarrage)", visible)
+	if visible > 5*time.Second {
+		t.Errorf("HTTPRoute visible en %v (> 5 s)", visible)
 	}
 
 	// Pas de contrôleur dans kind : le statut est écrit à la main.
-	kubectl(t, "", "-n", "atlas-it-gw", "patch", "gateway", "gw", "--subresource=status", "--type=merge", "-p", gatewayProgrammed)
+	kubectl(t, kctx, "", "-n", "atlas-it-gw", "patch", "gateway", "gw", "--subresource=status", "--type=merge", "-p", gatewayProgrammed)
 	_ = waitFor(t, sub, "Gateway programmé", func(m stream.Message) bool {
 		g, ok := m.Obj.(model.Gateway)
 		return m.Type == "upsert" && ok && g.Namespace == "atlas-it-gw" && g.Name == "gw" && g.Programmed == model.CondTrue
 	})
 
 	start = time.Now()
-	kubectl(t, "", "delete", "crd", "httproutes.gateway.networking.k8s.io", "--wait=true")
+	kubectl(t, kctx, "", "delete", "crd", "httproutes.gateway.networking.k8s.io", "--wait=true")
 	_ = waitFor(t, sub, "route retirée avec sa CRD", isRoute("delete", model.SourceHTTPRoute, "atlas-it-gw", "web", nil))
-	t.Logf("route retirée %v après la suppression de la CRD", time.Since(start))
+	gone := time.Since(start)
+	t.Logf("route retirée %v après la suppression de la CRD", gone)
+	if gone > 5*time.Second {
+		t.Errorf("route retirée en %v (> 5 s)", gone)
+	}
 }
 
 const traefikFixture = `
@@ -339,42 +375,47 @@ spec:
 
 // TestLiveTraefikServiceAndPV : la CRD des TraefikService installée après le
 // démarrage est prise en compte, une IngressRoute qui en vise un se résout en
-// Services pondérés en moins de 5 s, et un PV sans PVC est publié. Les
+// Services pondérés en moins de 5 s, et un PV sans PVC est publié, Released. Les
 // scénarios Traefik (make scenarios) sont remis en place à la fin.
 func TestLiveTraefikServiceAndPV(t *testing.T) {
 	crds := manifest(t, "TRAEFIK_CRDS")
-	_ = liveContext(t) // garde de contexte avant toute remise en état
+	kctx := liveContext(t)
 	t.Cleanup(func() {
-		restore(t, "delete", "namespace", "atlas-it-traefik", "--ignore-not-found", "--wait=true")
-		restore(t, "delete", "pv", "atlas-it-orphan", "--ignore-not-found")
-		restore(t, "apply", "--server-side", "-f", crds)
-		restore(t, "wait", "--for", "condition=established", "--timeout=60s", "crd/traefikservices.traefik.io")
-		restore(t, "apply", "-f", "../../hack/scenarios-traefik/")
+		restore(t, kctx, "delete", "namespace", "atlas-it-traefik", "--ignore-not-found", "--wait=true")
+		restore(t, kctx, "delete", "pv", "atlas-it-orphan", "--ignore-not-found")
+		restore(t, kctx, "apply", "--server-side", "-f", crds)
+		restore(t, kctx, "wait", "--for", "condition=established", "--timeout=60s", "crd/traefikservices.traefik.io")
+		restore(t, kctx, "apply", "-f", "../../hack/scenarios-traefik/")
 	})
-	kubectl(t, "", "delete", "crd", "traefikservices.traefik.io", "--ignore-not-found", "--wait=true")
-	_, sub, _ := startLive(t)
+	kubectl(t, kctx, "", "delete", "crd", "traefikservices.traefik.io", "--ignore-not-found", "--wait=true")
+	_, sub, _ := startLive(t, kctx)
 
-	kubectl(t, "", "apply", "--server-side", "-f", crds)
-	kubectl(t, "", "wait", "--for", "condition=established", "--timeout=60s", "crd/traefikservices.traefik.io")
+	kubectl(t, kctx, "", "apply", "--server-side", "-f", crds)
+	kubectl(t, kctx, "", "wait", "--for", "condition=established", "--timeout=60s", "crd/traefikservices.traefik.io")
+	// Chronomètre parti avant kubectl : voir TestLiveGatewayCRDHot.
 	start := time.Now()
-	kubectl(t, traefikFixture, "apply", "-f", "-")
+	kubectl(t, kctx, traefikFixture, "apply", "-f", "-")
 	_ = waitFor(t, sub, "IngressRoute via un TraefikService", isRoute("upsert", model.SourceIngressRoute, "atlas-it-traefik", "split", func(r model.Route) bool {
 		b := backends(r)
 		return w(b["a"]) == 750 && w(b["b"]) == 250 && b["a"].Via == "atlas-it-traefik/split" && b["a"].State == model.BackendOK
 	}))
-	seen := time.Since(start)
-	t.Logf("route résolue %v après sa création", seen)
-	if seen > 5*time.Second {
-		t.Errorf("route résolue en %v (> 5 s)", seen)
+	resolved := time.Since(start)
+	t.Logf("route résolue %v après sa création", resolved)
+	if resolved > 5*time.Second {
+		t.Errorf("route résolue en %v (> 5 s)", resolved)
 	}
 
+	// Le contrôleur de PV passe le volume en Released (son claimRef vise un
+	// PVC absent) : le flux doit porter cette phase.
 	start = time.Now()
-	kubectl(t, orphanPV, "apply", "-f", "-")
-	_ = waitFor(t, sub, "PV sans PVC", func(m stream.Message) bool {
+	kubectl(t, kctx, orphanPV, "apply", "-f", "-")
+	_ = waitFor(t, sub, "PV sans PVC, Released", func(m stream.Message) bool {
 		p, ok := m.Obj.(model.PersistentVolume)
-		return m.Type == "upsert" && ok && p.Name == "atlas-it-orphan" && p.ClaimRef == "atlas-it-traefik/gone"
+		return m.Type == "upsert" && ok && p.Name == "atlas-it-orphan" && p.ClaimRef == "atlas-it-traefik/gone" && p.Phase == "Released"
 	})
-	if seen := time.Since(start); seen > 5*time.Second {
-		t.Errorf("PV visible en %v (> 5 s)", seen)
+	released := time.Since(start)
+	t.Logf("PV Released visible %v après sa création", released)
+	if released > 5*time.Second {
+		t.Errorf("PV Released visible en %v (> 5 s)", released)
 	}
 }

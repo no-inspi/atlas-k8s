@@ -31,7 +31,8 @@ k -n infra patch gateway internal --subresource=status --type=merge -p "{\"statu
   \"listeners\":[$(listener http 1 False Pending)]}}"
 k -n kube-system patch gateway platform --subresource=status --type=merge -p "{\"status\":{
   \"conditions\":[$(cond Accepted True Accepted),$(cond Programmed True Programmed)],
-  \"listeners\":[$(listener http 0 True Programmed)]}}"
+  \"listeners\":[$(listener http 1 True Programmed)]}}"
 k -n production patch httproute storefront --subresource=status --type=merge -p "{\"status\":{\"parents\":[$(parent infra public True Accepted)]}}"
+k -n kube-system patch httproute platform-dns --subresource=status --type=merge -p "{\"status\":{\"parents\":[$(parent kube-system platform True Accepted)]}}"
 k -n staging patch httproute preview --subresource=status --type=merge -p "{\"status\":{\"parents\":[$(parent infra public False NotAllowedByListeners)]}}"
 echo "statut Gateway API écrit"
