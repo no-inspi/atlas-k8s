@@ -2,6 +2,7 @@ package kube
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strconv"
@@ -162,6 +163,7 @@ func ConvertIngress(i *networkingv1.Ingress, gate string, exists ServiceExists) 
 var (
 	hostRe = regexp.MustCompile("Host\\([`\"]([^`\"]+)[`\"]")
 	pathRe = regexp.MustCompile("(?:PathPrefix|Path)\\([`\"]([^`\"]+)[`\"]")
+	sniRe  = regexp.MustCompile("HostSNI\\([`\"]([^`\"]+)[`\"]")
 )
 
 // parseMatch extrait le premier Host() et le premier Path()/PathPrefix() d'une règle Traefik.
@@ -175,13 +177,134 @@ func parseMatch(match string) (host, path string) {
 	return host, path
 }
 
-// ConvertIngressRoute lit une IngressRoute Traefik (traefik.io ou traefik.containo.us).
+// TraefikLookup retrouve un TraefikService (traefik.io d'abord). nil : aucun n'est lisible.
+type TraefikLookup func(namespace, name string) (*unstructured.Unstructured, bool)
+
+// traefikMaxDepth borne la résolution des TraefikService imbriqués.
+const traefikMaxDepth = 8
+
+// ConvertIngressRoute : IngressRoute HTTP, sans résolution des TraefikService.
 func ConvertIngressRoute(u *unstructured.Unstructured, exists ServiceExists) model.Route {
+	return ConvertTraefikRoute(u, model.SourceIngressRoute, exists, nil)
+}
+
+// traefikRef lit une référence de service Traefik (routes[].services[],
+// weighted.services[], mirroring et ses mirrors[]).
+func traefikRef(ns string, m map[string]any) (refNS, name, kind, port string) {
+	refNS = ns
+	name, _ = m["name"].(string)
+	if n, _ := m["namespace"].(string); n != "" {
+		refNS = n
+	}
+	kind, _ = m["kind"].(string)
+	if kind == "" {
+		kind = "Service"
+	}
+	if p, ok := m["port"]; ok && p != nil {
+		port = fmt.Sprint(p)
+	}
+	return refNS, name, kind, port
+}
+
+// weightOf : poids Traefik d'une référence, 1 par défaut.
+func weightOf(m map[string]any) float64 {
+	if w, ok := m["weight"]; ok && w != nil {
+		return float64(toInt(w))
+	}
+	return 1
+}
+
+// leaf : backend final d'une règle Traefik, avec sa part du trafic (0 à 1).
+type leaf struct {
+	b     model.Backend
+	share float64
+}
+
+// resolveTraefik résout le TraefikService ns/name jusqu'à ses Services. weighted :
+// chaque enfant reçoit sa part normalisée ; mirroring : le service principal
+// garde toute la part, chaque miroir devient une feuille mirror avec son
+// percent. ok=false : introuvable, cycle, plus de traefikMaxDepth niveaux, ou
+// ni weighted ni mirroring.
+func resolveTraefik(lookup TraefikLookup, ns, name string) ([]leaf, bool) {
+	var out []leaf
+	path := map[string]bool{}
+	var walk func(ns, name string, share float64, depth int, mirror bool, percent int) bool
+	walk = func(ns, name string, share float64, depth int, mirror bool, percent int) bool {
+		key := ns + "/" + name
+		if lookup == nil || depth > traefikMaxDepth || path[key] {
+			return false
+		}
+		u, ok := lookup(ns, name)
+		if !ok {
+			return false
+		}
+		path[key] = true
+		defer delete(path, key)
+		visit := func(m map[string]any, share float64, mirror bool, percent int) bool {
+			rns, rname, kind, port := traefikRef(ns, m)
+			if kind == "TraefikService" {
+				return walk(rns, rname, share, depth+1, mirror, percent)
+			}
+			out = append(out, leaf{b: model.Backend{Namespace: rns, Service: rname, Port: port, Kind: kind, Mirror: mirror, Percent: percent}, share: share})
+			return true
+		}
+		if ws, found, _ := unstructured.NestedSlice(u.Object, "spec", "weighted", "services"); found {
+			total := 0.0
+			for _, x := range ws {
+				if m, ok := x.(map[string]any); ok {
+					total += weightOf(m)
+				}
+			}
+			for _, x := range ws {
+				m, ok := x.(map[string]any)
+				if !ok {
+					continue
+				}
+				s := 0.0
+				if total > 0 {
+					s = share * weightOf(m) / total
+				}
+				if !visit(m, s, mirror, percent) {
+					return false
+				}
+			}
+			return true
+		}
+		if main, found, _ := unstructured.NestedMap(u.Object, "spec", "mirroring"); found {
+			if !visit(main, share, mirror, percent) {
+				return false
+			}
+			mirrors, _ := main["mirrors"].([]any)
+			for _, x := range mirrors {
+				m, ok := x.(map[string]any)
+				if !ok {
+					continue
+				}
+				if !visit(m, 0, true, int(toInt(m["percent"]))) {
+					return false
+				}
+			}
+			return true
+		}
+		return false
+	}
+	if !walk(ns, name, 1, 1, false, 0) {
+		return nil, false
+	}
+	return out, true
+}
+
+// ConvertTraefikRoute lit une IngressRoute, IngressRouteTCP ou IngressRouteUDP
+// (traefik.io ou traefik.containo.us). Chaque service de chaque routes[] donne
+// une règle ; un TraefikService est remplacé par ses Services (via : son nom),
+// ou par une seule règle missing s'il ne se résout pas. Les poids, en pour
+// mille de la route, ne sont publiés que s'il y a plusieurs backends non miroirs.
+func ConvertTraefikRoute(u *unstructured.Unstructured, source string, exists ServiceExists, lookup TraefikLookup) model.Route {
 	gate := u.GetAnnotations()[ingressClassAnnotation]
 	if gate == "" {
 		gate = traefikGate
 	}
-	r := model.Route{Source: model.SourceIngressRoute, Group: u.GroupVersionKind().Group, Namespace: u.GetNamespace(), Name: u.GetName(),
+	r := model.Route{Source: source, Group: u.GroupVersionKind().Group, Namespace: u.GetNamespace(), Name: u.GetName(),
 		Gate: gate, Gates: []string{gate}, Rules: []model.Rule{}}
 	routes, _, _ := unstructured.NestedSlice(u.Object, "spec", "routes")
 	for _, ro := range routes {
@@ -191,34 +314,107 @@ func ConvertIngressRoute(u *unstructured.Unstructured, exists ServiceExists) mod
 		}
 		match, _ := rm["match"].(string)
 		host, path := parseMatch(match)
+		if source != model.SourceIngressRoute {
+			host, path = "", ""
+			if m := sniRe.FindStringSubmatch(match); m != nil && m[1] != "*" {
+				host = m[1]
+			}
+		}
 		services, _ := rm["services"].([]any)
+		total := 0.0
+		for _, so := range services {
+			if sm, ok := so.(map[string]any); ok {
+				total += weightOf(sm)
+			}
+		}
+		var leaves []leaf
 		for _, so := range services {
 			sm, ok := so.(map[string]any)
 			if !ok {
 				continue
 			}
-			name, _ := sm["name"].(string)
-			ns, _ := sm["namespace"].(string)
-			if ns == "" {
-				ns = r.Namespace
+			share := 0.0
+			if total > 0 {
+				share = weightOf(sm) / total
 			}
-			kind, _ := sm["kind"].(string)
-			if kind == "" {
-				kind = "Service"
+			ns, name, kind, port := traefikRef(r.Namespace, sm)
+			if kind != "TraefikService" {
+				leaves = append(leaves, leaf{b: model.Backend{Namespace: ns, Service: name, Port: port, Kind: kind}, share: share})
+				continue
 			}
-			port := ""
-			if p, ok := sm["port"]; ok && p != nil {
-				port = fmt.Sprint(p)
+			sub, ok := resolveTraefik(lookup, ns, name)
+			if !ok {
+				leaves = append(leaves, leaf{b: model.Backend{Namespace: ns, Service: name, Kind: kind, State: model.BackendMissing}, share: share})
+				continue
 			}
-			state := model.BackendIndirect
-			if kind == "Service" {
-				state = backendState(exists, ns, name)
+			for _, l := range sub {
+				l.b.Via = ns + "/" + name
+				l.share *= share
+				leaves = append(leaves, l)
 			}
-			r.Rules = append(r.Rules, model.Rule{Host: host, Path: path, Match: match,
-				Backend: model.Backend{Namespace: ns, Service: name, Port: port, Kind: kind, State: state}})
+		}
+		weighted := 0
+		for _, l := range leaves {
+			if !l.b.Mirror {
+				weighted++
+			}
+		}
+		for _, l := range leaves {
+			b := l.b
+			if b.State == "" {
+				b.State = backendState(exists, b.Namespace, b.Service)
+			}
+			if weighted > 1 && !b.Mirror {
+				b.Weight = model.Weight(int(math.Round(l.share * 1000)))
+			}
+			r.Rules = append(r.Rules, model.Rule{Host: host, Path: path, Match: match, Backend: b})
 		}
 	}
 	return r
+}
+
+// traefikRefs : Services et TraefikService visés directement par une route
+// Traefik ou par un TraefikService (index de la source), « ns/name », sans doublon.
+func traefikRefs(u *unstructured.Unstructured) (services, tservices []string) {
+	ns := u.GetNamespace()
+	seen := map[string]bool{}
+	add := func(x any) {
+		m, ok := x.(map[string]any)
+		if !ok {
+			return
+		}
+		rns, name, kind, _ := traefikRef(ns, m)
+		k := kind + ":" + rns + "/" + name
+		if name == "" || seen[k] {
+			return
+		}
+		seen[k] = true
+		if kind == "TraefikService" {
+			tservices = append(tservices, rns+"/"+name)
+		} else {
+			services = append(services, rns+"/"+name)
+		}
+	}
+	routes, _, _ := unstructured.NestedSlice(u.Object, "spec", "routes")
+	for _, ro := range routes {
+		rm, _ := ro.(map[string]any)
+		svcs, _ := rm["services"].([]any)
+		for _, s := range svcs {
+			add(s)
+		}
+	}
+	ws, _, _ := unstructured.NestedSlice(u.Object, "spec", "weighted", "services")
+	for _, s := range ws {
+		add(s)
+	}
+	if main, found, _ := unstructured.NestedMap(u.Object, "spec", "mirroring"); found {
+		add(main)
+		mirrors, _ := main["mirrors"].([]any)
+		for _, s := range mirrors {
+			add(s)
+		}
+	}
+	return services, tservices
 }
 
 // routeBackends : Services visés (« ns/name »), pour l'index des routes par Service.

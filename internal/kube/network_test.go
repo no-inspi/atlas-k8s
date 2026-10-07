@@ -160,7 +160,7 @@ func TestConvertIngressRoute(t *testing.T) {
 	if a := r.Rules[1].Backend; a.Namespace != "sso" || a.Port != "http" || a.State != model.BackendMissing {
 		t.Errorf("auth = %+v", a)
 	}
-	if w := r.Rules[2].Backend; w.Kind != "TraefikService" || w.State != model.BackendIndirect {
+	if w := r.Rules[2].Backend; w.Kind != "TraefikService" || w.State != model.BackendMissing {
 		t.Errorf("weighted = %+v", w)
 	}
 	if got := routeBackends(r); len(got) != 2 {
