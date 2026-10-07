@@ -191,6 +191,12 @@ func TestDemoNetworkInspector(t *testing.T) {
 	if y := yamlOf(inspect.Ref{Version: "v1", Kind: "PersistentVolumeClaim", Namespace: "staging", Name: "uploads-preview"}); !strings.Contains(y, "phase: Pending") {
 		t.Errorf("PVC :\n%s", y)
 	}
+	if y := yamlOf(inspect.Ref{Version: "v1", Kind: "Service", Namespace: "kube-system", Name: "kube-dns"}); !strings.Contains(y, "app.kubernetes.io/name: coredns") {
+		t.Errorf("le sélecteur vise le workload, pas le Service :\n%s", y)
+	}
+	if _, err := s.YAML(ctx, anyone, inspect.Ref{Group: "traefik.containo.us", Version: "v1alpha1", Kind: "IngressRoute", Namespace: "monitoring", Name: "grafana"}); err == nil {
+		t.Error("IngressRoute d'un autre groupe : erreur attendue")
+	}
 	if _, err := s.YAML(ctx, anyone, inspect.Ref{Version: "v1", Kind: "Service", Namespace: "production", Name: "absent"}); err == nil {
 		t.Error("Service absent : erreur attendue")
 	}

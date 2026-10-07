@@ -147,7 +147,11 @@ func run() error {
 		default:
 			return fmt.Errorf("--auth-mode inconnu %q (oidc | none)", f.authMode)
 		}
-		src, err := startClusterSource(ctx, f, rc, client, hub, log)
+		dyn, err := dynamic.NewForConfig(rc)
+		if err != nil {
+			return err
+		}
+		src, err := startClusterSource(ctx, f, rc, client, dyn, hub, log)
 		if err != nil {
 			return err
 		}
@@ -156,10 +160,6 @@ func run() error {
 		if cfg.Auth != nil {
 			authorize = cfg.Reviewer.Allowed
 		} else {
-			dyn, err := dynamic.NewForConfig(rc)
-			if err != nil {
-				return err
-			}
 			clients = access.Static{K: client, D: dyn, C: rc}
 		}
 		cfg.Inspect = kube.NewInspector(clients, src, authorize)
@@ -221,12 +221,8 @@ func newAuth(ctx context.Context, o oidcFlags, log *slog.Logger) (*auth.Auth, er
 }
 
 // startClusterSource branche les informers et metrics-server sur le hub.
-func startClusterSource(ctx context.Context, f flags, rc *rest.Config, client kubernetes.Interface, hub *stream.Hub, log *slog.Logger) (*kube.Source, error) {
+func startClusterSource(ctx context.Context, f flags, rc *rest.Config, client kubernetes.Interface, dyn dynamic.Interface, hub *stream.Hub, log *slog.Logger) (*kube.Source, error) {
 	mc, err := metricsclient.NewForConfig(rc)
-	if err != nil {
-		return nil, err
-	}
-	dyn, err := dynamic.NewForConfig(rc)
 	if err != nil {
 		return nil, err
 	}

@@ -66,7 +66,8 @@ Le remplissage des citernes (espace utilisé) est hors jalon. Il demanderait soi
 
 ### Droits
 
-- **ServiceAccount** (chart) : `list` et `watch` sur `services`, `persistentvolumeclaims`, `endpointslices` (`discovery.k8s.io`), `ingresses` et `ingressclasses` (`networking.k8s.io`), `ingressroutes` (`traefik.io` et `traefik.containo.us`). Toujours aucune écriture.
+- **ServiceAccount** (chart) : `list` et `watch` sur `services`, `persistentvolumeclaims`, `endpointslices` (`discovery.k8s.io`), `ingresses` et `ingressclasses` (`networking.k8s.io`), `ingressroutes` (`traefik.io` et `traefik.containo.us`) ; `get` en plus sur `services`, `persistentvolumeclaims`, `ingresses` et `ingressroutes`, pour l'onglet YAML en `auth.mode=none` (le client du ServiceAccount y sert), comme pour les pods et les workloads. Toujours aucune écriture.
+- **Sondes** : chaque type est sondé par un list d'essai (borné à 10 s) ; refusé ou absent, il est désactivé. Les EndpointSlices sont sondées d'abord : refusées, les Services sont désactivés aussi (sinon chaque Service paraîtrait `down`), et les backends des routes sont réputés présents.
 - **Filtre du flux** (`internal/access`), même mécanisme que pour les pods :
   - `service` exige `list services` dans son namespace ;
   - `route` exige `list ingresses` (`networking.k8s.io`) ou `list ingressroutes` (groupe de la ressource) ;

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -29,10 +30,15 @@ const (
 
 var probeOpts = metav1.ListOptions{Limit: 1}
 
+// probeTimeout borne chaque list d'essai : un API server lent ne bloque pas le démarrage.
+const probeTimeout = 10 * time.Second
+
 // probe : list d'essai. Refusé (403) ou absent (404) : le type est désactivé
 // plutôt que de bloquer la synchronisation des caches. Une autre erreur
 // (API server momentanément injoignable) laisse l'informer réessayer.
 func (s *Source) probe(ctx context.Context, what string, list func(context.Context) error) bool {
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
 	err := list(ctx)
 	if err != nil && (apierrors.IsForbidden(err) || apierrors.IsNotFound(err)) {
 		s.opts.Log.Warn("type désactivé : le ServiceAccount ne peut pas le lister", "type", what, "err", err)
@@ -44,11 +50,8 @@ func (s *Source) probe(ctx context.Context, what string, list func(context.Conte
 // startNetwork branche les informers du jalon 8 ; à appeler avant factory.Start.
 func (s *Source) startNetwork(ctx context.Context) {
 	c, f := s.client, s.factory
-	if s.probe(ctx, "services", func(ctx context.Context) error { _, err := c.CoreV1().Services("").List(ctx, probeOpts); return err }) {
-		inf := f.Core().V1().Services()
-		s.services = inf.Lister()
-		s.watch(inf.Informer(), s.onService)
-	}
+	// EndpointSlices d'abord : sans elles, chaque Service paraîtrait down, on
+	// préfère ne pas publier de Services du tout.
 	if s.probe(ctx, "endpointslices", func(ctx context.Context) error {
 		_, err := c.DiscoveryV1().EndpointSlices("").List(ctx, probeOpts)
 		return err
@@ -63,6 +66,13 @@ func (s *Source) startNetwork(ctx context.Context) {
 		}})
 		s.slices = inf.GetIndexer()
 		s.watch(inf, s.onEndpointSlice)
+		if s.probe(ctx, "services", func(ctx context.Context) error { _, err := c.CoreV1().Services("").List(ctx, probeOpts); return err }) {
+			inf := f.Core().V1().Services()
+			s.services = inf.Lister()
+			s.watch(inf.Informer(), s.onService)
+		}
+	} else {
+		s.opts.Log.Warn("services désactivés : endpointslices non listables")
 	}
 	if s.probe(ctx, "persistentvolumeclaims", func(ctx context.Context) error {
 		_, err := c.CoreV1().PersistentVolumeClaims("").List(ctx, probeOpts)

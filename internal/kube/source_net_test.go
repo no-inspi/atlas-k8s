@@ -110,3 +110,65 @@ func TestForbiddenTypeIsDisabled(t *testing.T) {
 		t.Error("les PVC restent publiés")
 	}
 }
+
+// Sans EndpointSlices, chaque Service paraîtrait down : les Services sont désactivés aussi.
+func TestForbiddenEndpointSlicesDisableServices(t *testing.T) {
+	client := fake.NewClientset(netFixtures()...)
+	client.PrependReactor("list", "endpointslices", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(schema.GroupResource{Group: "discovery.k8s.io", Resource: "endpointslices"}, "", errors.New("refusé"))
+	})
+	_, sk := startSourceWith(t, client, Options{})
+	if _, ok := sk.get(stream.KindService, "prod/api"); ok {
+		t.Error("Service publié sans EndpointSlices")
+	}
+	r, ok := sk.get(stream.KindRoute, "Ingress/prod/storefront")
+	if !ok || r.(model.Route).Rules[1].Backend.State != model.BackendOK {
+		t.Errorf("sans Services, un backend est réputé présent : %+v", r)
+	}
+	if _, ok := sk.get(stream.KindVolume, "prod/data"); !ok {
+		t.Error("les PVC restent publiés")
+	}
+}
+
+func TestServiceDeletedTurnsBackendMissing(t *testing.T) {
+	client, sk := startSource(t, netFixtures()...)
+	if err := client.CoreV1().Services("prod").Delete(context.Background(), "api", metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "backend manquant", func() bool {
+		o, _ := sk.get(stream.KindRoute, "Ingress/prod/storefront")
+		return o.(model.Route).Rules[0].Backend.State == model.BackendMissing
+	})
+}
+
+func TestSucceededPodLeavesVolume(t *testing.T) {
+	client, sk := startSource(t, netFixtures()...)
+	ctx := context.Background()
+	p, _ := client.CoreV1().Pods("prod").Get(ctx, "db-0", metav1.GetOptions{})
+	p.Status.Phase = corev1.PodSucceeded
+	if _, err := client.CoreV1().Pods("prod").UpdateStatus(ctx, p, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "pod terminé hors du volume", func() bool {
+		o, _ := sk.get(stream.KindVolume, "prod/data")
+		return len(o.(model.Volume).Pods) == 0
+	})
+}
+
+func TestDefaultIngressClassRegatesIngress(t *testing.T) {
+	bare := &networkingv1.Ingress{ObjectMeta: metav1.ObjectMeta{Name: "bare", Namespace: "prod"}}
+	client, sk := startSource(t, append(netFixtures(), bare)...)
+	id := "Ingress/prod/bare"
+	if o, ok := sk.get(stream.KindRoute, id); !ok || o.(model.Route).Gate != "default" {
+		t.Fatalf("route = %v %+v", ok, o)
+	}
+	cls := &networkingv1.IngressClass{ObjectMeta: metav1.ObjectMeta{Name: "traefik",
+		Annotations: map[string]string{defaultClassAnnotation: "true"}}}
+	if _, err := client.NetworkingV1().IngressClasses().Create(context.Background(), cls, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "porte par défaut", func() bool {
+		o, _ := sk.get(stream.KindRoute, id)
+		return o.(model.Route).Gate == "traefik"
+	})
+}

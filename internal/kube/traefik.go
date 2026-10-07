@@ -2,7 +2,9 @@ package kube
 
 import (
 	"context"
+	"log/slog"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
@@ -23,11 +25,14 @@ type traefikInformer struct {
 // traefikGroupsServed : groupes dont l'API server sert les IngressRoute.
 // La découverte a lieu au démarrage : une CRD installée ensuite est prise en
 // compte au prochain redémarrage.
-func traefikGroupsServed(d discovery.DiscoveryInterface) []string {
+func traefikGroupsServed(d discovery.DiscoveryInterface, log *slog.Logger) []string {
 	var out []string
 	for _, g := range traefikGroups {
 		rl, err := d.ServerResourcesForGroupVersion(g + "/v1alpha1")
 		if err != nil {
+			if !apierrors.IsNotFound(err) {
+				log.Warn("découverte Traefik impossible", "group", g, "err", err)
+			}
 			continue
 		}
 		for _, r := range rl.APIResources {
@@ -37,6 +42,9 @@ func traefikGroupsServed(d discovery.DiscoveryInterface) []string {
 			}
 		}
 	}
+	if len(out) > 0 {
+		log.Info("IngressRoute Traefik servies", "groups", out)
+	}
 	return out
 }
 
@@ -45,7 +53,7 @@ func (s *Source) startTraefik(ctx context.Context) {
 	if dyn == nil {
 		return
 	}
-	for _, g := range traefikGroupsServed(s.client.Discovery()) {
+	for _, g := range traefikGroupsServed(s.client.Discovery(), s.opts.Log) {
 		gvr := schema.GroupVersionResource{Group: g, Version: "v1alpha1", Resource: "ingressroutes"}
 		if !s.probe(ctx, "ingressroutes."+g, func(ctx context.Context) error {
 			_, err := dyn.Resource(gvr).List(ctx, probeOpts)

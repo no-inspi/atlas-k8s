@@ -11,6 +11,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
@@ -224,5 +225,15 @@ func TestTransformStripsUnusedFields(t *testing.T) {
 	d, _ := transform(&appsv1.Deployment{Spec: appsv1.DeploymentSpec{Replicas: i32(2), Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c"}}}}}})
 	if dd := d.(*appsv1.Deployment); dd.Spec.Template.Spec.Containers != nil || *dd.Spec.Replicas != 2 {
 		t.Errorf("deployment = %+v", dd.Spec)
+	}
+	u := &unstructured.Unstructured{Object: map[string]any{"metadata": map[string]any{"name": "r",
+		"managedFields": []any{map[string]any{"manager": "x"}},
+		"annotations":   map[string]any{corev1.LastAppliedConfigAnnotation: "{}", "keep": "1"}}}}
+	uo, _ := transform(u)
+	if a := uo.(*unstructured.Unstructured).GetAnnotations(); a[corev1.LastAppliedConfigAnnotation] != "" || a["keep"] != "1" {
+		t.Errorf("annotations unstructured = %v", a)
+	}
+	if mf := uo.(*unstructured.Unstructured).GetManagedFields(); mf != nil {
+		t.Errorf("managedFields unstructured = %v", mf)
 	}
 }

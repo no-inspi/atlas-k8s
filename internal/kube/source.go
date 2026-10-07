@@ -15,6 +15,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/dynamicinformer"
@@ -468,6 +469,9 @@ func transform(obj any) (any, error) {
 		delete(a, corev1.LastAppliedConfigAnnotation)
 	}
 	switch o := obj.(type) {
+	case *unstructured.Unstructured:
+		// GetAnnotations y renvoie une copie : on retire dans l'objet lui-même.
+		unstructured.RemoveNestedField(o.Object, "metadata", "annotations", corev1.LastAppliedConfigAnnotation)
 	case *corev1.Pod:
 		o.Spec.Volumes = claimVolumes(o.Spec.Volumes) // PVC montés (jalon 8), rien d'autre
 		slimContainers(o.Spec.InitContainers)

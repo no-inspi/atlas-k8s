@@ -232,7 +232,14 @@ func (s *Sim) netObject(ref inspect.Ref) map[string]any {
 		if m.Type == "ExternalName" {
 			spec["externalName"] = m.ExternalName
 		} else {
-			spec["selector"] = map[string]any{"app.kubernetes.io/name": m.Name}
+			workload := m.Name
+			for _, d := range s.catalog.services {
+				if d.NS == m.Namespace && d.Name == m.Name {
+					workload = d.Workload
+					break
+				}
+			}
+			spec["selector"] = map[string]any{"app.kubernetes.io/name": workload}
 			spec["clusterIP"] = m.ClusterIP
 			if m.Headless {
 				spec["clusterIP"] = "None"
@@ -260,7 +267,7 @@ func (s *Sim) netObject(ref inspect.Ref) map[string]any {
 		return map[string]any{"apiVersion": "v1", "kind": "PersistentVolumeClaim", "metadata": meta, "spec": spec, "status": status}
 	case "Ingress", "IngressRoute":
 		r, ok := s.netLast["route|"+ref.Kind+"/"+ref.Namespace+"/"+ref.Name].(model.Route)
-		if !ok {
+		if !ok || (ref.Kind == "IngressRoute" && ref.Group != r.Group) {
 			return nil
 		}
 		if ref.Kind == "Ingress" {
