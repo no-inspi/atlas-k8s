@@ -83,6 +83,7 @@ type Sim struct {
 	pods        []*simPod
 	nextChurn   time.Time
 	nextMetrics time.Time
+	netLast     map[string]any // dernier modèle publié par « kind|clé » (réseau et stockage)
 }
 
 // New construit le cluster, place les pods initiaux et publie l'état complet.
@@ -92,7 +93,7 @@ func New(sink Sink, opts Options) *Sim {
 		now = time.Now()
 	}
 	s := &Sim{sink: sink, rng: rand.New(rand.NewPCG(opts.Seed, opts.Seed^0x9e3779b97f4a7c15)), now: now,
-		catalog: catalogFor(opts.Scale)}
+		catalog: catalogFor(opts.Scale), netLast: map[string]any{}}
 	s.buildNodes()
 	for _, d := range s.catalog.workloads {
 		w := &simWorkload{def: d, replicas: d.Replicas, hash: s.rid(10)}
@@ -105,6 +106,7 @@ func New(sink Sink, opts Options) *Sim {
 	s.placeInitialPods()
 	s.nextChurn = now.Add(secs(churnPeriodSec))
 	s.flush()
+	s.flushNetwork()
 	s.publishMetrics()
 	return s
 }
@@ -134,6 +136,7 @@ func (s *Sim) Step(now time.Time) {
 	s.churn()
 	s.schedule()
 	s.flush()
+	s.flushNetwork()
 	if !now.Before(s.nextMetrics) {
 		s.publishMetrics()
 	}

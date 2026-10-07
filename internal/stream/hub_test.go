@@ -200,3 +200,17 @@ func TestReady(t *testing.T) {
 		t.Fatal("hub non prêt après MarkReady")
 	}
 }
+
+func TestSnapshotCarriesNetworkAndStorage(t *testing.T) {
+	h := NewHub(Options{})
+	h.Upsert(KindService, "prod/b", model.Service{Namespace: "prod", Name: "b"})
+	h.Upsert(KindService, "prod/a", model.Service{Namespace: "prod", Name: "a"})
+	h.Upsert(KindRoute, "Ingress/prod/web", model.Route{Source: "Ingress", Namespace: "prod", Name: "web"})
+	h.Upsert(KindVolume, "prod/data", model.Volume{Namespace: "prod", Name: "data"})
+	init, sub := h.Subscribe(0)
+	defer sub.Close()
+	m := init[0]
+	if m.Type != "snapshot" || len(m.Services) != 2 || m.Services[0].Name != "a" || len(m.Routes) != 1 || len(m.Volumes) != 1 {
+		t.Fatalf("snapshot = %+v", m)
+	}
+}

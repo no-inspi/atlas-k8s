@@ -75,7 +75,7 @@ test('un clic dans la ville ouvre l’inspecteur, qui navigue entre node et pod'
       opened = await panel.evaluate((el) => el.classList.contains('open'))
     }
   expect(opened).toBe(true)
-  await expect(panel.getByText(/^(Pod|Node) · /)).toBeVisible()
+  await expect(panel.locator('.p-kind').filter({ hasText: /^(Pod|Node|Service|PVC|IngressRoute|Ingress|Porte)/ })).toBeVisible()
   await page.waitForTimeout(1500) // fin de la transition du panneau (lente en WebGL logiciel)
   await page.screenshot({ path: 'e2e/__screenshots__/demo-inspector.png' })
 
@@ -84,6 +84,7 @@ test('un clic dans la ville ouvre l’inspecteur, qui navigue entre node et pod'
     await panel.locator('.podlist button').first().click()
     await expect(panel.getByText(/^Pod · /)).toBeVisible()
   }
+  if (!(await panel.getByText(/^Pod · /).isVisible())) return // objet réseau : couvert par network.spec.ts
   await expect(panel.getByRole('heading', { name: 'Containers' })).toBeVisible()
   await expect(panel.getByRole('heading', { name: 'Ressources' })).toBeVisible()
   await panel.getByRole('button', { name: /^gke-prod-/ }).click()

@@ -1,13 +1,18 @@
-import { useEffect } from 'react'
+import { useEffect, type ReactNode } from 'react'
+import { eventsResource, routeRef, serviceRef, volumeRef, type Ref } from '../api/inspect'
 import type { Pod } from '../api/types'
 import { clusterColors } from '../scene/colors'
+import { HEALTH_LABEL, healthSignal, volumeSignal } from '../scene/health'
 import { postureFor } from '../scene/posture'
-import { useCluster, type InspectorTab } from '../store/cluster'
+import { useCluster, type InspectorTab, type Selection } from '../store/cluster'
+import { gatesOf, readyCount, routeBroken } from '../store/net'
 import { BADGE } from './common'
 import { EventsTab } from './EventsTab'
 import { LogsTab } from './LogsTab'
+import { GateOverview, RouteOverview, ServiceOverview, VolumeOverview } from './NetOverview'
 import { GhostNode, NodeOverview } from './NodeOverview'
 import { PodOverview } from './PodOverview'
+import { RefYamlTab } from './RefYamlTab'
 import { TerminalTab } from './TerminalTab'
 import { YamlTab } from './YamlTab'
 
@@ -53,10 +58,82 @@ function PodBody({ p }: { p: Pod }) {
     case 'yaml':
       return <div className="p-body flush"><YamlTab p={p} /></div>
     case 'events':
-      return <EventsTab p={p} />
+      return <EventsTab ns={p.namespace} name={p.name} />
     default:
       return <PodOverview p={p} />
   }
+}
+
+const NET_TABS: [InspectorTab, string][] = [['overview', 'Aperçu'], ['yaml', 'YAML'], ['events', 'Événements']]
+
+function NetBody({ target, children }: { target: Ref; children: ReactNode }) {
+  const tab = useCluster((s) => s.inspectorTab)
+  if (tab === 'yaml') return <div className="p-body flush"><RefYamlTab target={target} /></div>
+  if (tab === 'events') {
+    return <EventsTab ns={target.namespace} name={target.name} resource={eventsResource(target.kind)} empty="Aucun événement récent pour cet objet." />
+  }
+  return <>{children}</>
+}
+
+/** Panneau d'un Service, d'une route, d'une porte ou d'un PVC. */
+function NetPanel({ selection, onClose }: { selection: NonNullable<Selection>; onClose: () => void }) {
+  const st = useCluster.getState()
+  const colors = clusterColors(st)
+  const gone = (kind: string, text: string) => (
+    <>
+      <Head kind={kind} name={selection.name} badge="Supprimé" badgeClass="s-mute" tabs={[['overview', 'Aperçu']]} onClose={onClose} />
+      <div className="gone">{text}</div>
+    </>
+  )
+  switch (selection.type) {
+    case 'service': {
+      const s = st.services.get(selection.key)
+      if (!s) return gone('Service', 'Ce Service a été supprimé.')
+      const badge = s.health === 'external' || s.health === 'down' ? HEALTH_LABEL[s.health] : `${readyCount(s)}/${s.endpoints.length} ready`
+      return (
+        <>
+          <Head kind={`Service · ${s.namespace}`} name={s.name} badge={badge} badgeClass={BADGE[healthSignal(s.health)]}
+            color={colors.get(s.namespace)} tabs={NET_TABS} onClose={onClose} />
+          <NetBody target={serviceRef(s)}><ServiceOverview s={s} /></NetBody>
+        </>
+      )
+    }
+    case 'route': {
+      const r = st.routes.get(selection.key)
+      if (!r) return gone('Route', 'Cette route a été supprimée.')
+      const broken = routeBroken(r)
+      return (
+        <>
+          <Head kind={`${r.source} · ${r.namespace}`} name={r.name} badge={broken ? 'Service introuvable' : `Porte ${r.gate}`}
+            badgeClass={broken ? 's-err' : 's-ok'} color={colors.get(r.namespace)} tabs={NET_TABS} onClose={onClose} />
+          <NetBody target={routeRef(r)}><RouteOverview r={r} /></NetBody>
+        </>
+      )
+    }
+    case 'volume': {
+      const v = st.volumes.get(selection.key)
+      if (!v) return gone('PVC', 'Ce PVC a été supprimé.')
+      return (
+        <>
+          <Head kind={`PVC · ${v.namespace}`} name={v.name} badge={v.phase} badgeClass={BADGE[volumeSignal(v)]}
+            color={colors.get(v.namespace)} tabs={NET_TABS} onClose={onClose} />
+          <NetBody target={volumeRef(v)}><VolumeOverview v={v} /></NetBody>
+        </>
+      )
+    }
+    case 'gate': {
+      const g = gatesOf(st.routes.values()).find((x) => x.name === selection.key)
+      if (!g) return gone("Porte d'entrée", 'Plus aucune route ne passe par cette porte.')
+      return (
+        <>
+          <Head kind="Porte d'entrée" name={g.name} badge={g.broken ? `${g.broken} route(s) cassée(s)` : `${g.routes.length} route(s)`}
+            badgeClass={g.broken ? 's-warn' : 's-ok'} tabs={[['overview', 'Aperçu']]} onClose={onClose} />
+          <GateOverview g={g} />
+        </>
+      )
+    }
+  }
+  return null
 }
 
 export function Inspector() {
@@ -115,6 +192,8 @@ export function Inspector() {
         <div className="gone">Ce node n'existe plus.</div>
       </>
     )
+  } else if (selection) {
+    content = <NetPanel selection={selection} onClose={close} />
   }
 
   return <aside className={`panel ${selection ? 'open' : ''}`} aria-label="Inspecteur" aria-hidden={!selection}>{content}</aside>

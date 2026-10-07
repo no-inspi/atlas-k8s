@@ -1,6 +1,10 @@
 package demo
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/no-inspi/atlas-k8s/internal/model"
+)
 
 // Scale décrit un cluster simulé agrandi pour mesurer les performances
 // (atlas --demo --demo-scale=100x30) : Nodes nodes et environ PodsPerNode pods
@@ -13,6 +17,9 @@ type Scale struct {
 type catalog struct {
 	pools     []poolDef
 	workloads []workloadDef
+	services  []serviceDef
+	routes    []model.Route
+	volumes   []volumeDef
 }
 
 // Workloads d'une équipe simulée : 25 pods, CPU modeste.
@@ -30,7 +37,7 @@ const teamPods = 25
 
 func catalogFor(sc Scale) catalog {
 	if sc.Nodes == 0 {
-		return catalog{pools: pools, workloads: workloads}
+		return catalog{pools: pools, workloads: workloads, services: services, routes: baseRoutes, volumes: volumes}
 	}
 	// Répartition des nodes : 60 % standard, 30 % spot, le reste en GPU (au moins 1).
 	gpu := max(1, sc.Nodes/25)
@@ -42,6 +49,9 @@ func catalogFor(sc Scale) catalog {
 		{Name: "gpu-pool", Machine: "g2-standard-8", CPU: 7910, Mem: 27000 * mi, GPU: 1, Count: gpu},
 	}}
 	c.workloads = append(c.workloads, workloads...)
+	c.services = append(c.services, services...)
+	c.routes = append(c.routes, baseRoutes...)
+	c.volumes = append(c.volumes, volumes...)
 	// Pods déjà prévus : catalogue de base (≈ 30) et un node-exporter par node.
 	target := sc.Nodes*sc.PodsPerNode - 30 - sc.Nodes
 	for i := 1; i <= max(0, target/teamPods); i++ {
@@ -50,6 +60,10 @@ func catalogFor(sc Scale) catalog {
 			w.NS, w.Image, w.Argo = ns, registry+w.Name+":1.0."+fmt.Sprint(i%10), i%3 != 0
 			c.workloads = append(c.workloads, w)
 		}
+		svcs, routes, vols := teamNetwork(i, ns)
+		c.services = append(c.services, svcs...)
+		c.routes = append(c.routes, routes...)
+		c.volumes = append(c.volumes, vols...)
 	}
 	return c
 }

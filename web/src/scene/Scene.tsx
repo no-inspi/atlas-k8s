@@ -4,10 +4,12 @@ import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import { shallow } from 'zustand/shallow'
-import { useCluster } from '../store/cluster'
+import { useCluster, type SelectionType } from '../store/cluster'
 import { Buildings } from './Buildings'
 import { PerfMeter, perfEnabled } from './PerfMeter'
 import { City } from './City'
+import { Links } from './GroundLinks'
+import { Network } from './Network'
 import { pickables } from './pick'
 import { Pods } from './Pods'
 import { Selection } from './Selection'
@@ -50,11 +52,17 @@ function CameraRig() {
     const fit = size.height / viewHeight
     c.minZoom = fit * ZOOM_MIN
     c.maxZoom = fit * ZOOM_MAX
+    // Caméra orthographique : sa distance ne change pas l'image, mais elle doit
+    // dépasser la demi-diagonale de la ville (entrepôts compris), sans quoi le
+    // plan proche rogne le sol au premier plan.
+    const dist = Math.max(80, Math.hypot(bounds.width, bounds.depth))
+    camera.far = dist * 3
     if (first) {
       c.target.set(bounds.x, 0, bounds.z)
-      camera.position.copy(CAMERA_DIR).multiplyScalar(80).add(c.target)
+      camera.position.copy(CAMERA_DIR).multiplyScalar(dist).add(c.target)
       camera.zoom = fit
     } else {
+      camera.position.sub(c.target).setLength(dist).add(c.target)
       camera.zoom = THREE.MathUtils.clamp(camera.zoom, c.minZoom, c.maxZoom)
     }
     camera.updateProjectionMatrix()
@@ -103,7 +111,7 @@ function CameraRig() {
 function StoreInvalidator() {
   const invalidate = useThree((s) => s.invalidate)
   useEffect(() => {
-    const stop = useCluster.subscribe((s) => [s.version, s.selection, s.nsFilter, s.podView, s.hover?.uid] as const, () => invalidate(), { equalityFn: shallow })
+    const stop = useCluster.subscribe((s) => [s.version, s.selection, s.nsFilter, s.podView, s.hover?.uid, s.hoverNet] as const, () => invalidate(), { equalityFn: shallow })
     const onVisible = () => invalidate()
     document.addEventListener('visibilitychange', onVisible)
     return () => { stop(); document.removeEventListener('visibilitychange', onVisible) }
@@ -124,19 +132,27 @@ function Picker() {
     let frame = 0
     const el = gl.domElement
 
-    const hitAt = (clientX: number, clientY: number) => {
+    const hitAt = (clientX: number, clientY: number): { type: SelectionType; key: string } | null => {
       const r = el.getBoundingClientRect()
       ptr.set(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1)
       ray.setFromCamera(ptr, camera)
       const pods = pickables.pods.meshes, nodes = pickables.nodes.meshes
-      const hit = ray.intersectObjects([...pods, ...nodes], false)[0]
+      const net = pickables.net.map((n) => n.mesh)
+      const hit = ray.intersectObjects([...pods, ...nodes, ...net], false)[0]
       if (!hit || hit.instanceId === undefined) return null
       if (pods.includes(hit.object as THREE.InstancedMesh)) {
         const uid = pickables.pods.uids[hit.instanceId]
-        return uid ? { type: 'pod' as const, key: uid } : null
+        return uid ? { type: 'pod', key: uid } : null
+      }
+      const owner = pickables.net.find((n) => n.mesh === hit.object)
+      if (owner) {
+        const k = owner.keys[hit.instanceId]
+        if (!k) return null // relais regroupé : passer par la recherche ou la liste
+        const i = k.indexOf(':')
+        return { type: k.slice(0, i) as SelectionType, key: k.slice(i + 1) }
       }
       const name = pickables.nodes.names[hit.instanceId]
-      return name ? { type: 'node' as const, key: name } : null
+      return name ? { type: 'node', key: name } : null
     }
 
     const onDown = (e: PointerEvent) => { down = { x: e.clientX, y: e.clientY } }
@@ -151,14 +167,17 @@ function Picker() {
       frame = requestAnimationFrame(() => {
         const hit = hitAt(e.clientX, e.clientY)
         const pod = hit?.type === 'pod' ? hit.key : null
+        const netKey = hit && hit.type !== 'pod' && hit.type !== 'node' ? `${hit.type}:${hit.key}` : null
         el.style.cursor = hit ? 'pointer' : ''
         useCluster.getState().setHover(pod ? { uid: pod, x: e.clientX, y: e.clientY } : null)
+        useCluster.getState().setHoverNet(netKey)
       })
     }
     const onLeave = () => {
       cancelAnimationFrame(frame)
       el.style.cursor = ''
       useCluster.getState().setHover(null)
+      useCluster.getState().setHoverNet(null)
     }
     el.addEventListener('pointerdown', onDown)
     el.addEventListener('pointerup', onUp)
@@ -222,9 +241,11 @@ export function Scene() {
       <Lights theme={theme} />
       <City theme={theme} />
       <Buildings theme={theme} />
+      <Links theme={theme} reducedMotion={reducedMotion} />
+      <Network theme={theme} reducedMotion={reducedMotion} />
       <Pods theme={theme} reducedMotion={reducedMotion} />
       <Stacks theme={theme} />
-      <Selection theme={theme} />
+      <Selection theme={theme} reducedMotion={reducedMotion} />
       <CameraRig />
       <Picker />
       <StoreInvalidator />

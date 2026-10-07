@@ -100,6 +100,12 @@ func TestStreamFilter(t *testing.T) {
 	}{
 		{stream.KindPod, model.Pod{Namespace: "production"}, true},
 		{stream.KindPod, model.Pod{Namespace: "kube-system"}, false},
+		{stream.KindService, model.Service{Namespace: "production"}, true},
+		{stream.KindService, model.Service{Namespace: "kube-system"}, false},
+		{stream.KindRoute, model.Route{Source: "Ingress", Namespace: "production"}, true},
+		{stream.KindRoute, model.Route{Source: "IngressRoute", Group: "traefik.io", Namespace: "kube-system"}, false},
+		{stream.KindVolume, model.Volume{Namespace: "production"}, true},
+		{stream.KindVolume, model.Volume{Namespace: "kube-system"}, false},
 		{stream.KindWorkload, model.Workload{Kind: "Deployment", Namespace: "production"}, true},
 		{stream.KindWorkload, model.Workload{Kind: "Job", Namespace: "kube-system"}, false},
 		{stream.KindNamespace, model.Namespace{Name: "production"}, true},
@@ -182,5 +188,22 @@ func TestClientsImpersonate(t *testing.T) {
 	cfg := c.configFor(alice)
 	if cfg.Impersonate.UserName != "alice" || len(cfg.Impersonate.Groups) != 1 || cfg.Impersonate.Groups[0] != "oidc:sre" {
 		t.Errorf("impersonation = %+v", cfg.Impersonate)
+	}
+}
+
+func TestNetworkAttributes(t *testing.T) {
+	cases := []struct {
+		obj  any
+		want Attributes
+	}{
+		{model.Service{Namespace: "a"}, Attributes{Verb: "list", Resource: "services", Namespace: "a"}},
+		{model.Route{Source: "Ingress", Group: "networking.k8s.io", Namespace: "a"}, Attributes{Verb: "list", Group: "networking.k8s.io", Resource: "ingresses", Namespace: "a"}},
+		{model.Route{Source: "IngressRoute", Group: "traefik.containo.us", Namespace: "a"}, Attributes{Verb: "list", Group: "traefik.containo.us", Resource: "ingressroutes", Namespace: "a"}},
+		{model.Volume{Namespace: "a"}, Attributes{Verb: "list", Resource: "persistentvolumeclaims", Namespace: "a"}},
+	}
+	for _, c := range cases {
+		if got, ok := attributes("", c.obj); !ok || got != c.want {
+			t.Errorf("%+v : %+v, attendu %+v", c.obj, got, c.want)
+		}
 	}
 }

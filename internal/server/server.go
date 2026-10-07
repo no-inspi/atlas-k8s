@@ -99,7 +99,7 @@ func New(cfg Config, hub *stream.Hub, log *slog.Logger) http.Handler {
 		r.Post("/access-review", s.accessReview)
 		if cfg.Inspect != nil {
 			r.Get("/namespaces/{ns}/pods/{pod}/owner", s.owner)
-			r.Get("/namespaces/{ns}/pods/{pod}/events", s.events)
+			r.Get("/namespaces/{ns}/{resource}/{name}/events", s.events)
 			r.Get("/yaml/{group}/{version}/{kind}/{ns}/{name}", s.yaml)
 			r.Handle("/namespaces/{ns}/pods/{pod}/logs", logs.Handler(cfg.Inspect, s.session, logs.Options{}, log))
 		}
@@ -301,8 +301,14 @@ func (s *server) owner(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"chain": chain})
 }
 
+// events : /api/namespaces/{ns}/{resource}/{name}/events (pods, services, persistentvolumeclaims, ingresses, ingressroutes…).
 func (s *server) events(w http.ResponseWriter, r *http.Request) {
-	evs, err := s.cfg.Inspect.Events(r.Context(), s.user(r), chi.URLParam(r, "ns"), chi.URLParam(r, "pod"))
+	kind, ok := inspect.KindForResource(chi.URLParam(r, "resource"))
+	if !ok {
+		apiError(w, inspect.ErrUnsupportedKind)
+		return
+	}
+	evs, err := s.cfg.Inspect.Events(r.Context(), s.user(r), kind, chi.URLParam(r, "ns"), chi.URLParam(r, "name"))
 	if err != nil {
 		apiError(w, err)
 		return

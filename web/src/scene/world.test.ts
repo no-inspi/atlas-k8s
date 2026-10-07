@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { World } from './world'
-import { BLOCK_MIN, type PodView } from './podView'
-import { node, pod } from '../store/fixtures'
+import { BLOCK_MIN, DEFAULT_VIEW, type PodView } from './podView'
+import { node, pod, route, service, volume } from '../store/fixtures'
 
 const state = (version: number, nodes = [node()], pods = [pod()]) => ({
   version,
@@ -65,6 +65,15 @@ describe('réglages d’affichage', () => {
     expect(w.targets.has('dns')).toBe(true)
   })
 
+  it('ne recalcule pas quand le namespace choisi ne change aucune visibilité', () => {
+    const w = new World()
+    const shown: PodView = { sort: 'name', hideSystem: false, hiddenKinds: [] }
+    w.update(withView(shown))
+    expect(w.update(withView(shown, 'production'))).toBe(false)
+    w.update(withView({ ...shown, hideSystem: true }))
+    expect(w.update(withView({ ...shown, hideSystem: true }, 'kube-system'))).toBe(true)
+  })
+
   it('masque les types de workload choisis', () => {
     const w = new World()
     w.update(withView({ sort: 'name', hideSystem: false, hiddenKinds: ['DaemonSet'] }))
@@ -125,5 +134,47 @@ describe('regroupement : cas limites', () => {
     w.update(state(1, [node()], pods))
     expect(w.stacks).toHaveLength(6)
     expect(w.stacks.every((s) => s.owner.startsWith('ns-'))).toBe(true)
+  })
+})
+
+describe('réseau et stockage', () => {
+  const st = (version: number, extra: Partial<{ hideSystem: boolean }> = {}) => ({
+    ...state(version, [node()], [pod({ uid: 'u1' })]),
+    services: new Map([['production/api', service()], ['kube-system/kube-dns', service({ namespace: 'kube-system', name: 'kube-dns', endpoints: [] })]]),
+    routes: new Map([['Ingress/production/storefront', route()]]),
+    volumes: new Map([['production/data-0', volume()]]),
+    podView: { ...DEFAULT_VIEW, hideSystem: extra.hideSystem ?? true },
+  })
+
+  it('dispose relais, portes et citernes, et trace les liens', () => {
+    const w = new World()
+    w.update(st(1))
+    expect([...w.net!.relays.keys()]).toEqual(['production/api']) // kube-system masqué
+    expect([...w.net!.gates.keys()]).toEqual(['nginx'])
+    expect(w.net!.tanks.has('production/data-0')).toBe(true)
+    expect(w.links.map((l) => l.family).sort()).toEqual(['data', 'fibre', 'main'])
+    expect(w.layout!.bounds.width).toBeGreaterThan(0)
+    const w2 = new World()
+    w2.update(st(1, { hideSystem: false }))
+    expect(w2.net!.relays.has('kube-system/kube-dns')).toBe(true)
+  })
+
+  it('estompe hors du chemin d’une sélection réseau, pas d’une sélection de pod', () => {
+    const w = new World()
+    w.update(st(1))
+    const f = w.focusFor({ type: 'service', key: 'production/api', name: 'api' }, null, null)
+    expect(f.dim).toBe(true)
+    expect(f.path!.has('pod:u1')).toBe(true)
+    expect(w.focusFor({ type: 'pod', key: 'u1', name: 'x' }, null, null).dim).toBe(false)
+    expect(w.focusFor(null, 'gate:nginx', null).hover!.has('service:production/api')).toBe(true)
+    expect(w.focusFor(null, null, null)).toEqual({ path: null, hover: null, dim: false })
+  })
+
+  it('situe un objet réseau', () => {
+    const w = new World()
+    w.update(st(1))
+    expect(w.positionOf('service', 'production/api')).toEqual(expect.objectContaining({ x: expect.any(Number) }))
+    expect(w.positionOf('route', 'Ingress/production/storefront')).toEqual(w.positionOf('gate', 'nginx'))
+    expect(w.positionOf('volume', 'absent')).toBeNull()
   })
 })

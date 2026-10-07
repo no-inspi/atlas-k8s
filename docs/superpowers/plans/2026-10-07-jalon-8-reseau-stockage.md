@@ -2513,18 +2513,22 @@ Après la règle `[nodes, pods, namespaces, events]`, ajouter :
 
 ```yaml
   # Jalon 8 : Services, entrées et PVC (lecture seule ; un type refusé est désactivé).
+  # get : onglet YAML en auth.mode=none, où le client du ServiceAccount sert.
   - apiGroups: [""]
     resources: [services, persistentvolumeclaims]
-    verbs: [list, watch]
+    verbs: [get, list, watch]
   - apiGroups: [discovery.k8s.io]
     resources: [endpointslices]
     verbs: [list, watch]
   - apiGroups: [networking.k8s.io]
-    resources: [ingresses, ingressclasses]
+    resources: [ingresses]
+    verbs: [get, list, watch]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingressclasses]
     verbs: [list, watch]
   - apiGroups: [traefik.io, traefik.containo.us]
     resources: [ingressroutes]
-    verbs: [list, watch]
+    verbs: [get, list, watch]
 ```
 
 - [ ] **Step 2 : vérifier**

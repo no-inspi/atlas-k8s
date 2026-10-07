@@ -11,6 +11,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
@@ -92,9 +93,16 @@ var lastSource *Source
 
 func startSource(t *testing.T, objs ...runtime.Object) (*fake.Clientset, *sink) {
 	t.Helper()
-	client := fake.NewClientset(objs...)
+	return startSourceWith(t, fake.NewClientset(objs...), Options{})
+}
+
+// startSourceWith démarre une source sur un client préparé (réacteurs, découverte).
+func startSourceWith(t *testing.T, client *fake.Clientset, opts Options) (*fake.Clientset, *sink) {
+	t.Helper()
 	sk := newSink()
-	src := NewSource(client, sk, Options{Log: slog.New(slog.NewTextHandler(io.Discard, nil)), ReconcileInterval: 10 * time.Millisecond})
+	opts.Log = slog.New(slog.NewTextHandler(io.Discard, nil))
+	opts.ReconcileInterval = 10 * time.Millisecond
+	src := NewSource(client, sk, opts)
 	lastSource = src
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -205,8 +213,27 @@ func TestTransformStripsUnusedFields(t *testing.T) {
 	if q.Spec.Volumes != nil || q.Spec.Containers[0].Env != nil || q.Spec.Containers[0].Command != nil || q.Spec.Containers[0].Image != "i" {
 		t.Errorf("spec = %+v", q.Spec)
 	}
+	withClaims, _ := transform(&corev1.Pod{Spec: corev1.PodSpec{Volumes: []corev1.Volume{
+		{Name: "data", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "c", ReadOnly: true}}},
+		{Name: "tmp", VolumeSource: corev1.VolumeSource{Ephemeral: &corev1.EphemeralVolumeSource{VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{}}}},
+		{Name: "secret", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: "s"}}},
+	}}})
+	vs := withClaims.(*corev1.Pod).Spec.Volumes
+	if len(vs) != 2 || vs[0].PersistentVolumeClaim.ClaimName != "c" || vs[0].PersistentVolumeClaim.ReadOnly || vs[1].Ephemeral.VolumeClaimTemplate != nil {
+		t.Errorf("volumes gardés = %+v", vs)
+	}
 	d, _ := transform(&appsv1.Deployment{Spec: appsv1.DeploymentSpec{Replicas: i32(2), Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c"}}}}}})
 	if dd := d.(*appsv1.Deployment); dd.Spec.Template.Spec.Containers != nil || *dd.Spec.Replicas != 2 {
 		t.Errorf("deployment = %+v", dd.Spec)
+	}
+	u := &unstructured.Unstructured{Object: map[string]any{"metadata": map[string]any{"name": "r",
+		"managedFields": []any{map[string]any{"manager": "x"}},
+		"annotations":   map[string]any{corev1.LastAppliedConfigAnnotation: "{}", "keep": "1"}}}}
+	uo, _ := transform(u)
+	if a := uo.(*unstructured.Unstructured).GetAnnotations(); a[corev1.LastAppliedConfigAnnotation] != "" || a["keep"] != "1" {
+		t.Errorf("annotations unstructured = %v", a)
+	}
+	if mf := uo.(*unstructured.Unstructured).GetManagedFields(); mf != nil {
+		t.Errorf("managedFields unstructured = %v", mf)
 	}
 }

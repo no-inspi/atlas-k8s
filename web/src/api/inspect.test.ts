@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { logsURL, openLogs, type LogMessage } from './inspect'
+import { eventsResource, logsURL, openLogs, routeRef, serviceRef, volumeRef, type LogMessage } from './inspect'
+import { route, service, volume } from '../store/fixtures'
 
 class FakeWS {
   static last: FakeWS
@@ -39,5 +40,17 @@ describe('openLogs', () => {
     openLogs('ws://x', () => {}, { WebSocket: FakeWS as unknown as typeof WebSocket, login })
     FakeWS.last.onclose?.({ code: 4401 })
     expect(login).toHaveBeenCalled()
+  })
+})
+
+describe('références', () => {
+  it('désigne Services, PVC, Ingress et IngressRoute pour le YAML et les événements', () => {
+    expect(serviceRef(service())).toEqual({ group: '', version: 'v1', kind: 'Service', namespace: 'production', name: 'api' })
+    expect(volumeRef(volume())).toEqual({ group: '', version: 'v1', kind: 'PersistentVolumeClaim', namespace: 'production', name: 'data-0' })
+    expect(routeRef(route())).toEqual({ group: 'networking.k8s.io', version: 'v1', kind: 'Ingress', namespace: 'production', name: 'storefront' })
+    expect(routeRef(route({ source: 'IngressRoute', group: 'traefik.containo.us' })))
+      .toEqual(expect.objectContaining({ group: 'traefik.containo.us', version: 'v1alpha1', kind: 'IngressRoute' }))
+    expect(['Pod', 'Service', 'PersistentVolumeClaim', 'Ingress', 'IngressRoute'].map(eventsResource))
+      .toEqual(['pods', 'services', 'persistentvolumeclaims', 'ingresses', 'ingressroutes'])
   })
 })

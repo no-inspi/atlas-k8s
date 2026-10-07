@@ -31,7 +31,8 @@ var workloadResources = map[string]Attributes{
 }
 
 // attributes : droit requis pour recevoir l'objet. Un namespace (qui ne porte
-// qu'une couleur) suit le droit de lister ses pods.
+// qu'une couleur) suit le droit de lister ses pods ; Services, routes et PVC
+// suivent le droit de les lister dans leur namespace.
 func attributes(kind stream.Kind, obj any) (Attributes, bool) {
 	switch o := obj.(type) {
 	case model.Pod:
@@ -44,6 +45,15 @@ func attributes(kind stream.Kind, obj any) (Attributes, bool) {
 		a, ok := workloadResources[o.Kind]
 		a.Verb, a.Namespace = "list", o.Namespace
 		return a, ok
+	case model.Service:
+		return Attributes{Verb: "list", Resource: "services", Namespace: o.Namespace}, true
+	case model.Route:
+		if o.Source == "Ingress" {
+			return Attributes{Verb: "list", Group: "networking.k8s.io", Resource: "ingresses", Namespace: o.Namespace}, true
+		}
+		return Attributes{Verb: "list", Group: o.Group, Resource: "ingressroutes", Namespace: o.Namespace}, true
+	case model.Volume:
+		return Attributes{Verb: "list", Resource: "persistentvolumeclaims", Namespace: o.Namespace}, true
 	}
 	return Attributes{}, false
 }

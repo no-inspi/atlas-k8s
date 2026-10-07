@@ -1,4 +1,4 @@
-import type { ArgoInfo } from './types'
+import type { ArgoInfo, Route, Service, Volume } from './types'
 import { apiFetch, loginURL } from './http'
 import { streamURL } from './stream'
 
@@ -46,8 +46,26 @@ const seg = encodeURIComponent
 export const getOwners = (ns: string, pod: string) =>
   getJSON<{ chain: Ref[] }>(`/api/namespaces/${seg(ns)}/pods/${seg(pod)}/owner`).then((r) => r.chain)
 
-export const getEvents = (ns: string, pod: string) =>
-  getJSON<{ events: KubeEvent[] }>(`/api/namespaces/${seg(ns)}/pods/${seg(pod)}/events`).then((r) => r.events)
+export const getEvents = (ns: string, name: string, resource = 'pods') =>
+  getJSON<{ events: KubeEvent[] }>(`/api/namespaces/${seg(ns)}/${seg(resource)}/${seg(name)}/events`).then((r) => r.events)
+
+export const serviceRef = (s: Pick<Service, 'namespace' | 'name'>): Ref =>
+  ({ group: '', version: 'v1', kind: 'Service', namespace: s.namespace, name: s.name })
+
+export const volumeRef = (v: Pick<Volume, 'namespace' | 'name'>): Ref =>
+  ({ group: '', version: 'v1', kind: 'PersistentVolumeClaim', namespace: v.namespace, name: v.name })
+
+export const routeRef = (r: Pick<Route, 'source' | 'group' | 'namespace' | 'name'>): Ref =>
+  r.source === 'Ingress'
+    ? { group: 'networking.k8s.io', version: 'v1', kind: 'Ingress', namespace: r.namespace, name: r.name }
+    : { group: r.group, version: 'v1alpha1', kind: 'IngressRoute', namespace: r.namespace, name: r.name }
+
+const RESOURCES: Record<string, string> = {
+  Pod: 'pods', Service: 'services', PersistentVolumeClaim: 'persistentvolumeclaims', Ingress: 'ingresses', IngressRoute: 'ingressroutes',
+}
+
+/** Ressource de l'URL des événements d'un kind. */
+export const eventsResource = (kind: string) => RESOURCES[kind] ?? `${kind.toLowerCase()}s`
 
 export const getYaml = (r: Ref) =>
   getJSON<YamlDoc>(`/api/yaml/${seg(r.group || 'core')}/${seg(r.version)}/${seg(r.kind)}/${seg(r.namespace)}/${seg(r.name)}`)

@@ -101,14 +101,85 @@ export interface Metrics {
   nodes: Record<string, Usage>
 }
 
-export type Kind = 'node' | 'pod' | 'workload' | 'namespace'
+export type Health = 'ok' | 'degraded' | 'down' | 'external'
+
+export interface ServicePort {
+  name?: string
+  port: number
+  targetPort?: string
+  protocol: string
+  nodePort?: number
+}
+
+export interface Endpoint {
+  podUID: string
+  ready: boolean
+}
+
+export interface Service {
+  namespace: string
+  name: string
+  type: string // ClusterIP | NodePort | LoadBalancer | ExternalName
+  headless?: boolean
+  clusterIP?: string
+  ports: ServicePort[]
+  loadBalancer?: string[]
+  externalName?: string
+  endpoints: Endpoint[]
+  health: Health
+}
+
+export interface Backend {
+  namespace: string
+  service: string
+  port?: string
+  kind: string // Service | TraefikService
+  state: 'ok' | 'missing' | 'indirect'
+}
+
+export interface Rule {
+  host?: string
+  path?: string
+  match?: string
+  backend: Backend
+}
+
+export interface Route {
+  source: 'Ingress' | 'IngressRoute'
+  group: string
+  namespace: string
+  name: string
+  gate: string
+  rules: Rule[]
+  addresses?: string[]
+}
+
+export interface Volume {
+  namespace: string
+  name: string
+  storageClass: string
+  requested: number
+  capacity: number
+  accessModes: string[]
+  phase: 'Pending' | 'Bound' | 'Lost'
+  volumeName?: string
+  pods: string[]
+}
+
+export type Kind = 'node' | 'pod' | 'workload' | 'namespace' | 'service' | 'route' | 'volume'
 
 export type Message =
-  | { type: 'snapshot'; rev: number; nodes?: Node[]; pods?: Pod[]; workloads?: Workload[]; namespaces?: Namespace[] }
+  | {
+      type: 'snapshot'; rev: number; nodes?: Node[]; pods?: Pod[]; workloads?: Workload[]; namespaces?: Namespace[]
+      services?: Service[]; routes?: Route[]; volumes?: Volume[]
+    }
   | { type: 'upsert' | 'delete'; rev: number; kind: 'node'; obj: Node }
   | { type: 'upsert' | 'delete'; rev: number; kind: 'pod'; obj: Pod }
   | { type: 'upsert' | 'delete'; rev: number; kind: 'workload'; obj: Workload }
   | { type: 'upsert' | 'delete'; rev: number; kind: 'namespace'; obj: Namespace }
+  | { type: 'upsert' | 'delete'; rev: number; kind: 'service'; obj: Service }
+  | { type: 'upsert' | 'delete'; rev: number; kind: 'route'; obj: Route }
+  | { type: 'upsert' | 'delete'; rev: number; kind: 'volume'; obj: Volume }
   | { type: 'metrics'; metrics: Metrics }
 
 export interface Me {
@@ -121,3 +192,6 @@ export interface Me {
 }
 
 export const workloadKey = (w: Pick<Workload, 'kind' | 'namespace' | 'name'>) => `${w.kind}/${w.namespace}/${w.name}`
+export const serviceKey = (s: Pick<Service, 'namespace' | 'name'>) => `${s.namespace}/${s.name}`
+export const routeKey = (r: Pick<Route, 'source' | 'namespace' | 'name'>) => `${r.source}/${r.namespace}/${r.name}`
+export const volumeKey = (v: Pick<Volume, 'namespace' | 'name'>) => `${v.namespace}/${v.name}`

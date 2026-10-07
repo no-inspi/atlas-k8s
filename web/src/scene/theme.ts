@@ -5,6 +5,7 @@ const TOKENS = {
   bg: '--bg', ground: '--ground', road: '--road', zoneStd: '--zone-std', zoneSpot: '--zone-spot', zoneGpu: '--zone-gpu',
   queue: '--queue', platform: '--platform', ink: '--ink', muted: '--muted', accent: '--accent', ok: '--ok', warn: '--warn',
   err: '--err', tree: '--tree', house: '--house', roof: '--roof', font: '--font',
+  avenue: '--avenue', warehouse: '--warehouse', fibre: '--fibre', data: '--data',
 } as const
 
 export type Theme = { [K in keyof typeof TOKENS]: string } & { dark: boolean }

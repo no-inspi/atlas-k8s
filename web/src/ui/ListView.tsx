@@ -5,9 +5,14 @@ import { buildTree, flatten, keyAction, type TreeNode } from './tree'
 
 const BADGE: Record<string, string> = { ok: 's-ok', warn: 's-warn', err: 's-err', mute: 's-mute', done: 's-mute' }
 
+const NET_STATUS: Record<string, string> = {
+  down: 's-err', Lost: 's-err', 'Service introuvable': 's-err', degraded: 's-warn', Pending: 's-warn', 'route cassée': 's-warn',
+}
+
 function statusClass(n: TreeNode): string {
   if (!n.status) return ''
   if (n.select?.type === 'node') return 's-warn'
+  if (n.select && n.select.type !== 'pod') return NET_STATUS[n.status] ?? 's-warn'
   return BADGE[postureFor({ displayStatus: n.status, ready: n.status === 'Running' }).antenna]
 }
 
@@ -46,7 +51,7 @@ export function ListView() {
       <div role="tree" aria-label="Cluster" className="tree">
         {items.map(({ node: n, level }) => {
           const hasChildren = !!n.children?.length
-          const selected = !!n.select && selection?.key === n.select.key
+          const selected = !!n.select && selection?.type === n.select.type && selection.key === n.select.key
           return (
             <div
               key={n.id}

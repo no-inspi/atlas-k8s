@@ -33,21 +33,36 @@ export interface Rect {
   depth: number
 }
 
+export interface Avenue {
+  x: number // centre
+  z: number
+  width: number
+  depth: number
+}
+
 export interface CityLayout {
   districts: District[]
   plots: Map<string, { x: number; z: number }>
   queue: Rect
+  /** Avenues entre les rangées de quartiers (ou devant la seule rangée). */
+  avenues: Avenue[]
   bounds: Rect
   geometry: PlotGeometry
 }
 
 const CELL = 0.95 // pas entre deux blocs de pods
 const BUILDING_DEPTH = 1.6 // fond de parcelle occupé par le bâtiment
-const ALLEY = 1.9 // allée entre deux parcelles
+export const ALLEY = 1.9 // allée entre deux parcelles
 const DISTRICT_PAD = 1.2 // marge intérieure d'un quartier
 const LABEL_STRIP = 1.0 // bande à l'avant du quartier pour son nom (jamais masquée par un bâtiment)
 const DISTRICT_GAP = 2.4 // rue entre deux quartiers
 const MIN_PLOT = 4.1
+/** Largeur d'une avenue : une rangée de relais, trois voies de liens et les noms des tronçons. */
+export const AVENUE = 3.6
+/** Entrée ouest de la première avenue, où se tiennent les portes. */
+export const GATE_ZONE = 4.5
+/** Débord des avenues à l'est de la ville : la rue est (conduites des entrepôts) y passe. */
+const AVENUE_EAST = 2
 
 /** Places par parcelle : 1,5 × le max observé, multiple de 4, entre 12 et 48. */
 export function slotCapacity(maxPodsPerNode: number): number {
@@ -109,13 +124,16 @@ export function layoutCity(nodes: Node[], geo: PlotGeometry): CityLayout {
   const totalArea = boxes.reduce((s, b) => s + b.width * b.depth, 0)
   const maxRow = Math.max(24, Math.sqrt(totalArea) * 1.4, ...boxes.map((b) => b.width))
 
-  // Étagères : on remplit une rangée jusqu'à maxRow, puis on passe à la suivante.
+  // Étagères : on remplit une rangée jusqu'à maxRow, puis on passe à la suivante,
+  // de l'autre côté d'une avenue.
   type Placed = (typeof boxes)[number] & { x0: number; z0: number }
   const placed: Placed[] = []
+  const avenueTops: number[] = [] // bord nord de chaque avenue, avant centrage
   let x = 0, z = 0, rowDepth = 0, width = 0
   for (const b of boxes) {
     if (x > 0 && x + b.width > maxRow) {
-      z += rowDepth + DISTRICT_GAP
+      avenueTops.push(z + rowDepth)
+      z += rowDepth + AVENUE
       x = 0
       rowDepth = 0
     }
@@ -124,7 +142,12 @@ export function layoutCity(nodes: Node[], geo: PlotGeometry): CityLayout {
     width = Math.max(width, x - DISTRICT_GAP)
     rowDepth = Math.max(rowDepth, b.depth)
   }
-  const depth = z + rowDepth
+  let depth = z + rowDepth
+  // Une seule rangée : l'avenue passe devant, entre la ville et la file d'attente.
+  if (!avenueTops.length) {
+    avenueTops.push(depth)
+    depth += AVENUE
+  }
   const ox = -width / 2, oz = -depth / 2
 
   const districts: District[] = []
@@ -140,10 +163,14 @@ export function layoutCity(nodes: Node[], geo: PlotGeometry): CityLayout {
     })
   }
 
+  const avenues: Avenue[] = avenueTops.map((top) => ({
+    x: (AVENUE_EAST - GATE_ZONE) / 2, z: oz + top + AVENUE / 2, width: width + GATE_ZONE + AVENUE_EAST, depth: AVENUE,
+  }))
   const queue: Rect = { x: 0, z: depth / 2 + 3.4, width: Math.max(14, width * 0.8), depth: 2.6 }
   return {
-    districts, plots, queue, geometry: geo,
-    bounds: { x: 0, z: 1.7, width: width, depth: depth + 3.4 * 2 },
+    districts, plots, queue, avenues, geometry: geo,
+    // Comme les avenues : l'entrée des portes à l'ouest, la rue est à l'est.
+    bounds: { x: (AVENUE_EAST - GATE_ZONE) / 2, z: 1.7, width: width + GATE_ZONE + AVENUE_EAST, depth: depth + 3.4 * 2 },
   }
 }
 

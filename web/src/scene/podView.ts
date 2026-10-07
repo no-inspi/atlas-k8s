@@ -37,10 +37,14 @@ export function sortKinds(kinds: Iterable<string>): string[] {
   return [...new Set(kinds)].sort((a, b) => kindRank(a) - kindRank(b) || a.localeCompare(b))
 }
 
+/** Namespace affiché : les namespaces système sont masqués, sauf s'ils sont choisis dans la légende. */
+export const isNamespaceVisible = (ns: string, view: PodView, nsFilter: string | null = null) =>
+  !(view.hideSystem && SYSTEM_NAMESPACES.has(ns) && ns !== nsFilter)
+
 export function isVisible(p: Pod, view: PodView, nsFilter: string | null = null): boolean {
   if (view.hiddenKinds.includes(kindOf(p))) return false
   // Choisir un namespace système dans la légende l'affiche malgré le masquage.
-  if (view.hideSystem && SYSTEM_NAMESPACES.has(p.namespace) && p.namespace !== nsFilter) return false
+  if (!isNamespaceVisible(p.namespace, view, nsFilter)) return false
   return true
 }
 

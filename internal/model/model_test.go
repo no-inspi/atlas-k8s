@@ -43,3 +43,34 @@ func TestKeys(t *testing.T) {
 		t.Errorf("NodeKey = %q", got)
 	}
 }
+
+func TestServiceHealth(t *testing.T) {
+	cases := []struct {
+		typ          string
+		total, ready int
+		want         string
+	}{
+		{"ClusterIP", 3, 3, HealthOK},
+		{"ClusterIP", 3, 1, HealthDegraded},
+		{"ClusterIP", 3, 0, HealthDown},
+		{"ClusterIP", 0, 0, HealthDown},
+		{"ExternalName", 0, 0, HealthExternal},
+	}
+	for _, c := range cases {
+		if got := ServiceHealth(c.typ, c.total, c.ready); got != c.want {
+			t.Errorf("ServiceHealth(%s, %d, %d) = %s, attendu %s", c.typ, c.total, c.ready, got, c.want)
+		}
+	}
+}
+
+func TestNetworkKeys(t *testing.T) {
+	if k := ServiceKey(Service{Namespace: "prod", Name: "api"}); k != "prod/api" {
+		t.Errorf("ServiceKey = %s", k)
+	}
+	if k := RouteKey(Route{Source: "IngressRoute", Namespace: "mon", Name: "grafana"}); k != "IngressRoute/mon/grafana" {
+		t.Errorf("RouteKey = %s", k)
+	}
+	if k := VolumeKey(Volume{Namespace: "prod", Name: "data-0"}); k != "prod/data-0" {
+		t.Errorf("VolumeKey = %s", k)
+	}
+}

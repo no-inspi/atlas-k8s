@@ -10,6 +10,7 @@ import { Inspector } from './inspector/Inspector'
 import { syncRoute } from './ui/route'
 import { Toasts } from './ui/Toasts'
 import { ListView } from './ui/ListView'
+import { PathSummary } from './ui/PathSummary'
 import { perfEnabled } from './scene/PerfMeter'
 
 export function App() {
@@ -36,6 +37,7 @@ export function App() {
         <Legend />
       </div>
       <Hint />
+      {view === '3d' && <PathSummary />}
       {view === '3d' && <PodTooltip />}
       <Inspector />
       <Toasts />

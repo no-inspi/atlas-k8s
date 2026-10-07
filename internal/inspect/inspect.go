@@ -42,8 +42,8 @@ type Backend interface {
 	// Owners renvoie la chaîne du workload racine jusqu'au pod (Deployment, ReplicaSet, Pod).
 	Owners(ctx context.Context, u access.User, namespace, pod string) ([]Ref, error)
 	YAML(ctx context.Context, u access.User, ref Ref) (Doc, error)
-	// Events renvoie les événements du pod, du plus récent au plus ancien.
-	Events(ctx context.Context, u access.User, namespace, pod string) ([]model.Event, error)
+	// Events renvoie les événements d'un objet (kind : Pod, Service…), du plus récent au plus ancien.
+	Events(ctx context.Context, u access.User, kind, namespace, name string) ([]model.Event, error)
 	// Logs renvoie le flux brut de pods/log, lignes préfixées d'un horodatage RFC 3339.
 	Logs(ctx context.Context, u access.User, namespace, pod string, o LogOptions) (io.ReadCloser, error)
 }
@@ -61,6 +61,21 @@ var Kinds = []Kind{
 	{"apps", "v1", "StatefulSet", "statefulsets"},
 	{"apps", "v1", "DaemonSet", "daemonsets"},
 	{"batch", "v1", "Job", "jobs"},
+	{"", "v1", "Service", "services"},
+	{"", "v1", "PersistentVolumeClaim", "persistentvolumeclaims"},
+	{"networking.k8s.io", "v1", "Ingress", "ingresses"},
+	{"traefik.io", "v1alpha1", "IngressRoute", "ingressroutes"},
+	{"traefik.containo.us", "v1alpha1", "IngressRoute", "ingressroutes"},
+}
+
+// KindForResource : kind désigné par la ressource d'une URL (« services » → Service).
+func KindForResource(resource string) (string, bool) {
+	for _, k := range Kinds {
+		if k.Resource == resource {
+			return k.Kind, true
+		}
+	}
+	return "", false
 }
 
 // ErrUnsupportedKind : kind absent de Kinds.

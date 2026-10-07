@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { layoutCity, plotGeometry, slotCapacity, queuePosition } from './layout'
+import { AVENUE, GATE_ZONE, layoutCity, plotGeometry, slotCapacity, queuePosition } from './layout'
 import { node } from '../store/fixtures'
 
 const n = (name: string, pool: string, extra = {}) => node({ name, pool, ...extra })
@@ -50,6 +50,51 @@ describe('layoutCity', () => {
     const c = layoutCity(nodes, plotGeometry(12))
     const maxZ = Math.max(...[...c.plots.values()].map((p) => p.z))
     expect(c.queue.z).toBeGreaterThan(maxZ)
+  })
+
+  describe('avenues', () => {
+    const geo = plotGeometry(12)
+
+    it('une seule rangée : une avenue devant, avant la file d’attente', () => {
+      const c = layoutCity([n('a-1', 'p'), n('a-2', 'p')], geo)
+      expect(c.avenues).toHaveLength(1)
+      const a = c.avenues[0]
+      const maxZ = Math.max(...[...c.plots.values()].map((p) => p.z))
+      expect(a.z - AVENUE / 2).toBeGreaterThan(maxZ)
+      expect(c.queue.z - c.queue.depth / 2).toBeGreaterThan(a.z + AVENUE / 2)
+    })
+
+    it('une avenue entre chaque paire de rangées, sans toucher les parcelles', () => {
+      const many = Array.from({ length: 40 }, (_, i) => n(`node-${String(i).padStart(2, '0')}`, `pool-${i % 4}`))
+      const c = layoutCity(many, geo)
+      const rows = new Set(c.districts.map((d) => (d.z - d.depth / 2).toFixed(3))).size
+      expect(rows).toBeGreaterThan(1)
+      expect(c.avenues).toHaveLength(rows - 1)
+      const plots = [...c.plots.values()]
+      for (const a of c.avenues) {
+        expect(plots.some((p) => p.z < a.z)).toBe(true)
+        expect(plots.some((p) => p.z > a.z)).toBe(true)
+        for (const p of plots) expect(Math.abs(p.z - a.z)).toBeGreaterThan(AVENUE / 2 + geo.depth / 2 - 1e-6)
+      }
+    })
+
+    it('commence à l’ouest de la ville, où se tiennent les portes', () => {
+      const c = layoutCity(nodes, geo)
+      const left = Math.min(...c.districts.map((d) => d.x - d.width / 2))
+      const right = Math.max(...c.districts.map((d) => d.x + d.width / 2))
+      for (const a of c.avenues) expect(a.x - a.width / 2).toBeCloseTo(left - GATE_ZONE)
+      // À l'est, l'avenue déborde de deux unités : la rue est des conduites y passe.
+      for (const a of c.avenues) expect(a.x + a.width / 2).toBeCloseTo(right + 2)
+      expect(c.bounds.x - c.bounds.width / 2).toBeLessThanOrEqual(left - GATE_ZONE + 1e-6)
+    })
+
+    it('englobe les avenues dans ses limites', () => {
+      const c = layoutCity(nodes, geo)
+      for (const a of c.avenues) {
+        expect(c.bounds.x - c.bounds.width / 2).toBeLessThanOrEqual(a.x - a.width / 2 + 1e-6)
+        expect(c.bounds.x + c.bounds.width / 2).toBeGreaterThanOrEqual(a.x + a.width / 2 - 1e-6)
+      }
+    })
   })
 })
 

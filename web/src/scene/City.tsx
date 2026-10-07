@@ -73,8 +73,13 @@ function treePositions(layout: CityLayout): [number, number, number][] {
 export function City({ theme }: { theme: Theme }) {
   // Les libellés des nodes changent avec le cordon : on s'abonne à cette seule information.
   const nodeKey = useCluster((s) => [...s.nodes.values()].map((n) => `${n.pool}/${n.name}/${n.unschedulable ? 1 : 0}`).sort().join(','))
+  // Le réseau (avenues, tronçons, entrepôts) change avec le flux et les réglages d'affichage.
+  useCluster((s) => s.version)
+  useCluster((s) => s.podView)
+  useCluster((s) => s.nsFilter)
   world.update(useCluster.getState())
   const layout = world.layout
+  const net = world.net
 
   const zone: Record<DistrictStyle, string> = { std: theme.zoneStd, spot: theme.zoneSpot, gpu: theme.zoneGpu }
   const trees = useMemo(() => (layout ? treePositions(layout) : []), [layout])
@@ -95,6 +100,28 @@ export function City({ theme }: { theme: Theme }) {
       ))}
       {[...layout.plots.entries()].map(([name, p]) => (
         <GroundLabel key={name} text={shortNode(name) + (cordoned.has(name) ? ' · cordon' : '')} w={g.width} h={0.7} x={p.x} z={p.z + g.depth / 2 + 0.45} align="center" size={34} theme={theme} />
+      ))}
+      {layout.avenues.map((a, i) => (
+        <Plane key={`avenue-${i}`} w={a.width} d={a.depth} x={a.x} z={a.z} y={0.012} color={theme.avenue} />
+      ))}
+      {net?.segments.map((s, i) => {
+        const lanes = net.lanes[s.avenue]
+        const w = s.x1 - s.x0
+        return (
+          <group key={`segment-${i}`}>
+            <Plane w={w - 0.1} d={0.22} x={(s.x0 + s.x1) / 2} z={lanes.north + 0.13} y={0.016} color={world.colors.get(s.ns) ?? theme.muted} />
+            <GroundLabel text={s.ns} w={Math.max(1.2, w - 0.1)} h={0.6} x={(s.x0 + s.x1) / 2} z={lanes.label} align="center" size={30} theme={theme} />
+          </group>
+        )
+      })}
+      {net?.warehouse && (
+        <Plane w={net.warehouse.width} d={net.warehouse.depth} x={net.warehouse.x} z={net.warehouse.z} y={0.01} color={theme.warehouse} />
+      )}
+      {net?.islands.map((is) => (
+        <group key={`island-${is.storageClass}`}>
+          <Plane w={is.width} d={is.depth} x={is.x} z={is.z} y={0.014} color={theme.platform} />
+          <GroundLabel text={is.storageClass} w={is.width - 0.4} h={0.8} x={is.x} z={is.z - is.depth / 2 + 0.5} align="center" size={34} theme={theme} />
+        </group>
       ))}
       <Plane w={queue.width} d={queue.depth} x={queue.x} z={queue.z} y={0.01} color={theme.queue} />
       <GroundLabel text="File d'attente du scheduler (Pending)" w={14} h={1} x={queue.x - queue.width / 2 + 7} z={queue.z - queue.depth / 2 - 0.55} theme={theme} />

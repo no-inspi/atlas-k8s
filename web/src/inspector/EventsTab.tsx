@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { getEvents, type KubeEvent } from '../api/inspect'
-import type { Pod } from '../api/types'
 import { age } from '../ui/format'
 
 const REFRESH_MS = 3000
 
-/** Événements du pod, du plus récent au plus ancien, rafraîchis tant que l'onglet est ouvert. */
-export function EventsTab({ p }: { p: Pod }) {
+/** Événements d'un objet, du plus récent au plus ancien, rafraîchis tant que l'onglet est ouvert. */
+export function EventsTab({ ns, name, resource = 'pods', empty = 'Aucun événement récent pour ce pod.' }: {
+  ns: string; name: string; resource?: string; empty?: string
+}) {
   const [events, setEvents] = useState<KubeEvent[] | null>(null)
   const [error, setError] = useState('')
 
@@ -15,17 +16,17 @@ export function EventsTab({ p }: { p: Pod }) {
     setEvents(null)
     setError('')
     const load = () =>
-      getEvents(p.namespace, p.name)
+      getEvents(ns, name, resource)
         .then((e) => { if (live) { setEvents(e); setError('') } })
         .catch((e: Error) => live && setError(e.message))
     load()
     const id = setInterval(load, REFRESH_MS)
     return () => { live = false; clearInterval(id) }
-  }, [p.namespace, p.name])
+  }, [ns, name, resource])
 
   if (error) return <div className="p-body"><p className="note s-err">{error}</p></div>
   if (!events) return <div className="p-body"><p className="note">Chargement…</p></div>
-  if (!events.length) return <div className="p-body"><p className="note">Aucun événement récent pour ce pod.</p></div>
+  if (!events.length) return <div className="p-body"><p className="note">{empty}</p></div>
   return (
     <div className="p-body">
       <table className="evt" data-testid="events">

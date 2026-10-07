@@ -117,7 +117,7 @@ func TestInspectorLogs(t *testing.T) {
 
 type staticEvents []model.Event
 
-func (s staticEvents) PodEvents(string, string) []model.Event { return s }
+func (s staticEvents) ObjectEvents(string, string, string) []model.Event { return s }
 
 func TestInspectorEventsChecksRights(t *testing.T) {
 	now := time.Now()
@@ -126,10 +126,10 @@ func TestInspectorEventsChecksRights(t *testing.T) {
 	allow := func(_ context.Context, _ access.User, a access.Attributes) bool {
 		return a.Verb == "list" && a.Resource == "events" && a.Namespace == "prod"
 	}
-	if _, err := NewInspector(nil, evs, deny).Events(context.Background(), bob, "prod", "api"); !apierrors.IsForbidden(err) {
+	if _, err := NewInspector(nil, evs, deny).Events(context.Background(), bob, "Pod", "prod", "api"); !apierrors.IsForbidden(err) {
 		t.Errorf("refus attendu : %v", err)
 	}
-	got, err := NewInspector(nil, evs, allow).Events(context.Background(), bob, "prod", "api")
+	got, err := NewInspector(nil, evs, allow).Events(context.Background(), bob, "Pod", "prod", "api")
 	if err != nil || len(got) != 2 || got[0].Reason != "BackOff" {
 		t.Errorf("événements = %+v (%v), le plus récent d'abord", got, err)
 	}
@@ -146,9 +146,16 @@ func TestSourceIndexesPodEvents(t *testing.T) {
 	_, sk := startSource(t, append(fixtures(), ev("e1", "Pulled", time.Now()), other)...)
 	_ = sk
 	src := lastSource
-	eventually(t, "événements indexés", func() bool { return len(src.PodEvents("prod", "api")) == 1 })
-	got := src.PodEvents("prod", "api")[0]
+	eventually(t, "événements indexés", func() bool { return len(src.ObjectEvents("prod", "Pod", "api")) == 1 })
+	got := src.ObjectEvents("prod", "Pod", "api")[0]
 	if got.Reason != "Pulled" || got.Count != 2 || got.Source != "kubelet" {
 		t.Errorf("événement = %+v", got)
 	}
+}
+
+func TestSourceIndexesServiceEvents(t *testing.T) {
+	ev := &corev1.Event{ObjectMeta: metav1.ObjectMeta{Name: "e1", Namespace: "prod"}, Reason: "SyncLoadBalancerFailed", Type: "Warning",
+		InvolvedObject: corev1.ObjectReference{Kind: "Service", Namespace: "prod", Name: "api"}}
+	startSource(t, append(fixtures(), ev)...)
+	eventually(t, "événement du Service indexé", func() bool { return len(lastSource.ObjectEvents("prod", "Service", "api")) == 1 })
 }

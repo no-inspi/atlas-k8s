@@ -38,9 +38,15 @@ export function nsColors(namespaces: Iterable<string>, overrides: ReadonlyMap<st
   return out
 }
 
-/** Couleurs des namespaces présents parmi les pods, annotations comprises. */
-export function clusterColors(st: { pods: ReadonlyMap<string, { namespace: string }>; namespaces: ReadonlyMap<string, { color?: string }> }) {
+/** Couleurs des namespaces présents (pods, Services, volumes), annotations comprises. */
+export function clusterColors(st: {
+  pods: ReadonlyMap<string, { namespace: string }>
+  namespaces: ReadonlyMap<string, { color?: string }>
+  services?: ReadonlyMap<string, { namespace: string }>
+  volumes?: ReadonlyMap<string, { namespace: string }>
+}) {
   const overrides = new Map<string, string>()
   for (const [name, ns] of st.namespaces) if (ns.color) overrides.set(name, ns.color)
-  return nsColors([...st.pods.values()].map((p) => p.namespace), overrides)
+  const names = [...st.pods.values(), ...(st.services?.values() ?? []), ...(st.volumes?.values() ?? [])].map((o) => o.namespace)
+  return nsColors(names, overrides)
 }
