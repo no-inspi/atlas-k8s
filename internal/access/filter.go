@@ -30,9 +30,21 @@ var workloadResources = map[string]Attributes{
 	"Job":         {Group: "batch", Resource: "jobs"},
 }
 
+// routeResources : ressource à lister pour recevoir une route, selon sa source
+// (le groupe est celui de la route).
+var routeResources = map[string]string{
+	model.SourceIngress:         "ingresses",
+	model.SourceIngressRoute:    "ingressroutes",
+	model.SourceIngressRouteTCP: "ingressroutetcps",
+	model.SourceIngressRouteUDP: "ingressrouteudps",
+	model.SourceHTTPRoute:       "httproutes",
+	model.SourceGRPCRoute:       "grpcroutes",
+}
+
 // attributes : droit requis pour recevoir l'objet. Un namespace (qui ne porte
-// qu'une couleur) suit le droit de lister ses pods ; Services, routes et PVC
-// suivent le droit de les lister dans leur namespace.
+// qu'une couleur) suit le droit de lister ses pods ; Services, routes, Gateways
+// et PVC suivent le droit de les lister dans leur namespace ; un PV, objet du
+// cluster, celui de lister les PV.
 func attributes(kind stream.Kind, obj any) (Attributes, bool) {
 	switch o := obj.(type) {
 	case model.Pod:
@@ -48,10 +60,12 @@ func attributes(kind stream.Kind, obj any) (Attributes, bool) {
 	case model.Service:
 		return Attributes{Verb: "list", Resource: "services", Namespace: o.Namespace}, true
 	case model.Route:
-		if o.Source == "Ingress" {
-			return Attributes{Verb: "list", Group: "networking.k8s.io", Resource: "ingresses", Namespace: o.Namespace}, true
-		}
-		return Attributes{Verb: "list", Group: o.Group, Resource: "ingressroutes", Namespace: o.Namespace}, true
+		res, ok := routeResources[o.Source]
+		return Attributes{Verb: "list", Group: o.Group, Resource: res, Namespace: o.Namespace}, ok
+	case model.Gateway:
+		return Attributes{Verb: "list", Group: "gateway.networking.k8s.io", Resource: "gateways", Namespace: o.Namespace}, true
+	case model.PersistentVolume:
+		return Attributes{Verb: "list", Resource: "persistentvolumes"}, true
 	case model.Volume:
 		return Attributes{Verb: "list", Resource: "persistentvolumeclaims", Namespace: o.Namespace}, true
 	}

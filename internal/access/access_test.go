@@ -200,10 +200,35 @@ func TestNetworkAttributes(t *testing.T) {
 		{model.Route{Source: "Ingress", Group: "networking.k8s.io", Namespace: "a"}, Attributes{Verb: "list", Group: "networking.k8s.io", Resource: "ingresses", Namespace: "a"}},
 		{model.Route{Source: "IngressRoute", Group: "traefik.containo.us", Namespace: "a"}, Attributes{Verb: "list", Group: "traefik.containo.us", Resource: "ingressroutes", Namespace: "a"}},
 		{model.Volume{Namespace: "a"}, Attributes{Verb: "list", Resource: "persistentvolumeclaims", Namespace: "a"}},
+		{model.Route{Source: model.SourceIngressRouteTCP, Group: "traefik.io", Namespace: "a"}, Attributes{Verb: "list", Group: "traefik.io", Resource: "ingressroutetcps", Namespace: "a"}},
+		{model.Route{Source: model.SourceIngressRouteUDP, Group: "traefik.containo.us", Namespace: "a"}, Attributes{Verb: "list", Group: "traefik.containo.us", Resource: "ingressrouteudps", Namespace: "a"}},
+		{model.Route{Source: model.SourceHTTPRoute, Group: "gateway.networking.k8s.io", Namespace: "a"}, Attributes{Verb: "list", Group: "gateway.networking.k8s.io", Resource: "httproutes", Namespace: "a"}},
+		{model.Route{Source: model.SourceGRPCRoute, Group: "gateway.networking.k8s.io", Namespace: "a"}, Attributes{Verb: "list", Group: "gateway.networking.k8s.io", Resource: "grpcroutes", Namespace: "a"}},
+		{model.Gateway{Namespace: "a"}, Attributes{Verb: "list", Group: "gateway.networking.k8s.io", Resource: "gateways", Namespace: "a"}},
+		{model.PersistentVolume{Name: "pv"}, Attributes{Verb: "list", Resource: "persistentvolumes"}},
 	}
 	for _, c := range cases {
 		if got, ok := attributes("", c.obj); !ok || got != c.want {
 			t.Errorf("%+v : %+v, attendu %+v", c.obj, got, c.want)
 		}
+	}
+	if _, ok := attributes("", model.Route{Source: "Mystère", Namespace: "a"}); ok {
+		t.Error("route de source inconnue acceptée")
+	}
+}
+
+func TestStreamFilterGatewaysAndVolumes(t *testing.T) {
+	var calls atomic.Int32
+	f := NewStreamFilter(NewReviewer(fakeClient(&calls, false)), bob)
+	ctx := context.Background()
+	if f.Allow(ctx, stream.KindPersistentVolume, model.PersistentVolume{Name: "pv-1"}) {
+		t.Error("bob, sans droit sur le cluster, ne doit voir aucun PV")
+	}
+	if f.Allow(ctx, stream.KindGateway, model.Gateway{Namespace: "kube-system", Name: "gw"}) {
+		t.Error("bob ne doit voir aucun Gateway de kube-system")
+	}
+	if !f.Allow(ctx, stream.KindGateway, model.Gateway{Namespace: "production", Name: "gw"}) ||
+		!f.Allow(ctx, stream.KindRoute, model.Route{Source: model.SourceHTTPRoute, Group: "gateway.networking.k8s.io", Namespace: "production"}) {
+		t.Error("bob doit voir les Gateways et les HTTPRoute de production")
 	}
 }
