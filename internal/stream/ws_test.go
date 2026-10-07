@@ -193,3 +193,36 @@ func TestStreamClosesWhenRightsChangeOrSessionExpires(t *testing.T) {
 		recheckInterval = old
 	}
 }
+
+// nsOnly ne laisse passer les objets réseau et stockage que d'un namespace.
+type nsOnly string
+
+func (o nsOnly) Allow(_ context.Context, _ Kind, obj any) bool {
+	switch x := obj.(type) {
+	case model.Service:
+		return x.Namespace == string(o)
+	case model.Route:
+		return x.Namespace == string(o)
+	case model.Volume:
+		return x.Namespace == string(o)
+	}
+	return true
+}
+func (nsOnly) Changed(context.Context) bool { return false }
+
+func TestViewFiltersNetworkAndStorage(t *testing.T) {
+	v := newView(nsOnly("prod"))
+	out := v.apply(context.Background(), []Message{{Type: "snapshot",
+		Services: []model.Service{{Namespace: "prod", Name: "a"}, {Namespace: "kube-system", Name: "kube-dns"}},
+		Routes:   []model.Route{{Namespace: "kube-system", Name: "x"}},
+		Volumes:  []model.Volume{{Namespace: "prod", Name: "data"}},
+	}})
+	s := out[0]
+	if len(s.Services) != 1 || s.Services[0].Name != "a" || len(s.Routes) != 0 || len(s.Volumes) != 1 {
+		t.Fatalf("snapshot filtré = %+v", s)
+	}
+	d := v.apply(context.Background(), []Message{{Type: "upsert", Kind: KindService, Obj: model.Service{Namespace: "kube-system", Name: "kube-dns"}}})
+	if len(d) != 0 {
+		t.Errorf("delta d'un namespace interdit transmis : %+v", d)
+	}
+}

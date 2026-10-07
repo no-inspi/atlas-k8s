@@ -20,6 +20,9 @@ const (
 	KindPod       Kind = "pod"
 	KindWorkload  Kind = "workload"
 	KindNamespace Kind = "namespace"
+	KindService   Kind = "service"
+	KindRoute     Kind = "route"
+	KindVolume    Kind = "volume"
 )
 
 // Message est le format JSON de /api/stream.
@@ -32,6 +35,9 @@ type Message struct {
 	Pods       []model.Pod       `json:"pods,omitempty"`
 	Workloads  []model.Workload  `json:"workloads,omitempty"`
 	Namespaces []model.Namespace `json:"namespaces,omitempty"`
+	Services   []model.Service   `json:"services,omitempty"`
+	Routes     []model.Route     `json:"routes,omitempty"`
+	Volumes    []model.Volume    `json:"volumes,omitempty"`
 	Metrics    *model.Metrics    `json:"metrics,omitempty"`
 }
 
@@ -266,7 +272,8 @@ func (h *Hub) replayLocked(lastRev uint64) ([]Message, bool) {
 
 func (h *Hub) snapshotLocked() Message {
 	m := Message{Type: "snapshot", Rev: h.rev,
-		Nodes: []model.Node{}, Pods: []model.Pod{}, Workloads: []model.Workload{}, Namespaces: []model.Namespace{}}
+		Nodes: []model.Node{}, Pods: []model.Pod{}, Workloads: []model.Workload{}, Namespaces: []model.Namespace{},
+		Services: []model.Service{}, Routes: []model.Route{}, Volumes: []model.Volume{}}
 	for _, obj := range h.state {
 		switch o := obj.(type) {
 		case model.Node:
@@ -277,6 +284,12 @@ func (h *Hub) snapshotLocked() Message {
 			m.Workloads = append(m.Workloads, o)
 		case model.Namespace:
 			m.Namespaces = append(m.Namespaces, o)
+		case model.Service:
+			m.Services = append(m.Services, o)
+		case model.Route:
+			m.Routes = append(m.Routes, o)
+		case model.Volume:
+			m.Volumes = append(m.Volumes, o)
 		}
 	}
 	sort.Slice(m.Nodes, func(i, j int) bool { return m.Nodes[i].Name < m.Nodes[j].Name })
@@ -285,5 +298,8 @@ func (h *Hub) snapshotLocked() Message {
 	sort.Slice(m.Workloads, func(i, j int) bool {
 		return model.WorkloadKey(m.Workloads[i]) < model.WorkloadKey(m.Workloads[j])
 	})
+	sort.Slice(m.Services, func(i, j int) bool { return model.ServiceKey(m.Services[i]) < model.ServiceKey(m.Services[j]) })
+	sort.Slice(m.Routes, func(i, j int) bool { return model.RouteKey(m.Routes[i]) < model.RouteKey(m.Routes[j]) })
+	sort.Slice(m.Volumes, func(i, j int) bool { return model.VolumeKey(m.Volumes[i]) < model.VolumeKey(m.Volumes[j]) })
 	return m
 }

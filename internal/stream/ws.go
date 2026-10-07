@@ -165,7 +165,8 @@ func (v *view) apply(ctx context.Context, msgs []Message) []Message {
 func (v *view) snapshot(ctx context.Context, m Message) Message {
 	v.pods, v.nodes = map[string]bool{}, map[string]bool{}
 	s := Message{Type: "snapshot", Rev: m.Rev,
-		Nodes: []model.Node{}, Pods: []model.Pod{}, Workloads: []model.Workload{}, Namespaces: []model.Namespace{}}
+		Nodes: []model.Node{}, Pods: []model.Pod{}, Workloads: []model.Workload{}, Namespaces: []model.Namespace{},
+		Services: []model.Service{}, Routes: []model.Route{}, Volumes: []model.Volume{}}
 	for _, n := range m.Nodes {
 		if v.f.Allow(ctx, KindNode, n) {
 			v.nodes[n.Name] = true
@@ -186,6 +187,21 @@ func (v *view) snapshot(ctx context.Context, m Message) Message {
 	for _, n := range m.Namespaces {
 		if v.f.Allow(ctx, KindNamespace, n) {
 			s.Namespaces = append(s.Namespaces, n)
+		}
+	}
+	for _, o := range m.Services {
+		if v.f.Allow(ctx, KindService, o) {
+			s.Services = append(s.Services, o)
+		}
+	}
+	for _, o := range m.Routes {
+		if v.f.Allow(ctx, KindRoute, o) {
+			s.Routes = append(s.Routes, o)
+		}
+	}
+	for _, o := range m.Volumes {
+		if v.f.Allow(ctx, KindVolume, o) {
+			s.Volumes = append(s.Volumes, o)
 		}
 	}
 	return s
