@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { routeKey, serviceKey, volumeKey, type Pod } from '../api/types'
 import { node, pod, route, service, volume } from '../store/fixtures'
 import { layoutCity, plotGeometry } from './layout'
-import { buildLinks, isLit, pathOf, type Link } from './links'
+import { buildLinks, isLit, PathMemo, pathOf, podUidsOf, sameTopology, type Link } from './links'
 import { layoutNetwork, TANK_PITCH } from './netLayout'
 
 const nodes = [node({ name: 'n1', pool: 'p' }), node({ name: 'n2', pool: 'p' })]
@@ -128,6 +128,43 @@ describe('pathOf', () => {
     const p = pathOf('pod:a', links)
     expect(isLit(fam('main')[0], p)).toBe(true)
     expect(isLit(fam('data')[0], p)).toBe(false)
+  })
+})
+
+describe('mémorisation du chemin', () => {
+  // Mêmes objets reliés, tracé et état différents : une reconstruction sans changement de topologie.
+  const moved = links.map((l) => ({ ...l, points: l.points.map(([x, z]) => [x + 1, z] as [number, number]), live: !l.live }))
+  const fewer = links.filter((l) => !l.keys.includes('pod:b'))
+
+  it('compare la topologie : familles et objets reliés, dans l’ordre', () => {
+    expect(sameTopology(links, moved)).toBe(true)
+    expect(sameTopology(links, fewer)).toBe(false)
+    expect(sameTopology(links, links.map((l, i) => (i === 0 ? { ...l, family: l.family === 'data' ? 'fibre' as const : 'data' as const } : l)))).toBe(false)
+    expect(sameTopology(links, links.map((l, i) => (i === 0 ? { ...l, keys: [...l.keys, 'pod:x'] } : l)))).toBe(false)
+  })
+
+  it('même sélection, mêmes liens : même objet, sans recalcul', () => {
+    const memo = new PathMemo()
+    const p = memo.get('gate:nginx', links)
+    expect([...p].sort()).toEqual([...pathOf('gate:nginx', links)].sort())
+    expect(memo.get('gate:nginx', links)).toBe(p)
+    expect(memo.get('service:production/db', links)).not.toBe(p)
+    expect(memo.get('gate:nginx', links)).toBe(p) // deux sélections en cache (sélection et survol)
+  })
+
+  it('liens reconstruits à l’identique : pas de recalcul ; topologie changée : recalcul', () => {
+    const memo = new PathMemo()
+    const p = memo.get('service:production/api', links)
+    expect(memo.get('service:production/api', moved)).toBe(p)
+    const q = memo.get('service:production/api', fewer)
+    expect(q).not.toBe(p)
+    expect(q.has('pod:b')).toBe(false)
+    expect(p.has('pod:b')).toBe(true)
+  })
+
+  it('extrait les uids des pods d’un chemin', () => {
+    expect([...podUidsOf(pathOf('service:production/api', links))].sort()).toEqual(['a', 'b']) // pod en attente : pas de fibre
+    expect(podUidsOf(new Set(['gate:nginx'])).size).toBe(0)
   })
 })
 

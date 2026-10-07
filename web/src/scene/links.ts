@@ -213,3 +213,51 @@ export function pathOf(sel: string, links: Link[]): Set<string> {
 
 /** Lien allumé : tous ses objets, routes exceptées, sont sur le chemin. */
 export const isLit = (l: Link, path: ReadonlySet<string>) => l.keys.every((k) => k.startsWith('route:') || path.has(k))
+
+/**
+ * Même topologie : mêmes familles et mêmes objets reliés, dans le même ordre.
+ * C'est tout ce que lit `pathOf` (ni le tracé, ni l'état, ni le namespace).
+ */
+export function sameTopology(a: readonly Link[], b: readonly Link[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i], y = b[i]
+    if (x.family !== y.family || x.keys.length !== y.keys.length) return false
+    for (let j = 0; j < x.keys.length; j++) if (x.keys[j] !== y.keys[j]) return false
+  }
+  return true
+}
+
+/** Uids des pods d'un chemin (« pod:uid » → « uid »). */
+export function podUidsOf(path: ReadonlySet<string>): Set<string> {
+  const out = new Set<string>()
+  for (const k of path) if (k.startsWith('pod:')) out.add(k.slice(4))
+  return out
+}
+
+/** Au-delà, le cache est vidé (le survol balaie beaucoup d'objets). */
+const MEMO_MAX = 64
+
+/**
+ * `pathOf` mémorisé par sélection : recalculé seulement quand la topologie des
+ * liens change, pas à chaque reconstruction (le flux reconstruit les liens à
+ * chaque version, le plus souvent à l'identique).
+ */
+export class PathMemo {
+  private links: readonly Link[] | null = null
+  private cache = new Map<string, Set<string>>()
+
+  get(sel: string, links: Link[]): Set<string> {
+    if (links !== this.links) {
+      if (!this.links || !sameTopology(this.links, links)) this.cache.clear()
+      this.links = links
+    }
+    let p = this.cache.get(sel)
+    if (!p) {
+      if (this.cache.size >= MEMO_MAX) this.cache.clear()
+      this.cache.set(sel, (p = pathOf(sel, links)))
+    }
+    return p
+  }
+}

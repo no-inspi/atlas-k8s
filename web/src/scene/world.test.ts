@@ -167,7 +167,27 @@ describe('réseau et stockage', () => {
     expect(f.path!.has('pod:u1')).toBe(true)
     expect(w.focusFor({ type: 'pod', key: 'u1', name: 'x' }, null, null).dim).toBe(false)
     expect(w.focusFor(null, 'gate:nginx', null).hover!.has('service:production/api')).toBe(true)
-    expect(w.focusFor(null, null, null)).toEqual({ path: null, hover: null, dim: false })
+    expect(w.focusFor(null, null, null)).toEqual({ path: null, hover: null, dim: false, podUids: null })
+  })
+
+  it('précalcule les uids des pods du chemin estompant', () => {
+    const w = new World()
+    w.update(st(1))
+    expect([...w.focusFor({ type: 'service', key: 'production/api', name: 'api' }, null, null).podUids!]).toEqual(['u1'])
+    expect(w.focusFor({ type: 'pod', key: 'u1', name: 'x' }, null, null).podUids).toBeNull()
+  })
+
+  it('garde le focus quand une nouvelle version ne change pas les liens', () => {
+    const w = new World()
+    const sel = { type: 'service' as const, key: 'production/api', name: 'api' }
+    w.update(st(1))
+    const f = w.focusFor(sel, null, null)
+    w.update(st(2))
+    expect(w.focusFor(sel, null, null)).toBe(f)
+    w.update({ ...st(3), services: new Map([['production/api', service({ endpoints: [] })]]) })
+    const g = w.focusFor(sel, null, null)
+    expect(g).not.toBe(f)
+    expect(g.podUids!.size).toBe(0)
   })
 
   it('situe un objet réseau', () => {

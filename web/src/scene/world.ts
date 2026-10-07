@@ -4,7 +4,7 @@ import {
 } from '../api/types'
 import type { ClusterState, Selection, SelectionType } from '../store/cluster'
 import { gatesOf, type Gate } from '../store/net'
-import { buildLinks, pathOf, type Link } from './links'
+import { buildLinks, PathMemo, podUidsOf, type Link } from './links'
 import { layoutNetwork, type NetLayout } from './netLayout'
 import { clusterColors } from './colors'
 import { postureFor } from './posture'
@@ -53,9 +53,11 @@ export interface Focus {
   hover: Set<string> | null
   /** Estomper ce qui n'est pas sur le chemin : sélection d'une porte, d'une route, d'un Service ou d'un PVC. */
   dim: boolean
+  /** Uids des pods du chemin quand il estompe (`dim`), sinon null : lu par pod et par frame, sans allocation. */
+  podUids: ReadonlySet<string> | null
 }
 
-const NO_FOCUS: Focus = { path: null, hover: null, dim: false }
+const NO_FOCUS: Focus = { path: null, hover: null, dim: false, podUids: null }
 const NET_SELECTIONS: ReadonlySet<SelectionType> = new Set(['service', 'route', 'volume', 'gate', 'gateway', 'pv'])
 
 /** Occupant d'une place : un pod, ou une pile (représentant et membres). */
@@ -92,10 +94,9 @@ export class World {
   links: Link[] = []
   private city: CityLayout | null = null
   private netKey = ''
-  private focusKey = ''
   private focusVal: Focus = NO_FOCUS
-  private pathKey = ''
-  private pathVal = new Set<string>()
+  /** Chemins mémorisés : recalculés seulement si la sélection ou la topologie des liens change. */
+  private paths = new PathMemo()
   private viewKey = ''
   private layoutKey = ''
   private capacity = 0
@@ -167,29 +168,27 @@ export class World {
     this.links = buildLinks({ city, net: this.net!, services: this.services, routes: this.routes, volumes: this.volumes, pods: st.pods, targets: this.targets })
   }
 
-  /** Chemin à allumer pour la sélection et le survol courants (mis en cache). */
+  /**
+   * Chemin à allumer pour la sélection et le survol courants. Même objet tant
+   * que la sélection, le survol et la topologie des liens ne changent pas, même
+   * si la version du flux avance.
+   */
   focusFor(sel: Selection, hoverNet: string | null, hoverPod: string | null): Focus {
     const selKey = sel && sel.type !== 'node' ? `${sel.type}:${sel.key}` : null
     const hoverKey = hoverNet ?? (hoverPod ? `pod:${hoverPod}` : null)
-    const key = `${this.version}|${this.viewKey}|${selKey}|${hoverKey}`
-    if (key === this.focusKey) return this.focusVal
-    this.focusKey = key
-    this.focusVal = !selKey && !hoverKey ? NO_FOCUS : {
-      path: selKey ? pathOf(selKey, this.links) : null,
-      hover: hoverKey ? pathOf(hoverKey, this.links) : null,
-      dim: !!sel && NET_SELECTIONS.has(sel.type),
-    }
-    return this.focusVal
+    if (!selKey && !hoverKey) return (this.focusVal = NO_FOCUS)
+    const path = selKey ? this.paths.get(selKey, this.links) : null
+    const hover = hoverKey ? this.paths.get(hoverKey, this.links) : null
+    const dim = !!sel && NET_SELECTIONS.has(sel.type)
+    const f = this.focusVal
+    if (f.path === path && f.hover === hover && f.dim === dim) return f
+    const podUids = !dim || !path ? null : f.path === path && f.podUids ? f.podUids : podUidsOf(path)
+    return (this.focusVal = { path, hover, dim, podUids })
   }
 
-  /** Chemin d'un objet (« type:clé »), mis en cache à part : n'évince pas le focus de la scène. */
+  /** Chemin d'un objet (« type:clé »), mémorisé comme celui du focus. */
   pathFor(selKey: string): Set<string> {
-    const key = `${this.version}|${this.viewKey}|${selKey}`
-    if (key !== this.pathKey) {
-      this.pathKey = key
-      this.pathVal = pathOf(selKey, this.links)
-    }
-    return this.pathVal
+    return this.paths.get(selKey, this.links)
   }
 
   /** Point de la ville où se trouve un objet (recherche, marqueur de sélection). */
