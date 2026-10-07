@@ -78,6 +78,10 @@ clean:
 # --- Cluster kind de développement -----------------------------------------
 
 KIND_CTX := kind-atlas
+# Garde : sans contexte explicite, kubectl viserait le contexte courant.
+ifeq ($(strip $(KIND_CTX)),)
+$(error KIND_CTX est vide : les cibles kind exigent un contexte explicite)
+endif
 
 kind-up:
 	kind create cluster --config hack/kind.yaml
@@ -88,20 +92,30 @@ kind-down:
 	kind delete cluster --name atlas
 
 # CRD tierces des scénarios, téléchargées une fois à une version épinglée
-# (hack/crds/.cache/, ignoré par git) ; le test d'intégration les réapplique.
+# (hack/crds/.cache/, ignoré par git) et vérifiées par sha256 ; le test
+# d'intégration les réapplique. Changer une version impose de changer son hash.
 GATEWAY_API_VERSION ?= v1.3.0
-TRAEFIK_CRD_VERSION ?= v3.5
+GATEWAY_API_SHA256 ?= 78796d5c51450fc55d8dc8092ba8137f8c807982d7508d7875d5c537a24082b9
+TRAEFIK_CRD_VERSION ?= v3.5.6
+TRAEFIK_CRD_SHA256 ?= 1f0a915765915aac3293274db2344145fa41b28c1162d7c1a0ce833b0efb890b
 GATEWAY_API_CRDS := hack/crds/.cache/gateway-api-$(GATEWAY_API_VERSION)-standard.yaml
 TRAEFIK_CRDS := hack/crds/.cache/traefik-$(TRAEFIK_CRD_VERSION)-crds.yaml
+SHA256 := $(shell command -v sha256sum >/dev/null 2>&1 && echo sha256sum || echo shasum -a 256)
+
+# fetch URL SHA256 : télécharge dans $@.tmp, vérifie le hash, puis renomme.
+define fetch
+	mkdir -p $(dir $@)
+	curl -fsSL -o $@.tmp $(1) && test "$$($(SHA256) $@.tmp | cut -d' ' -f1)" = "$(2)" \
+		|| { rm -f $@.tmp; echo "échec du téléchargement ou hash inattendu : $(1)"; exit 1; }
+	mv $@.tmp $@
+endef
 
 $(GATEWAY_API_CRDS):
-	mkdir -p $(dir $@)
-	curl -fsSL -o $@.tmp https://github.com/kubernetes-sigs/gateway-api/releases/download/$(GATEWAY_API_VERSION)/standard-install.yaml && mv $@.tmp $@
+	$(call fetch,https://github.com/kubernetes-sigs/gateway-api/releases/download/$(GATEWAY_API_VERSION)/standard-install.yaml,$(GATEWAY_API_SHA256))
 
 # https://doc.traefik.io/traefik/reference/install-configuration/providers/kubernetes/kubernetes-crd/
 $(TRAEFIK_CRDS):
-	mkdir -p $(dir $@)
-	curl -fsSL -o $@.tmp https://raw.githubusercontent.com/traefik/traefik/$(TRAEFIK_CRD_VERSION)/docs/content/reference/dynamic-configuration/kubernetes-crd-definition-v1.yml && mv $@.tmp $@
+	$(call fetch,https://raw.githubusercontent.com/traefik/traefik/$(TRAEFIK_CRD_VERSION)/docs/content/reference/dynamic-configuration/kubernetes-crd-definition-v1.yml,$(TRAEFIK_CRD_SHA256))
 
 crds: $(GATEWAY_API_CRDS) $(TRAEFIK_CRDS)
 
