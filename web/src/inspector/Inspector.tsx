@@ -53,7 +53,7 @@ function PodBody({ p }: { p: Pod }) {
     case 'yaml':
       return <div className="p-body flush"><YamlTab p={p} /></div>
     case 'events':
-      return <EventsTab p={p} />
+      return <EventsTab ns={p.namespace} name={p.name} />
     default:
       return <PodOverview p={p} />
   }
