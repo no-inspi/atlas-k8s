@@ -16,7 +16,9 @@ import (
 
 // ConvertService réduit un Service et ses EndpointSlices. La santé compte
 // toutes les adresses (un Service sans selector comme default/kubernetes reste
-// sain) ; Endpoints ne garde que les pods, dédoublonnés (double pile). Un
+// sain) ; Endpoints ne garde que les pods, dédoublonnés (double pile). Les
+// endpoints en arrêt (Terminating, pods qui disparaissent pendant un
+// déploiement) sont ignorés : ni comptés dans la santé, ni listés. Un
 // Service sans selector ni slice n'est pas publié (publish=false), sauf
 // ExternalName.
 func ConvertService(s *corev1.Service, slices []*discoveryv1.EndpointSlice) (m model.Service, publish bool) {
@@ -30,8 +32,11 @@ func ConvertService(s *corev1.Service, slices []*discoveryv1.EndpointSlice) (m m
 		m.ClusterIP = ""
 	}
 	for _, p := range s.Spec.Ports {
-		m.Ports = append(m.Ports, model.ServicePort{Name: p.Name, Port: p.Port, TargetPort: p.TargetPort.String(),
-			Protocol: string(p.Protocol), NodePort: p.NodePort})
+		sp := model.ServicePort{Name: p.Name, Port: p.Port, Protocol: string(p.Protocol), NodePort: p.NodePort}
+		if p.TargetPort.IntVal != 0 || p.TargetPort.StrVal != "" { // sinon String() rendrait « 0 »
+			sp.TargetPort = p.TargetPort.String()
+		}
+		m.Ports = append(m.Ports, sp)
 	}
 	for _, in := range s.Status.LoadBalancer.Ingress {
 		if in.IP != "" {
@@ -46,6 +51,11 @@ func ConvertService(s *corev1.Service, slices []*discoveryv1.EndpointSlice) (m m
 	pods := map[string]int{}
 	for _, sl := range slices {
 		for _, e := range sl.Endpoints {
+			if e.Conditions.Terminating != nil && *e.Conditions.Terminating {
+				continue // pod en arrêt : sur le point de disparaître
+			}
+			// Limite acceptée : un Service headless avec publishNotReadyAddresses
+			// déclare tous ses endpoints prêts.
 			ready := e.Conditions.Ready == nil || *e.Conditions.Ready
 			id := ""
 			if e.TargetRef != nil && e.TargetRef.Kind == "Pod" && e.TargetRef.UID != "" {
@@ -149,8 +159,8 @@ func ConvertIngress(i *networkingv1.Ingress, gate string, exists ServiceExists) 
 }
 
 var (
-	hostRe = regexp.MustCompile("Host\\(`([^`]+)`")
-	pathRe = regexp.MustCompile("(?:PathPrefix|Path)\\(`([^`]+)`")
+	hostRe = regexp.MustCompile("Host\\([`\"]([^`\"]+)[`\"]")
+	pathRe = regexp.MustCompile("(?:PathPrefix|Path)\\([`\"]([^`\"]+)[`\"]")
 )
 
 // parseMatch extrait le premier Host() et le premier Path()/PathPrefix() d'une règle Traefik.

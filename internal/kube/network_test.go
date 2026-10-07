@@ -201,3 +201,54 @@ func TestPodClaims(t *testing.T) {
 		t.Errorf("PodClaims = %v", got)
 	}
 }
+
+func TestConvertServiceTerminatingEndpoints(t *testing.T) {
+	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "prod"},
+		Spec: corev1.ServiceSpec{Selector: map[string]string{"app": "api"}}}
+	// Pendant un déploiement, le pod en arrêt n'est ni prêt ni compté.
+	stopping := podEp("3", bptr(false))
+	stopping.Conditions.Terminating = bptr(true)
+	m, _ := ConvertService(svc, []*discoveryv1.EndpointSlice{slice("api", podEp("1", bptr(true)), podEp("2", bptr(true)), stopping)})
+	if m.Health != model.HealthOK {
+		t.Errorf("santé = %s", m.Health)
+	}
+	for _, e := range m.Endpoints {
+		if e.PodUID == "3" {
+			t.Errorf("pod en arrêt présent : %+v", m.Endpoints)
+		}
+	}
+}
+
+func TestConvertServiceUnsetTargetPort(t *testing.T) {
+	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "prod"},
+		Spec: corev1.ServiceSpec{Ports: []corev1.ServicePort{{Port: 80}, {Port: 81, TargetPort: intstr.FromInt32(8081)}}}}
+	m, _ := ConvertService(svc, nil)
+	if m.Ports[0].TargetPort != "" || m.Ports[1].TargetPort != "8081" {
+		t.Errorf("ports = %+v", m.Ports)
+	}
+}
+
+func TestParseMatchDoubleQuotes(t *testing.T) {
+	if h, p := parseMatch(`Host("a.example.com") && PathPrefix("/x")`); h != "a.example.com" || p != "/x" {
+		t.Errorf("host=%q path=%q", h, p)
+	}
+}
+
+func TestConvertIngressRoutePortFloat(t *testing.T) {
+	u := ingressRoute("traefik.io", "mon", "g", []any{
+		map[string]any{"match": "Host(`a`)", "services": []any{map[string]any{"name": "grafana", "port": float64(3000)}}},
+	})
+	if r := ConvertIngressRoute(u, nil); r.Rules[0].Backend.Port != "3000" {
+		t.Errorf("port = %q", r.Rules[0].Backend.Port)
+	}
+}
+
+func TestConvertIngressPortNameAndNoHTTP(t *testing.T) {
+	named := networkingv1.IngressBackend{Service: &networkingv1.IngressServiceBackend{Name: "web", Port: networkingv1.ServiceBackendPort{Name: "http"}}}
+	ing := &networkingv1.Ingress{ObjectMeta: metav1.ObjectMeta{Name: "i", Namespace: "prod"},
+		Spec: networkingv1.IngressSpec{DefaultBackend: &named, Rules: []networkingv1.IngressRule{{Host: "sans-http.example.com"}}}}
+	r := ConvertIngress(ing, "nginx", nil)
+	if len(r.Rules) != 1 || r.Rules[0].Backend.Port != "http" {
+		t.Errorf("règles = %+v", r.Rules)
+	}
+}

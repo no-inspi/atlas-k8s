@@ -29,7 +29,7 @@ Le remplissage des citernes (espace utilisé) est hors jalon. Il demanderait soi
 
 - `namespace`, `name`, `type` (`ClusterIP`, `NodePort`, `LoadBalancer`, `ExternalName`), `headless`, `ports: [{name, port, targetPort, protocol, nodePort}]`, `loadBalancer: [ip|hostname]`, `externalName`.
 - `endpoints: [{podUID, ready}]`, lus dans les EndpointSlices (label `kubernetes.io/service-name`, `targetRef.uid`, `conditions.ready`), dédoublonnés par pod.
-- `health` calculé côté serveur : `ok` (au moins un endpoint, tous ready), `degraded` (une partie ready), `down` (aucun endpoint ready ou aucun endpoint), `external` (ExternalName).
+- `health` calculé côté serveur : `ok` (au moins un endpoint, tous ready), `degraded` (une partie ready), `down` (aucun endpoint ready ou aucun endpoint), `external` (ExternalName). Les endpoints des pods en arrêt (`terminating`) sont ignorés, pour qu'un déploiement progressif ne dégrade pas le Service.
 - Un Service sans selector et sans EndpointSlice n'est pas publié. Un ExternalName l'est toujours.
 
 **`route`** (clé `source/namespace/name`)

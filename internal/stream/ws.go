@@ -218,7 +218,7 @@ func (v *view) delta(ctx context.Context, m Message) (Message, bool) {
 	case model.Node:
 		known, id = v.nodes, o.Name
 	}
-	if known == nil { // workloads, namespaces : visibles selon le droit courant
+	if known == nil { // workloads, namespaces, Services, routes et volumes : visibles selon le droit courant
 		return m, v.f.Allow(ctx, m.Kind, m.Obj)
 	}
 	if m.Type == "delete" {
