@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { node, pod, workload } from '../store/fixtures'
+import { node, pod, route, service, volume, workload } from '../store/fixtures'
 import { search } from './searchRank'
 
 const st = {
@@ -25,5 +25,21 @@ describe('search', () => {
   it('ignore la casse et les requêtes vides', () => {
     expect(search('WEB', st).map((x) => x.label)).toEqual(['web-1'])
     expect(search('  ', st)).toEqual([])
+  })
+})
+
+describe('réseau et stockage', () => {
+  const st = {
+    pods: new Map(), nodes: new Map(), workloads: new Map(),
+    services: new Map([['production/api', service()]]),
+    routes: new Map([['Ingress/production/storefront', route()]]),
+    volumes: new Map([['production/data-0', volume()]]),
+  }
+
+  it('trouve Services, routes (par nom ou par hôte), PVC et portes', () => {
+    expect(search('api', st).map((r) => [r.type, r.key])).toEqual([['service', 'production/api']])
+    expect(search('shop.example', st).map((r) => r.key)).toEqual(['Ingress/production/storefront'])
+    expect(search('data', st)[0]).toEqual(expect.objectContaining({ type: 'volume', key: 'production/data-0' }))
+    expect(search('ngi', st)[0]).toEqual(expect.objectContaining({ type: 'gate', key: 'nginx' }))
   })
 })

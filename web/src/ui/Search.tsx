@@ -1,17 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { podPositions, world } from '../scene/world'
+import { world } from '../scene/world'
 import { useCluster } from '../store/cluster'
 import { search, type SearchResult } from './searchRank'
 
 /** Position à viser dans la ville pour un résultat. */
 function positionOf(r: SearchResult): { x: number; z: number } | null {
-  const uid = r.type === 'pod' ? r.key : r.podUid
-  if (uid) {
-    const p = podPositions.get(uid) ?? world.targets.get(uid)
-    return p ? { x: p.x, z: p.z } : null
-  }
-  const plot = world.layout?.plots.get(r.key)
-  return plot ?? null
+  if (r.type === 'workload') return r.podUid ? world.positionOf('pod', r.podUid) : null
+  return world.positionOf(r.type, r.key)
 }
 
 /** Recherche (/) : centre la caméra sur l'objet et l'ouvre dans l'inspecteur. */
@@ -39,8 +34,8 @@ export function Search() {
 
   const choose = (r: SearchResult) => {
     const st = useCluster.getState()
-    if (r.type === 'node') st.select({ type: 'node', key: r.key })
-    else st.select({ type: 'pod', key: r.type === 'pod' ? r.key : r.podUid! })
+    if (r.type === 'workload') st.select({ type: 'pod', key: r.podUid! })
+    else st.select({ type: r.type, key: r.key })
     const at = positionOf(r)
     if (at) st.focusOn(at.x, at.z)
     setOpen(false)
@@ -63,8 +58,8 @@ export function Search() {
         aria-expanded={results.length > 0}
         aria-controls="search-results"
         aria-activedescendant={results[active] ? `search-r${active}` : undefined}
-        aria-label="Rechercher un pod, un node ou un workload"
-        placeholder="Pod, node ou workload…"
+        aria-label="Rechercher un pod, un node, un workload, un Service, une route ou un PVC"
+        placeholder="Pod, node, Service, route, PVC…"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
