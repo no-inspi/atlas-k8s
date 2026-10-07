@@ -63,6 +63,8 @@ test('bob (edit dans production et staging) ne reçoit rien de kube-system', asy
   // Les PV sont cluster-scoped : sans droit de les lister, bob n'en reçoit aucun.
   expect(frames).not.toContain('"persistentVolumes"')
   expect(frames).not.toContain('"kind":"persistentVolume"')
+  // La HTTPRoute de production (rôle agrégé atlas-dev-gateway-view), oui.
+  expect(frames).toContain('"source":"HTTPRoute"')
   await page.screenshot({ path: 'e2e/__screenshots__/auth-bob.png' })
 
   // Revue d'accès au nom de bob : delete dans production oui, dans kube-system non.

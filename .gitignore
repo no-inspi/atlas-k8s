@@ -11,3 +11,4 @@ deploy.local.mk
 deploy/values.local.yaml
 .superpowers/
 .playwright-mcp/
+hack/crds/.cache/

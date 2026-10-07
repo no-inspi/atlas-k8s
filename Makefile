@@ -1,4 +1,4 @@
-.PHONY: deploy load-up load-down kind-oidc helm-kind-oidc dev-demo dex-up dex-down run-dev e2e-auth helm-kind image image-push scan web build test test-go test-web demo dev e2e embed-dir clean kind-up kind-down scenarios run-kind test-integration
+.PHONY: deploy load-up load-down kind-oidc helm-kind-oidc dev-demo dex-up dex-down run-dev e2e-auth helm-kind image image-push scan web build test test-go test-web demo dev e2e embed-dir clean kind-up kind-down scenarios run-kind test-integration crds
 
 BIN := bin/atlas
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -87,14 +87,34 @@ kind-up:
 kind-down:
 	kind delete cluster --name atlas
 
-# CRD Traefik (IngressRoute) : https://doc.traefik.io/traefik/reference/install-configuration/providers/kubernetes/kubernetes-crd/
-TRAEFIK_CRD ?= https://raw.githubusercontent.com/traefik/traefik/v3.5/docs/content/reference/dynamic-configuration/kubernetes-crd-definition-v1.yml
+# CRD tierces des scénarios, téléchargées une fois à une version épinglée
+# (hack/crds/.cache/, ignoré par git) ; le test d'intégration les réapplique.
+GATEWAY_API_VERSION ?= v1.3.0
+TRAEFIK_CRD_VERSION ?= v3.5
+GATEWAY_API_CRDS := hack/crds/.cache/gateway-api-$(GATEWAY_API_VERSION)-standard.yaml
+TRAEFIK_CRDS := hack/crds/.cache/traefik-$(TRAEFIK_CRD_VERSION)-crds.yaml
 
-scenarios:
+$(GATEWAY_API_CRDS):
+	mkdir -p $(dir $@)
+	curl -fsSL -o $@.tmp https://github.com/kubernetes-sigs/gateway-api/releases/download/$(GATEWAY_API_VERSION)/standard-install.yaml && mv $@.tmp $@
+
+# https://doc.traefik.io/traefik/reference/install-configuration/providers/kubernetes/kubernetes-crd/
+$(TRAEFIK_CRDS):
+	mkdir -p $(dir $@)
+	curl -fsSL -o $@.tmp https://raw.githubusercontent.com/traefik/traefik/$(TRAEFIK_CRD_VERSION)/docs/content/reference/dynamic-configuration/kubernetes-crd-definition-v1.yml && mv $@.tmp $@
+
+crds: $(GATEWAY_API_CRDS) $(TRAEFIK_CRDS)
+
+scenarios: crds
 	kubectl --context $(KIND_CTX) apply -f hack/scenarios/
-	kubectl --context $(KIND_CTX) apply --server-side -f $(TRAEFIK_CRD)
-	kubectl --context $(KIND_CTX) wait --for condition=established crd/ingressroutes.traefik.io --timeout=60s
+	kubectl --context $(KIND_CTX) apply --server-side -f $(TRAEFIK_CRDS)
+	kubectl --context $(KIND_CTX) apply --server-side -f $(GATEWAY_API_CRDS)
+	kubectl --context $(KIND_CTX) wait --for condition=established --timeout=60s \
+		crd/ingressroutes.traefik.io crd/ingressroutetcps.traefik.io crd/ingressrouteudps.traefik.io crd/traefikservices.traefik.io \
+		crd/gateways.gateway.networking.k8s.io crd/httproutes.gateway.networking.k8s.io crd/grpcroutes.gateway.networking.k8s.io
 	kubectl --context $(KIND_CTX) apply -f hack/scenarios-traefik/
+	kubectl --context $(KIND_CTX) apply -f hack/scenarios-gateway/gateways.yaml
+	hack/scenarios-gateway/status.sh $(KIND_CTX)
 
 # Atlas contre le cluster kind, sans authentification (jalon 4 : OIDC via Dex).
 run-kind: build
