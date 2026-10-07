@@ -1,4 +1,4 @@
-import type { Node, Pod, Workload } from '../api/types'
+import type { Node, Pod, Route, Service, Volume, Workload } from '../api/types'
 
 export function pod(over: Partial<Pod> = {}): Pod {
   return {
@@ -23,4 +23,29 @@ export function node(over: Partial<Node> = {}): Node {
 
 export function workload(over: Partial<Workload> = {}): Workload {
   return { kind: 'Deployment', name: 'api', namespace: 'production', replicas: 3, readyReplicas: 3, ...over }
+}
+
+export function service(over: Partial<Service> = {}): Service {
+  return {
+    namespace: 'production', name: 'api', type: 'ClusterIP', clusterIP: '10.96.0.10',
+    ports: [{ name: 'http', port: 80, targetPort: 'http', protocol: 'TCP' }],
+    endpoints: [{ podUID: 'u1', ready: true }], health: 'ok',
+    ...over,
+  }
+}
+
+export function route(over: Partial<Route> = {}): Route {
+  return {
+    source: 'Ingress', group: 'networking.k8s.io', namespace: 'production', name: 'storefront', gate: 'nginx',
+    rules: [{ host: 'shop.example.com', path: '/', backend: { namespace: 'production', service: 'api', port: '80', kind: 'Service', state: 'ok' } }],
+    ...over,
+  }
+}
+
+export function volume(over: Partial<Volume> = {}): Volume {
+  return {
+    namespace: 'production', name: 'data-0', storageClass: 'standard-rwo', requested: 10 * 2 ** 30, capacity: 10 * 2 ** 30,
+    accessModes: ['ReadWriteOnce'], phase: 'Bound', volumeName: 'pvc-1', pods: ['u1'],
+    ...over,
+  }
 }

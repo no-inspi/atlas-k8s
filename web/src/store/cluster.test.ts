@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useCluster } from './cluster'
-import { node, pod, workload } from './fixtures'
+import { node, pod, route, service, volume, workload } from './fixtures'
 
 const s = () => useCluster.getState()
 
@@ -86,5 +86,37 @@ describe('sélection et filtre', () => {
     expect(s().nsFilter).toBe('production')
     s().toggleNsFilter('production')
     expect(s().nsFilter).toBeNull()
+  })
+})
+
+describe('réseau et stockage', () => {
+  it('suit Services, routes et volumes', () => {
+    s().applyMessages([{ type: 'snapshot', rev: 1, services: [service()], routes: [route()], volumes: [volume()] }])
+    expect([...s().services.keys()]).toEqual(['production/api'])
+    expect([...s().routes.keys()]).toEqual(['Ingress/production/storefront'])
+    expect([...s().volumes.keys()]).toEqual(['production/data-0'])
+    s().applyMessages([
+      { type: 'upsert', kind: 'service', rev: 2, obj: service({ name: 'web' }) },
+      { type: 'delete', kind: 'route', rev: 3, obj: route() },
+      { type: 'delete', kind: 'volume', rev: 4, obj: volume() },
+    ])
+    expect(s().services.size).toBe(2)
+    expect(s().routes.size).toBe(0)
+    expect(s().volumes.size).toBe(0)
+  })
+
+  it('sélectionne un Service, une route, un volume ou une porte', () => {
+    s().applyMessages([{ type: 'snapshot', rev: 1, services: [service()], routes: [route()], volumes: [volume()] }])
+    s().select({ type: 'service', key: 'production/api' })
+    expect(s().selection).toEqual({ type: 'service', key: 'production/api', name: 'api' })
+    s().select({ type: 'route', key: 'Ingress/production/storefront' })
+    expect(s().selection?.name).toBe('storefront')
+    s().select({ type: 'gate', key: 'nginx' })
+    expect(s().selection?.name).toBe('nginx')
+  })
+
+  it('retient l’objet réseau survolé', () => {
+    s().setHoverNet('service:production/api')
+    expect(s().hoverNet).toBe('service:production/api')
   })
 })

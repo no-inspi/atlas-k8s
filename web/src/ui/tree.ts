@@ -3,6 +3,7 @@
 // navigation au clavier (motif « tree » de WAI-ARIA).
 
 import { workloadKey, type Node, type Pod, type Workload } from '../api/types'
+import type { SelectionType } from '../store/cluster'
 
 export interface TreeNode {
   id: string
@@ -10,7 +11,7 @@ export interface TreeNode {
   detail?: string
   status?: string
   /** Sélection ouverte dans l'inspecteur (pods et nodes). */
-  select?: { type: 'pod' | 'node'; key: string }
+  select?: { type: SelectionType; key: string }
   children?: TreeNode[]
 }
 
