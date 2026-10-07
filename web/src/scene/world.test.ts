@@ -177,6 +177,42 @@ describe('réseau et stockage', () => {
     expect(w.focusFor({ type: 'pod', key: 'u1', name: 'x' }, null, null).podUids).toBeNull()
   })
 
+  it('nouveau chemin quand le masquage ou le filtre retire le Service sélectionné', () => {
+    const dns = service({ namespace: 'kube-system', name: 'kube-dns', endpoints: [{ podUID: 'k1', ready: true }] })
+    const sys = (version: number, hideSystem: boolean, nsFilter: string | null = null) => ({
+      ...state(version, [node()], [pod({ uid: 'u1' }), pod({ uid: 'k1', name: 'coredns-1', namespace: 'kube-system' })]),
+      services: new Map([['production/api', service()], ['kube-system/kube-dns', dns]]),
+      podView: { ...DEFAULT_VIEW, hideSystem }, nsFilter,
+    })
+    const sel = { type: 'service' as const, key: 'kube-system/kube-dns', name: 'kube-dns' }
+    const w = new World()
+    w.update(sys(1, false))
+    const f = w.focusFor(sel, null, null)
+    expect([...f.podUids!]).toEqual(['k1'])
+    w.update(sys(2, true)) // namespaces système masqués
+    const g = w.focusFor(sel, null, null)
+    expect(g).not.toBe(f)
+    expect(g.podUids!.size).toBe(0)
+    w.update(sys(3, true, 'kube-system')) // filtre sur kube-system : le Service revient
+    const h = w.focusFor(sel, null, null)
+    expect([...h.podUids!]).toEqual(['k1'])
+    w.update(sys(4, true, null)) // filtre retiré : le Service disparaît de nouveau
+    expect(w.focusFor(sel, null, null).podUids!.size).toBe(0)
+  })
+
+  it('survol seul : hover change, podUids identique', () => {
+    const w = new World()
+    w.update(st(1))
+    const sel = { type: 'service' as const, key: 'production/api', name: 'api' }
+    const f = w.focusFor(sel, null, null)
+    const g = w.focusFor(sel, 'gate:nginx', null)
+    expect(g.hover).not.toBe(f.hover)
+    expect(g.hover!.has('gate:nginx')).toBe(true)
+    expect(g.path).toBe(f.path)
+    expect(g.podUids).toBe(f.podUids)
+    expect(w.focusFor(sel, null, 'u1').podUids).toBe(f.podUids)
+  })
+
   it('garde le focus quand une nouvelle version ne change pas les liens', () => {
     const w = new World()
     const sel = { type: 'service' as const, key: 'production/api', name: 'api' }

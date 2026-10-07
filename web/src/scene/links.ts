@@ -236,7 +236,7 @@ export function podUidsOf(path: ReadonlySet<string>): Set<string> {
   return out
 }
 
-/** Au-delà, le cache est vidé (le survol balaie beaucoup d'objets). */
+/** Au-delà, les chemins les moins récemment demandés sont évincés (le survol balaie beaucoup d'objets). */
 const MEMO_MAX = 64
 
 /**
@@ -254,10 +254,19 @@ export class PathMemo {
       this.links = links
     }
     let p = this.cache.get(sel)
-    if (!p) {
-      if (this.cache.size >= MEMO_MAX) this.cache.clear()
-      this.cache.set(sel, (p = pathOf(sel, links)))
+    if (p) {
+      // Moins récemment demandé en tête : la sélection, redemandée à chaque frame, n'est jamais évincée.
+      this.cache.delete(sel)
+    } else {
+      p = pathOf(sel, links)
+      if (this.cache.size >= MEMO_MAX) this.cache.delete(this.cache.keys().next().value!)
     }
+    this.cache.set(sel, p)
     return p
+  }
+
+  /** Nombre de chemins en cache. */
+  get size(): number {
+    return this.cache.size
   }
 }

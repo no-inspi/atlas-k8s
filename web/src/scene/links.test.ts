@@ -162,6 +162,19 @@ describe('mémorisation du chemin', () => {
     expect(p.has('pod:b')).toBe(true)
   })
 
+  it('au-delà du seuil, évince les plus anciennes et garde la sélection redemandée', () => {
+    const memo = new PathMemo()
+    const sel = memo.get('gate:nginx', links)
+    const first = memo.get('pod:h0', links)
+    for (let i = 1; i < 200; i++) {
+      memo.get(`pod:h${i}`, links) // survol qui balaie la ville
+      expect(memo.get('gate:nginx', links)).toBe(sel) // sélection demandée à chaque frame
+    }
+    expect(memo.size).toBeLessThanOrEqual(64)
+    expect(memo.get('pod:h0', links)).not.toBe(first) // survol ancien : évincé, recalculé
+    expect(memo.get('gate:nginx', links)).toBe(sel)
+  })
+
   it('extrait les uids des pods d’un chemin', () => {
     expect([...podUidsOf(pathOf('service:production/api', links))].sort()).toEqual(['a', 'b']) // pod en attente : pas de fibre
     expect(podUidsOf(new Set(['gate:nginx'])).size).toBe(0)
