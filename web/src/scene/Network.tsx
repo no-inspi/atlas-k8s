@@ -244,7 +244,7 @@ export function Network({ theme, reducedMotion }: { theme: Theme; reducedMotion:
         if (pv.phase === 'Released') {
           const z = o.z + o.r + 0.25
           put('signPost', o.x, 0, z, 1, 1, 1, colors.muted, a)
-          put('signPanel', o.x, 0.9, z, 1, 1, 1, colors.muted, a, key)
+          put('signPanel', o.x, 0.9, z, 1, 1, 1, key === selKey ? colors.accent : colors.muted, a, key)
         }
       }
     }

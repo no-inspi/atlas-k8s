@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { ribbon, writeAlpha } from './GroundLinks'
+import { linkAlpha, ribbon, writeAlpha } from './GroundLinks'
+import type { Link } from './links'
 
 describe('ribbon', () => {
   it('quatre sommets et deux triangles par segment, abscisse curviligne continue', () => {
@@ -42,5 +43,24 @@ describe('writeAlpha', () => {
   it('signale l’absence de changement', () => {
     const r = ribbon(items, 0.1, 0)
     expect(writeAlpha(r.alpha, items, () => 1)).toBe(false)
+  })
+})
+
+describe('linkAlpha', () => {
+  const l = (over: Partial<Link> = {}): Link => ({ family: 'main', points: [[0, 0], [1, 0]], keys: ['gate:nginx', 'service:production/api'], live: true, ns: 'production', ...over })
+  const none = { path: null, hover: null, dim: false }
+
+  it('estompe hors namespace filtré puis hors chemin', () => {
+    expect(linkAlpha(l(), null, none)).toBe(1)
+    expect(linkAlpha(l(), 'staging', none)).toBe(0.1)
+    expect(linkAlpha(l(), null, { path: new Set(['gate:nginx']), hover: null, dim: true })).toBe(0.2)
+    expect(linkAlpha(l(), null, { path: new Set(['gate:nginx', 'service:production/api']), hover: null, dim: true })).toBe(1)
+  })
+
+  it('atténue une ligne de poids 0 et les miroirs', () => {
+    expect(linkAlpha(l({ weight: 0 }), null, none)).toBeCloseTo(0.35)
+    expect(linkAlpha(l({ weight: 100 }), null, none)).toBe(1)
+    expect(linkAlpha(l({ family: 'mirror', live: false }), null, none)).toBeCloseTo(0.6)
+    expect(linkAlpha(l({ weight: 0 }), 'staging', none)).toBeCloseTo(0.035)
   })
 })

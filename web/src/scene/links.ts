@@ -21,7 +21,11 @@ export interface Link {
   ns: string
   /** Route cassée ou refusée : position du panneau « ? » ou « ⊘ ». */
   sign?: Pt
-  /** Ligne principale : plus forte part du trafic (pour mille) parmi ses règles ; absent si l'une n'est pas pondérée. */
+  /**
+   * Ligne principale : plus forte part du trafic (pour mille) parmi ses règles ;
+   * absent si l'une n'est pas pondérée. Sert seulement de signal « nul ou non »
+   * (atténuation, paquets) ; l'affichage des parts lit `rule.backend.weight`.
+   */
   weight?: number
 }
 

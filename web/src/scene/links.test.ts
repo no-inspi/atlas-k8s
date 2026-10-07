@@ -183,6 +183,30 @@ describe('Gateway API et Traefik complet', () => {
     expect(of('broken').map((l) => l.keys)).toEqual([['gate:traefik', `route:${routeKey(lost)}`]])
   })
 
+  it('fusionne le poids de deux routes sur la même porte et le même Service : non pondéré l’emporte', () => {
+    const zero = route({ source: 'HTTPRoute', group: 'gateway.networking.k8s.io', name: 'zero', gate: 'infra/public', rules: [
+      { backend: { namespace: 'production', service: 'api', kind: 'Service', state: 'ok', weight: 0 } },
+    ] })
+    const plain = route({ source: 'HTTPRoute', group: 'gateway.networking.k8s.io', name: 'plain', gate: 'infra/public', rules: [
+      { backend: { namespace: 'production', service: 'api', kind: 'Service', state: 'ok' } },
+    ] })
+    const m = buildLinks({ city, net: gnet, services: [api], routes: [zero, plain], volumes: [], pods: new Map(), targets })
+      .filter((l) => l.family === 'main')
+    expect(m).toHaveLength(1)
+    expect(m[0].weight).toBeUndefined()
+    expect(m[0].live).toBe(true)
+  })
+
+  it('une route refusée à deux portes trace deux lignes refusées', () => {
+    const twice = route({ source: 'HTTPRoute', group: 'gateway.networking.k8s.io', name: 'twice', gate: 'infra/public',
+      gates: ['infra/public', 'infra/internal'], rules: [
+        { backend: { namespace: 'production', service: 'api', kind: 'Service', state: 'refused' } },
+      ] })
+    const r = buildLinks({ city, net: gnet, services: [api], routes: [twice], volumes: [], pods: new Map(), targets })
+      .filter((l) => l.family === 'refused')
+    expect(r.map((l) => l.keys[0]).sort()).toEqual(['gate:infra/internal', 'gate:infra/public'])
+  })
+
   it('chemin d’un Gateway : sa porte, ses routes, ses Services et leurs pods ; d’un PV : lui seul', () => {
     const p = pathOf('gateway:infra/public', ls)
     expect([...p]).toEqual(expect.arrayContaining([

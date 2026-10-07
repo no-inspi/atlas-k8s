@@ -6,7 +6,7 @@ import { isLit, type Family, type Link, type Pt } from './links'
 import { LOD_PX, questionTexture } from './Pods'
 import type { Theme } from './theme'
 import { tick } from './tick'
-import { world } from './world'
+import { world, type Focus } from './world'
 
 // Liens au sol : rubans plats (deux triangles par segment) sur lesquels un
 // shader fait défiler des paquets (réseau) ou des gouttes (data). Une
@@ -97,6 +97,36 @@ export function writeAlpha(alpha: Float32Array, items: readonly { points: readon
   return changed
 }
 
+/**
+ * Opacité d'un lien : 10 % hors du namespace filtré, 20 % hors du chemin d'une
+ * sélection réseau ; un miroir est discret (60 %), une ligne de poids 0 pâle (35 %).
+ */
+export function linkAlpha(l: Link, nsFilter: string | null, focus: Focus): number {
+  const base = nsFilter && l.ns !== nsFilter ? 0.1 : focus.dim && focus.path && !isLit(l, focus.path) ? 0.2 : 1
+  return base * (l.family === 'mirror' ? 0.6 : l.weight === 0 ? 0.35 : 1)
+}
+
+/** Panneau « ⊘ » d'une route refusée par son Gateway. */
+function refusedTexture(): THREE.Texture {
+  const c = document.createElement('canvas')
+  c.width = c.height = 64
+  const g = c.getContext('2d')!
+  g.fillStyle = '#C23E28'
+  g.beginPath()
+  g.arc(32, 32, 30, 0, Math.PI * 2)
+  g.fill()
+  g.strokeStyle = '#fff'
+  g.lineWidth = 6
+  g.beginPath()
+  g.arc(32, 32, 16, 0, Math.PI * 2)
+  g.moveTo(20.7, 43.3)
+  g.lineTo(43.3, 20.7)
+  g.stroke()
+  const t = new THREE.CanvasTexture(c)
+  t.colorSpace = THREE.SRGBColorSpace
+  return t
+}
+
 const vertexShader = /* glsl */ `
 attribute float aDist;
 attribute float aAlpha;
@@ -168,7 +198,8 @@ export function Links({ theme, reducedMotion }: { theme: Theme; reducedMotion: b
     links: null, meshes: null, fibreKey: '', alphaKey: '', drawn: new Map(), fibres: [],
   })
   const question = useMemo(questionTexture, [])
-  useEffect(() => () => question.dispose(), [question])
+  const refused = useMemo(refusedTexture, [])
+  useEffect(() => () => { question.dispose(); refused.dispose() }, [question, refused])
 
   useFrame(({ clock, camera, invalidate }) => {
     const st = useCluster.getState()
@@ -179,8 +210,7 @@ export function Links({ theme, reducedMotion }: { theme: Theme; reducedMotion: b
     const focusKey = `${st.selection?.type}:${st.selection?.key}|${st.hoverNet}|${st.hover?.uid}`
     const fibreKey = `${focusKey}|${far}`
     const alphaKey = `${focusKey}|${nsFilter}`
-    const alphaOf = (l: Link) =>
-      nsFilter && l.ns !== nsFilter ? 0.1 : focus.dim && focus.path && !isLit(l, focus.path) ? 0.2 : 1
+    const alphaOf = (l: Link) => linkAlpha(l, nsFilter, focus)
     const setGeometry = (f: Family, ls: Link[]) => {
       const mesh = meshes.get(f)!
       mesh.geometry.dispose()
@@ -230,7 +260,7 @@ export function Links({ theme, reducedMotion }: { theme: Theme; reducedMotion: b
       {[...meshes.values()].map((m, i) => <primitive key={i} object={m} />)}
       {signs.map((l, i) => (
         <sprite key={`sign-${i}`} position={[l.sign![0], 0.6, l.sign![1]]} scale={[0.45, 0.45, 1]} raycast={() => null} renderOrder={10}>
-          <spriteMaterial map={question} depthTest={false} transparent opacity={nsFilter && l.ns !== nsFilter ? 0.1 : 1} />
+          <spriteMaterial map={l.family === 'refused' ? refused : question} depthTest={false} transparent opacity={nsFilter && l.ns !== nsFilter ? 0.1 : 1} />
         </sprite>
       ))}
     </>
