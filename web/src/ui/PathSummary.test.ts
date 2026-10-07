@@ -36,6 +36,11 @@ describe('splitText', () => {
     expect(splitText(route())).toBe('')
   })
 
+  it('un miroir sans pourcentage vaut 0 %', () => {
+    const b = { namespace: 'production', kind: 'Service' as const, state: 'ok' as const }
+    expect(splitText(route({ rules: [{ path: '/', backend: { ...b, service: 'audit', mirror: true } }] }))).toBe('Répartition : miroir audit 0 %')
+  })
+
   it('garde un poids nul, et ne dit rien d’un miroir seul sans parts', () => {
     const b = { namespace: 'production', kind: 'Service' as const, state: 'ok' as const }
     expect(splitText(route({ rules: [

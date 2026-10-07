@@ -47,7 +47,7 @@ describe('shareLabel', () => {
   })
   it('affiche un miroir avec son pourcentage, 100 % par défaut', () => {
     expect(shareLabel({ mirror: true, percent: 10 })).toBe('miroir 10 %')
-    expect(shareLabel({ mirror: true })).toBe('miroir 100 %')
+    expect(shareLabel({ mirror: true })).toBe('miroir 0 %')
   })
   it('affiche un tiret pour un backend unique', () => {
     expect(shareLabel({})).toBe('—')

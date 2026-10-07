@@ -2,7 +2,7 @@ import type { Route } from '../api/types'
 import { world } from '../scene/world'
 import { useCluster, type ClusterState, type Selection } from '../store/cluster'
 import { gatesOf } from '../store/net'
-import { fmtShare } from './format'
+import { fmtShare, mirrorLabel } from './format'
 
 const LABELS: [string, string, string][] = [['gate', 'porte', 'portes'], ['service', 'Service', 'Services'], ['pod', 'pod', 'pods'], ['volume', 'PVC', 'PVC']]
 
@@ -20,12 +20,12 @@ function exists(sel: NonNullable<Selection>, st: ClusterState): boolean {
 
 /** Répartition du trafic d'une route (parts et miroirs), un Service une seule fois ; vide sans poids. */
 export function splitText(r: Pick<Route, 'rules'>): string {
-  const parts = new Set<string>()
+  const parts = new Map<string, string>()
   for (const { backend: b } of r.rules) {
-    if (b.mirror) parts.add(`miroir ${b.service} ${b.percent ?? 100} %`)
-    else if (b.weight !== undefined) parts.add(`${b.service} ${fmtShare(b.weight)}`)
+    if (b.mirror) parts.set(`${b.namespace}/${b.service}/${mirrorLabel(b)}`, `miroir ${b.service} ${b.percent ?? 0} %`)
+    else if (b.weight !== undefined) parts.set(`${b.namespace}/${b.service}/${b.weight}`, `${b.service} ${fmtShare(b.weight)}`)
   }
-  return parts.size ? `Répartition : ${[...parts].join(', ')}` : ''
+  return parts.size ? `Répartition : ${[...parts.values()].join(', ')}` : ''
 }
 
 /** Texte du résumé, vide sans sélection d'une porte, d'un Gateway, d'une route, d'un Service ou d'un PVC. */

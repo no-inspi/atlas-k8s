@@ -6,7 +6,7 @@ import { gateSignal } from '../scene/health'
 import { postureFor } from '../scene/posture'
 import { useCluster } from '../store/cluster'
 import { gatesOfRoute, isGatewayGate, readyCount, routeBroken, routeRefused, routesTo, type Gate } from '../store/net'
-import { fmtMem, fmtShare } from '../ui/format'
+import { fmtMem, fmtShare, mirrorLabel } from '../ui/format'
 import { BADGE, goPod } from './common'
 
 const goService = (ns: string, name: string) => () => useCluster.getState().select({ type: 'service', key: `${ns}/${name}` })
@@ -112,7 +112,7 @@ export function ServiceOverview({ s }: { s: Service }) {
 
 /** Libellé de la colonne Part : miroir et son pourcentage, part du trafic, ou « — » (backend unique). */
 export function shareLabel(b: Pick<Backend, 'weight' | 'mirror' | 'percent'>): string {
-  if (b.mirror) return `miroir ${b.percent ?? 100} %`
+  if (b.mirror) return mirrorLabel(b)
   return b.weight !== undefined ? fmtShare(b.weight) : '—'
 }
 

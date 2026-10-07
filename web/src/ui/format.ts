@@ -32,3 +32,8 @@ export function pct(value: number, total: number): number {
 export function fmtShare(permille: number): string {
   return `${Math.round(permille) / 10} %`
 }
+
+/** Miroir : « miroir 10 % » ; sans pourcentage publié, 0 % (le serveur omet percent = 0). */
+export function mirrorLabel(b: { percent?: number }): string {
+  return `miroir ${b.percent ?? 0} %`
+}
