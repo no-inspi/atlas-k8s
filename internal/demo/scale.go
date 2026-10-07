@@ -40,7 +40,7 @@ const teamPods = 25
 func catalogFor(sc Scale) catalog {
 	if sc.Nodes == 0 {
 		return catalog{pools: pools, workloads: workloads, services: services, routes: baseRoutes, volumes: volumes,
-			gateways: gateways, pvs: orphanPVs}
+			gateways: withAttachedRoutes(gateways, baseRoutes), pvs: orphanPVs}
 	}
 	// Répartition des nodes : 60 % standard, 30 % spot, le reste en GPU (au moins 1).
 	gpu := max(1, sc.Nodes/25)
@@ -72,5 +72,6 @@ func catalogFor(sc Scale) catalog {
 		c.gateways = append(c.gateways, teamGateways(i, ns)...)
 		c.pvs = append(c.pvs, teamPVs(i, ns)...)
 	}
+	c.gateways = withAttachedRoutes(c.gateways, c.routes)
 	return c
 }

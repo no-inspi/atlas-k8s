@@ -253,9 +253,8 @@ func (s *Sim) flushNetwork() {
 		m := volumeModel(d, pods[d.NS+"/"+d.Workload])
 		publish(stream.KindVolume, model.VolumeKey(m), m)
 	}
-	for _, g := range s.catalog.gateways {
-		m := gatewayModel(g, s.catalog.routes)
-		publish(stream.KindGateway, model.GatewayKey(m), m)
+	for _, g := range s.catalog.gateways { // attachedRoutes précalculé par catalogFor
+		publish(stream.KindGateway, model.GatewayKey(g), g)
 	}
 	for _, p := range s.catalog.pvs {
 		publish(stream.KindPersistentVolume, model.PersistentVolumeKey(p), p)
@@ -319,22 +318,25 @@ func withBackendStates(r model.Route, exists map[string]bool) model.Route {
 	return out
 }
 
-// gatewayModel : chaque listener compte les routes acceptées par le Gateway.
-func gatewayModel(g model.Gateway, routes []model.Route) model.Gateway {
-	key := model.GatewayKey(g)
-	var n int32
+// withAttachedRoutes : chaque listener compte les routes acceptées par son
+// Gateway. Les routes du catalogue sont statiques : calculé une seule fois, à
+// la construction du catalogue (O(G+R)), pas à chaque pas.
+func withAttachedRoutes(gws []model.Gateway, routes []model.Route) []model.Gateway {
+	n := map[string]int32{}
 	for _, r := range routes {
 		for _, p := range r.Parents {
-			if p.Gateway == key && p.Accepted != model.CondFalse {
-				n++
+			if p.Accepted != model.CondFalse {
+				n[p.Gateway]++
 			}
 		}
 	}
-	out := g
-	out.Listeners = make([]model.Listener, len(g.Listeners))
-	for i, l := range g.Listeners {
-		l.AttachedRoutes = n
-		out.Listeners[i] = l
+	out := make([]model.Gateway, len(gws))
+	for i, g := range gws {
+		g.Listeners = append([]model.Listener(nil), g.Listeners...) // ne modifie pas le catalogue global
+		for j := range g.Listeners {
+			g.Listeners[j].AttachedRoutes = n[model.GatewayKey(g)]
+		}
+		out[i] = g
 	}
 	return out
 }

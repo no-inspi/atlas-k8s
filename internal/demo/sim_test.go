@@ -455,6 +455,25 @@ func TestDemoGatewayAPITraefikAndPV(t *testing.T) {
 	if pv := sink.net["persistentVolume|pv-archive-2025"].(model.PersistentVolume); pv.Phase != "Released" || pv.ClaimRef != "production/archive-2025" || pv.Capacity != 100*gi {
 		t.Errorf("pv-archive-2025 = %+v", pv)
 	}
+	for k, o := range sink.net {
+		r, ok := o.(model.Route)
+		if !ok {
+			continue
+		}
+		if r.Group == "" {
+			t.Errorf("%s : Group vide (refusée par le filtre d'accès)", k)
+		}
+		sum, weighted := 0, false
+		for _, rule := range r.Rules {
+			if b := rule.Backend; b.Weight != nil && !b.Mirror {
+				sum += *b.Weight
+				weighted = true
+			}
+		}
+		if weighted && sum != 1000 {
+			t.Errorf("%s : poids non miroirs = %d ‰, attendu 1000", k, sum)
+		}
+	}
 	if pv, ok := sink.net["persistentVolume|pv-spare-01"].(model.PersistentVolume); !ok || pv.Phase != "Available" || pv.StorageClass != "premium-rwo" || pv.Capacity != 50*gi {
 		t.Errorf("pv-spare-01 = %v %+v", ok, pv)
 	}
