@@ -92,7 +92,7 @@ Publié seulement pour un PV **sans PVC existant** : phase `Available`, `Release
 
 ## Droits
 
-- **ServiceAccount** (chart) : `list` et `watch` sur `customresourcedefinitions` (`apiextensions.k8s.io`), `gatewayclasses`, `gateways`, `httproutes`, `grpcroutes` (`gateway.networking.k8s.io`), `ingressroutetcps`, `ingressrouteudps`, `traefikservices` (`traefik.io` et `traefik.containo.us`), `persistentvolumes` ; `get` en plus sur `gatewayclasses`, `gateways`, `httproutes`, `grpcroutes`, `ingressroutetcps`, `ingressrouteudps`, `traefikservices`, `persistentvolumes` pour l'onglet YAML en `auth.mode=none`. Toujours aucune écriture.
+- **ServiceAccount** (chart) : `list` et `watch` sur `customresourcedefinitions` (`apiextensions.k8s.io`), `gateways`, `httproutes`, `grpcroutes` (`gateway.networking.k8s.io`), `ingressroutetcps`, `ingressrouteudps`, `traefikservices` (`traefik.io` et `traefik.containo.us`), `persistentvolumes` ; `get` seul sur `gatewayclasses` (lue par l'onglet YAML uniquement, ni informer ni sonde) ; `get` en plus sur `gateways`, `httproutes`, `grpcroutes`, `ingressroutetcps`, `ingressrouteudps`, `traefikservices`, `persistentvolumes` pour l'onglet YAML en `auth.mode=none`. Toujours aucune écriture.
 - **Sondes** : chaque type est sondé comme au jalon 8 ; refusé, il est désactivé avec un warning.
 - **Filtre du flux** (`internal/access`) :
   - `gateway` exige `list gateways` dans son namespace ;

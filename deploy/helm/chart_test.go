@@ -174,7 +174,7 @@ func TestClusterRoleReadsJalon9Types(t *testing.T) {
 		return false
 	}
 	inspectable := []struct{ group, resource string }{
-		{"gateway.networking.k8s.io", "gatewayclasses"}, {"gateway.networking.k8s.io", "gateways"},
+		{"gateway.networking.k8s.io", "gateways"},
 		{"gateway.networking.k8s.io", "httproutes"}, {"gateway.networking.k8s.io", "grpcroutes"},
 		{"traefik.io", "ingressroutetcps"}, {"traefik.containo.us", "ingressroutetcps"},
 		{"traefik.io", "ingressrouteudps"}, {"traefik.containo.us", "ingressrouteudps"},
@@ -186,6 +186,14 @@ func TestClusterRoleReadsJalon9Types(t *testing.T) {
 			if !allowed(c.group, c.resource, verb) {
 				t.Errorf("%s %s.%s absent du ClusterRole", verb, c.resource, c.group)
 			}
+		}
+	}
+	if !allowed("gateway.networking.k8s.io", "gatewayclasses", "get") {
+		t.Error("get gatewayclasses absent (onglet YAML)")
+	}
+	for _, verb := range []string{"list", "watch"} {
+		if allowed("gateway.networking.k8s.io", "gatewayclasses", verb) {
+			t.Errorf("%s gatewayclasses inutile : get suffit", verb)
 		}
 	}
 	for _, c := range inspectable {
