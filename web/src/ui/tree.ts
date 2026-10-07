@@ -1,16 +1,21 @@
-// Arbre de la vue Liste : namespaces → workloads → pods, et nodes → pods.
+// Arbre de la vue Liste : namespaces → workloads → pods, nodes → pods, puis
+// entrées → routes, Services par namespace et PVC par classe de stockage.
 // Fonctions pures : construction, aplatissement selon les nœuds dépliés,
 // navigation au clavier (motif « tree » de WAI-ARIA).
 
-import { workloadKey, type Node, type Pod, type Workload } from '../api/types'
+import {
+  routeKey, serviceKey, volumeKey, workloadKey, type Node, type Pod, type Route, type Service, type Volume, type Workload,
+} from '../api/types'
 import type { SelectionType } from '../store/cluster'
+import { gatesOf, readyCount, routeBroken } from '../store/net'
+import { fmtMem } from './format'
 
 export interface TreeNode {
   id: string
   label: string
   detail?: string
   status?: string
-  /** Sélection ouverte dans l'inspecteur (pods et nodes). */
+  /** Sélection ouverte dans l'inspecteur. */
   select?: { type: SelectionType; key: string }
   children?: TreeNode[]
 }
@@ -25,7 +30,10 @@ const byLabel = (a: TreeNode, b: TreeNode) => a.label.localeCompare(b.label)
 
 const podItem = (p: Pod): TreeNode => ({ id: `pod:${p.uid}`, label: p.name, status: p.displayStatus, select: { type: 'pod', key: p.uid } })
 
-export function buildTree(st: { pods: ReadonlyMap<string, Pod>; nodes: ReadonlyMap<string, Node>; workloads: ReadonlyMap<string, Workload> }): TreeNode[] {
+export function buildTree(st: {
+  pods: ReadonlyMap<string, Pod>; nodes: ReadonlyMap<string, Node>; workloads: ReadonlyMap<string, Workload>
+  services?: ReadonlyMap<string, Service>; routes?: ReadonlyMap<string, Route>; volumes?: ReadonlyMap<string, Volume>
+}): TreeNode[] {
   const pods = [...st.pods.values()]
   const byNs = new Map<string, Map<string, Pod[]>>()
   for (const p of pods) {
@@ -57,10 +65,58 @@ export function buildTree(st: { pods: ReadonlyMap<string, Pod>; nodes: ReadonlyM
     children: (podsOnNode.get(n.name) ?? []).map(podItem).sort(byLabel),
   })).sort(byLabel)
 
-  return [
+  const roots: TreeNode[] = [
     { id: 'group:namespaces', label: 'Namespaces', detail: `${namespaces.length}`, children: namespaces },
     { id: 'group:nodes', label: 'Nodes', detail: `${nodes.length}`, children: nodes },
   ]
+
+  const gates = gatesOf(st.routes?.values() ?? [])
+  if (gates.length) roots.push({
+    id: 'group:gates', label: 'Entrées', detail: `${gates.length}`,
+    children: gates.map((g) => ({
+      id: `gate:${g.name}`, label: g.name, detail: `${g.routes.length} routes`, status: g.broken ? 'route cassée' : undefined,
+      select: { type: 'gate', key: g.name },
+      children: g.routes.map((r) => ({
+        id: `route:${routeKey(r)}`, label: r.name, detail: `${r.source} · ${r.namespace}`,
+        status: routeBroken(r) ? 'Service introuvable' : undefined, select: { type: 'route', key: routeKey(r) },
+      })),
+    })),
+  })
+
+  const services = [...(st.services?.values() ?? [])]
+  if (services.length) {
+    const byNs = new Map<string, Service[]>()
+    for (const s of services) byNs.set(s.namespace, [...(byNs.get(s.namespace) ?? []), s])
+    roots.push({
+      id: 'group:services', label: 'Services', detail: `${services.length}`,
+      children: [...byNs].map(([ns, ss]) => ({
+        id: `svcns:${ns}`, label: ns, detail: `${ss.length} Services`,
+        children: ss.map((s) => ({
+          id: `service:${serviceKey(s)}`, label: s.name,
+          detail: s.type === 'ExternalName' ? `ExternalName · ${s.externalName}` : `${s.type} · ${readyCount(s)}/${s.endpoints.length} ready`,
+          status: s.health === 'down' || s.health === 'degraded' ? s.health : undefined,
+          select: { type: 'service' as const, key: serviceKey(s) },
+        })).sort(byLabel),
+      })).sort(byLabel),
+    })
+  }
+
+  const volumes = [...(st.volumes?.values() ?? [])]
+  if (volumes.length) {
+    const byClass = new Map<string, Volume[]>()
+    for (const v of volumes) byClass.set(v.storageClass || '(aucune)', [...(byClass.get(v.storageClass || '(aucune)') ?? []), v])
+    roots.push({
+      id: 'group:storage', label: 'Stockage', detail: `${volumes.length}`,
+      children: [...byClass].map(([c, vs]) => ({
+        id: `class:${c}`, label: c, detail: `${vs.length} PVC`,
+        children: vs.map((v) => ({
+          id: `volume:${volumeKey(v)}`, label: v.name, detail: `${v.namespace} · ${fmtMem(v.requested)}`,
+          status: v.phase !== 'Bound' ? v.phase : undefined, select: { type: 'volume' as const, key: volumeKey(v) },
+        })).sort(byLabel),
+      })).sort(byLabel),
+    })
+  }
+  return roots
 }
 
 export function flatten(roots: TreeNode[], expanded: ReadonlySet<string>): VisibleItem[] {

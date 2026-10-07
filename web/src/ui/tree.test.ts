@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { node, pod, workload } from '../store/fixtures'
+import { node, pod, route, service, volume, workload } from '../store/fixtures'
 import { buildTree, flatten, keyAction } from './tree'
 
 const st = {
@@ -47,5 +47,30 @@ describe('navigation au clavier', () => {
     const all = flatten(roots, new Set([...open, 'wl:Deployment/production/api']))
     expect(keyAction('Enter', all, 'pod:u1', open)).toEqual({ type: 'activate', id: 'pod:u1' })
     expect(keyAction('Enter', items, 'group:nodes', open)).toEqual({ type: 'expand', id: 'group:nodes' })
+  })
+})
+
+describe('réseau et stockage', () => {
+  const withNet = {
+    ...st,
+    services: new Map([
+      ['production/api', service()],
+      ['production/ghost', service({ name: 'ghost', endpoints: [], health: 'down' })],
+    ]),
+    routes: new Map([['Ingress/production/storefront', route()]]),
+    volumes: new Map([['production/data-0', volume()]]),
+  }
+
+  it('ajoute Entrées, Services et Stockage, seulement s’ils ne sont pas vides', () => {
+    expect(buildTree(st).map((g) => g.label)).toEqual(['Namespaces', 'Nodes'])
+    const roots = buildTree(withNet)
+    expect(roots.map((g) => g.label)).toEqual(['Namespaces', 'Nodes', 'Entrées', 'Services', 'Stockage'])
+    const [, , gates, services, storage] = roots
+    expect(gates.children![0]).toEqual(expect.objectContaining({ label: 'nginx', select: { type: 'gate', key: 'nginx' } }))
+    expect(gates.children![0].children![0].select).toEqual({ type: 'route', key: 'Ingress/production/storefront' })
+    expect(services.children![0].label).toBe('production')
+    expect(services.children![0].children!.map((s) => [s.label, s.status])).toEqual([['api', undefined], ['ghost', 'down']])
+    expect(storage.children![0].label).toBe('standard-rwo')
+    expect(storage.children![0].children![0]).toEqual(expect.objectContaining({ label: 'data-0', select: { type: 'volume', key: 'production/data-0' } }))
   })
 })
