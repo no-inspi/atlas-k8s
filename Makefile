@@ -87,8 +87,14 @@ kind-up:
 kind-down:
 	kind delete cluster --name atlas
 
+# CRD Traefik (IngressRoute) : https://doc.traefik.io/traefik/reference/install-configuration/providers/kubernetes/kubernetes-crd/
+TRAEFIK_CRD ?= https://raw.githubusercontent.com/traefik/traefik/v3.5/docs/content/reference/dynamic-configuration/kubernetes-crd-definition-v1.yml
+
 scenarios:
 	kubectl --context $(KIND_CTX) apply -f hack/scenarios/
+	kubectl --context $(KIND_CTX) apply --server-side -f $(TRAEFIK_CRD)
+	kubectl --context $(KIND_CTX) wait --for condition=established crd/ingressroutes.traefik.io --timeout=60s
+	kubectl --context $(KIND_CTX) apply -f hack/scenarios-traefik/
 
 # Atlas contre le cluster kind, sans authentification (jalon 4 : OIDC via Dex).
 run-kind: build
