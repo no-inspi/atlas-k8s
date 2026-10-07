@@ -16,7 +16,7 @@ La ville gagne une structure : une entrée, des avenues, une zone industrielle.
 | Ingress, IngressRoute | **Route** : ligne principale de la porte vers chaque Service visé | Hôtes, chemins ou `match`, état du backend |
 | Service | **Relais** : disque posé sur l'avenue, bordé de la couleur du namespace, voyant dessus | Voyant vert (`ok`), orange (`degraded`), rouge clignotant (`down`) ; panneau pour `ExternalName` |
 | Endpoints d'un Service | **Fibres** au sol, du relais aux pods par les rues | Visibles au survol ou à la sélection |
-| PVC | **Citerne** dans le quartier Entrepôts, un îlot par StorageClass | Rayon selon la capacité (log, borné) ; Pending en pointillés orange, Lost en rouge |
+| PVC | **Citerne** dans le quartier Entrepôts, un îlot par StorageClass | Rayon selon la capacité (log, borné) ; Pending en orange translucide, Lost en rouge |
 | Montage d'un PVC par un pod | **Conduite** au sol de la citerne au pod | Toujours visible ; gouttes de data quand le pod est Running |
 
 Le remplissage des citernes (espace utilisé) est hors jalon. Il demanderait soit `nodes/proxy` (exclu : quasi root sur les nodes), soit une source Prometheus, à traiter avec les métriques historiques.
@@ -88,7 +88,7 @@ Le simulateur produit le même modèle :
 ### Disposition (`web/src/scene/layout.ts`, fonction pure)
 
 - **Avenues** : une entre chaque paire de rangées de quartiers. Avec une seule rangée, une avenue devant elle, entre la ville et la file Pending. Largeur : une rangée de relais et deux voies de liens.
-- **Tronçons** : les namespaces ayant au moins un relais visible, triés par nom, remplissent les avenues dans l'ordre. Chaque tronçon porte une bande de la couleur du namespace et son nom peint au sol. Les relais y sont rangés par nom ; un nouveau Service décale ses voisins du tronçon (animé). Si une avenue est pleine, le tronçon continue sur la suivante. Règle de place, déterministe, qui ne pose jamais deux objets au même endroit : (a) pas de 1,3 avec une place libre entre deux namespaces si tout tient ; (b) sinon le pas se resserre, jusqu'à 0,65 au plus serré ; (c) sinon plus de place libre entre namespaces, et les plus gros namespaces (à taille égale, par nom) se replient chacun en un bloc unique avec un compteur, jusqu'à tenir ; (d) si même un bloc par namespace ne tient pas, tous sont repliés et le pas descend à ce qu'il faut (longueur disponible / nombre de namespaces).
+- **Tronçons** : les namespaces ayant au moins un relais visible, triés par nom, remplissent les avenues dans l'ordre. Chaque tronçon porte une bande de la couleur du namespace et son nom peint au sol. Les relais y sont rangés par nom ; un nouveau Service décale ses voisins du tronçon : ils rejoignent directement leur nouvelle place, sans animation. Si une avenue est pleine, le tronçon continue sur la suivante. Règle de place, déterministe, qui ne pose jamais deux objets au même endroit : (a) pas de 1,3 avec une place libre entre deux namespaces si tout tient ; (b) sinon le pas se resserre, jusqu'à 0,65 au plus serré ; (c) sinon plus de place libre entre namespaces, et les plus gros namespaces (à taille égale, par nom) se replient chacun en un bloc unique avec un compteur, jusqu'à tenir ; (d) si même un bloc par namespace ne tient pas, tous sont repliés et le pas descend à ce qu'il faut (longueur disponible / nombre de namespaces).
 - **Portes** : à l'entrée ouest de la première avenue, une par `gate`, triées par nom.
 - **Entrepôts** : un quartier à l'est de la ville, un îlot par StorageClass (trié par nom ; `(aucune)` pour un PVC sans classe), citernes rangées par namespace puis par nom ; le nombre de colonnes grandit avec le nombre de PVC pour que le quartier reste à peu près aussi profond que la ville, et il se tient à l'est de la file d'attente comme de la ville.
 - La disposition ne dépend que des nodes, des Services visibles (namespace, nom) et des PVC visibles (classe, namespace, nom).
@@ -108,7 +108,7 @@ Chaque famille est une seule géométrie (un draw call), reconstruite quand la t
 
 - Clic sur une porte, un relais ou une citerne : ouvre l'inspecteur et pose le marqueur de sélection.
 - Sélection : tout le chemin s'allume (porte → relais → pods → citernes) et le reste passe à l'opacité réduite du filtre de namespace. Pour un pod sélectionné, on allume ses relais, leurs portes et ses citernes.
-- Les chips de namespace filtrent aussi relais, routes et citernes.
+- Les chips de namespace filtrent aussi relais, routes, citernes, liens au sol et panneaux « ? » (opacité 10 % hors du namespace choisi).
 - Recherche (`/`) : Services, routes et PVC par nom.
 - Vue Liste : trois nouveaux groupes, Entrées (portes, puis leurs routes), Services, Stockage.
 - Liens profonds : `?select=service/<ns>/<nom>`, `route/<source>/<ns>/<nom>`, `volume/<ns>/<nom>`, `gate/<nom>`.

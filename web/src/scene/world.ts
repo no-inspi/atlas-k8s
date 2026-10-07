@@ -89,6 +89,8 @@ export class World {
   private netKey = ''
   private focusKey = ''
   private focusVal: Focus = NO_FOCUS
+  private pathKey = ''
+  private pathVal = new Set<string>()
   private viewKey = ''
   private layoutKey = ''
   private capacity = 0
@@ -168,6 +170,16 @@ export class World {
       dim: !!sel && NET_SELECTIONS.has(sel.type),
     }
     return this.focusVal
+  }
+
+  /** Chemin d'un objet (« type:clé »), mis en cache à part : n'évince pas le focus de la scène. */
+  pathFor(selKey: string): Set<string> {
+    const key = `${this.version}|${this.viewKey}|${selKey}`
+    if (key !== this.pathKey) {
+      this.pathKey = key
+      this.pathVal = pathOf(selKey, this.links)
+    }
+    return this.pathVal
   }
 
   /** Point de la ville où se trouve un objet (recherche, marqueur de sélection). */
@@ -257,7 +269,11 @@ export function ghostNodes(known: ReadonlyMap<string, Node>, pods: Pod[]): Node[
 
 function groupBy<T>(xs: T[], key: (x: T) => string): Map<string, T[]> {
   const m = new Map<string, T[]>()
-  for (const x of xs) m.set(key(x), [...(m.get(key(x)) ?? []), x])
+  for (const x of xs) {
+    const k = key(x), list = m.get(k)
+    if (list) list.push(x)
+    else m.set(k, [x])
+  }
   return m
 }
 

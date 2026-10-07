@@ -1,23 +1,40 @@
 import { world } from '../scene/world'
-import { useCluster } from '../store/cluster'
+import { useCluster, type ClusterState, type Selection } from '../store/cluster'
 
 const LABELS: [string, string, string][] = [['gate', 'porte', 'portes'], ['service', 'Service', 'Services'], ['pod', 'pod', 'pods'], ['volume', 'PVC', 'PVC']]
+
+/** L'objet sélectionné existe-t-il encore dans le flux ? */
+function exists(sel: NonNullable<Selection>, st: ClusterState): boolean {
+  switch (sel.type) {
+    case 'service': return st.services.has(sel.key)
+    case 'volume': return st.volumes.has(sel.key)
+    case 'route': return st.routes.has(sel.key)
+    case 'gate': return [...st.routes.values()].some((r) => r.gate === sel.key)
+    default: return false
+  }
+}
+
+/** Texte du résumé, vide sans sélection d'une porte, d'une route, d'un Service ou d'un PVC. */
+export function summaryText(sel: Selection, st: ClusterState): string {
+  if (!sel || sel.type === 'pod' || sel.type === 'node' || !exists(sel, st)) return ''
+  world.update(st)
+  const path = world.pathFor(`${sel.type}:${sel.key}`)
+  const parts = LABELS.map(([type, one, many]) => {
+    let n = 0
+    for (const k of path) if (k.startsWith(`${type}:`)) n++
+    return n ? `${n} ${n === 1 ? one : many}` : ''
+  }).filter(Boolean)
+  return `Chemin : ${parts.join(' · ') || 'aucun lien'}`
+}
 
 /**
  * Résumé du chemin allumé par la sélection d'une porte, d'une route, d'un
  * Service ou d'un PVC : ce que la ville montre, dit aussi en texte (lecteurs
- * d'écran, tests).
+ * d'écran, tests). La région live reste montée, seul son texte change.
  */
 export function PathSummary() {
   const selection = useCluster((s) => s.selection)
   useCluster((s) => s.version)
-  if (!selection || selection.type === 'pod' || selection.type === 'node') return null
-  world.update(useCluster.getState())
-  const path = world.focusFor(selection, null, null).path
-  if (!path) return null
-  const parts = LABELS.map(([type, one, many]) => {
-    const n = [...path].filter((k) => k.startsWith(`${type}:`)).length
-    return n ? `${n} ${n === 1 ? one : many}` : ''
-  }).filter(Boolean)
-  return <div className="path-summary" role="status" data-testid="path-summary">Chemin : {parts.join(' · ') || 'aucun lien'}</div>
+  const text = summaryText(selection, useCluster.getState())
+  return <div className="path-summary" role="status" data-testid="path-summary" data-empty={text ? undefined : ''}>{text}</div>
 }

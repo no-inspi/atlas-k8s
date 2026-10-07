@@ -17,7 +17,13 @@ export type Route =
 const SOURCES: Record<string, 'Ingress' | 'IngressRoute'> = { ingress: 'Ingress', ingressroute: 'IngressRoute' }
 
 export function parseRoute(pathname: string): Route {
-  const [head, ...rest] = pathname.split('/').filter(Boolean).map(decodeURIComponent)
+  let parts: string[]
+  try {
+    parts = pathname.split('/').filter(Boolean).map(decodeURIComponent)
+  } catch {
+    return null // encodage invalide (« %E0%A4 ») : pas de lien profond
+  }
+  const [head, ...rest] = parts
   if (head === 'pods' && rest.length === 2) return { type: 'pod', namespace: rest[0], name: rest[1] }
   if (head === 'nodes' && rest.length === 1) return { type: 'node', name: rest[0] }
   if (head === 'services' && rest.length === 2) return { type: 'service', namespace: rest[0], name: rest[1] }
@@ -103,7 +109,10 @@ export function syncRoute(win: Pick<Window, 'location' | 'history'> = window): (
 
   const unsubVersion = useCluster.subscribe((s) => s.version, tryRestore)
   const unsubSel = useCluster.subscribe((s) => s.selection, (sel) => {
-    if (pending) return // lien profond pas encore rétabli : on ne touche pas à l'URL
+    if (pending) {
+      if (!sel) return // lien profond pas encore rétabli : on ne touche pas à l'URL
+      pending = null // l'utilisateur a choisi autre chose : l'URL le suit, le lien est abandonné
+    }
     const path = pathFor(routeFor(sel, useCluster.getState()))
     if (path !== win.location.pathname) win.history.replaceState(null, '', path)
   })

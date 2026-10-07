@@ -25,7 +25,7 @@ function PodItem({ uid, extra }: { uid: string; extra?: ReactNode }) {
   return (
     <li>
       <button onClick={goPod(uid)} disabled={!p}>
-        <i style={{ background: p ? clusterColors(st).get(p.namespace) : undefined }} />
+        <i aria-hidden="true" style={{ background: p ? clusterColors(st).get(p.namespace) : undefined }} />
         <span className="nm">{p?.name ?? 'pod non visible'}</span>
         {extra}
       </button>
@@ -90,6 +90,9 @@ export function RouteOverview({ r }: { r: Route }) {
       </dl>
       <h3>Règles ({r.rules.length})</h3>
       <table className="evt" data-testid="rules">
+        <thead>
+          <tr><th scope="col">Hôte · chemin</th><th scope="col">Backend</th></tr>
+        </thead>
         <tbody>
           {r.rules.map((rule, i) => {
             const b = rule.backend
