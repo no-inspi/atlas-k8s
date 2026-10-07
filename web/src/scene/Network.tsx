@@ -130,7 +130,12 @@ export function Network({ theme, reducedMotion }: { theme: Theme; reducedMotion:
         for (const [k, r] of net.relays) {
           const sv = byKey.get(k)
           if (!sv) continue
-          if (r.group) { groupSigs.set(r.group, [...(groupSigs.get(r.group) ?? []), healthSignal(sv.health)]); continue }
+          if (r.group) {
+            const sigs = groupSigs.get(r.group)
+            if (sigs) sigs.push(healthSignal(sv.health))
+            else groupSigs.set(r.group, [healthSignal(sv.health)])
+            continue
+          }
           items.push({ key: `service:${k}`, ns: r.ns, x: r.x, z: r.z, sig: healthSignal(sv.health), external: sv.type === 'ExternalName' })
         }
         for (const g of net.groups) items.push({ key: '', ns: g.ns, x: g.x, z: g.z, sig: worst(groupSigs.get(g.key) ?? []), external: false })
@@ -204,7 +209,7 @@ export function Network({ theme, reducedMotion }: { theme: Theme; reducedMotion:
       {net && [...net.gates.values()].map((g) => {
         const pill = pillTexture(g.name, theme)
         return (
-          <sprite key={`gate-${g.name}`} position={[g.x, 3.0, g.z]} scale={[0.35 * pill.aspect, 0.35, 1]} raycast={() => null} renderOrder={10}>
+          <sprite key={`gate-${g.name}`} position={[g.x, 3.1, g.z]} scale={[0.6 * pill.aspect, 0.6, 1]} raycast={() => null} renderOrder={10}>
             <spriteMaterial map={pill.tex} depthTest={false} transparent />
           </sprite>
         )

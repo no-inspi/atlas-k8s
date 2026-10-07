@@ -65,6 +65,15 @@ describe('réglages d’affichage', () => {
     expect(w.targets.has('dns')).toBe(true)
   })
 
+  it('ne recalcule pas quand le namespace choisi ne change aucune visibilité', () => {
+    const w = new World()
+    const shown: PodView = { sort: 'name', hideSystem: false, hiddenKinds: [] }
+    w.update(withView(shown))
+    expect(w.update(withView(shown, 'production'))).toBe(false)
+    w.update(withView({ ...shown, hideSystem: true }))
+    expect(w.update(withView({ ...shown, hideSystem: true }, 'kube-system'))).toBe(true)
+  })
+
   it('masque les types de workload choisis', () => {
     const w = new World()
     w.update(withView({ sort: 'name', hideSystem: false, hiddenKinds: ['DaemonSet'] }))

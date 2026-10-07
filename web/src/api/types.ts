@@ -101,11 +101,6 @@ export interface Metrics {
   nodes: Record<string, Usage>
 }
 
-export interface Metrics {
-  pods: Record<string, Usage>
-  nodes: Record<string, Usage>
-}
-
 export type Health = 'ok' | 'degraded' | 'down' | 'external'
 
 export interface ServicePort {

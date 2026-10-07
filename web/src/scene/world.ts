@@ -96,7 +96,8 @@ export class World {
   update(st: WorldInput): boolean {
     const view = st.podView ?? NEUTRAL_VIEW
     const nsFilter = st.nsFilter ?? null
-    const viewKey = `${view.sort}|${view.hideSystem}|${view.hiddenKinds.join(',')}|${nsFilter}`
+    // nsFilter ne change la visibilité (pods, réseau) qu'avec le masquage des namespaces système.
+    const viewKey = `${view.sort}|${view.hideSystem}|${view.hiddenKinds.join(',')}|${view.hideSystem ? nsFilter : ''}`
     if (st.version === this.version && viewKey === this.viewKey) return false
     this.version = st.version
     this.viewKey = viewKey

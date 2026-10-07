@@ -12,15 +12,21 @@ export interface Gate {
 
 export const routeBroken = (r: Route) => r.rules.some((x) => x.backend.state === 'missing')
 
+/** Ordre des noms indépendant de la locale du navigateur. */
+const byName = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 const byNsName = (a: { namespace: string; name: string }, b: { namespace: string; name: string }) =>
-  a.namespace.localeCompare(b.namespace) || a.name.localeCompare(b.name)
+  byName(a.namespace, b.namespace) || byName(a.name, b.name)
 
 /** Portes triées par nom, routes de chaque porte triées par namespace puis nom. */
 export function gatesOf(routes: Iterable<Route>): Gate[] {
   const by = new Map<string, Route[]>()
-  for (const r of routes) by.set(r.gate, [...(by.get(r.gate) ?? []), r])
+  for (const r of routes) {
+    const list = by.get(r.gate)
+    if (list) list.push(r)
+    else by.set(r.gate, [r])
+  }
   return [...by]
-    .sort(([a], [b]) => a.localeCompare(b))
+    .sort(([a], [b]) => byName(a, b))
     .map(([name, rs]) => {
       const sorted = [...rs].sort(byNsName)
       return { name, routes: sorted, broken: sorted.filter(routeBroken).length }
