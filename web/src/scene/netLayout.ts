@@ -22,6 +22,8 @@ const UNCLASSED = '(aucune)'
 
 export interface RelayInput { key: string; namespace: string; name: string }
 export interface TankInput { key: string; namespace: string; name: string; storageClass: string; requested: number }
+/** PV sans PVC : citerne vide dans l'îlot de sa classe, après les PVC. */
+export interface OrphanInput { key: string; name: string; storageClass: string; capacity: number }
 
 export interface RelaySlot {
   key: string
@@ -47,6 +49,8 @@ export interface NetLayout {
   gates: Map<string, GateSlot>
   islands: Island[]
   tanks: Map<string, TankSlot>
+  /** Citernes vides (PV sans PVC), îlot par îlot. */
+  orphans: TankSlot[]
   warehouse: Rect | null
   lanes: Lanes[]
   /** Rue ouest (portes ↔ avenues) et rue est (entrepôts ↔ avenues). */
@@ -95,12 +99,12 @@ function fitPitch(bands: { x0: number; x1: number }[], need: number, hi: number)
 
 function emptyNetwork(city: CityLayout): NetLayout {
   return {
-    segments: [], relays: new Map(), groups: [], gates: new Map(), islands: [], tanks: new Map(), warehouse: null,
+    segments: [], relays: new Map(), groups: [], gates: new Map(), islands: [], tanks: new Map(), orphans: [], warehouse: null,
     lanes: [], westX: 0, eastX: 0, bounds: city.bounds,
   }
 }
 
-export function layoutNetwork(city: CityLayout, relays: RelayInput[], gates: string[], tanks: TankInput[]): NetLayout {
+export function layoutNetwork(city: CityLayout, relays: RelayInput[], gates: string[], tanks: TankInput[], orphans: OrphanInput[] = []): NetLayout {
   const avenues = city.avenues
   if (!city.districts.length || !avenues.length) return emptyNetwork(city)
   const lanes = avenues.map(lanesOf)
@@ -188,20 +192,24 @@ export function layoutNetwork(city: CityLayout, relays: RelayInput[], gates: str
   const gateSlots = new Map(names.map((name, k) => [name, { name, x: gx, z: a0.z + (k - (names.length - 1) / 2) * GATE_PITCH }]))
 
   // Entrepôts : un îlot par StorageClass, empilés du nord au sud, assez de
-  // colonnes pour rester à peu près aussi profonds que la ville.
-  const byClass = new Map<string, TankInput[]>()
-  for (const t of tanks) {
-    const c = t.storageClass || UNCLASSED
-    const list = byClass.get(c)
-    if (list) list.push(t)
-    else byClass.set(c, [t])
+  // colonnes pour rester à peu près aussi profonds que la ville. Dans un îlot,
+  // les PVC (par namespace puis nom), puis les PV sans PVC (par nom).
+  const byClass = new Map<string, { tanks: TankInput[]; orphans: OrphanInput[] }>()
+  const entry = (c: string) => {
+    let e = byClass.get(c)
+    if (!e) byClass.set(c, (e = { tanks: [], orphans: [] }))
+    return e
   }
+  for (const t of tanks) entry(t.storageClass || UNCLASSED).tanks.push(t)
+  for (const o of orphans) entry(o.storageClass || UNCLASSED).orphans.push(o)
+  const size = (c: string) => byClass.get(c)!.tanks.length + byClass.get(c)!.orphans.length
   const classes = [...byClass.keys()].sort(byName)
   const islandDepth = (n: number, cols: number) => ISLAND_LABEL + Math.ceil(n / cols) * TANK_PITCH + 0.4
   const depthWith = (cols: number) =>
-    classes.reduce((d, c) => d + islandDepth(byClass.get(c)!.length, cols), 0) + ISLAND_GAP * Math.max(0, classes.length - 1)
-  const largest = Math.max(0, ...classes.map((c) => byClass.get(c)!.length))
-  let cols = Math.max(TANK_COLS, Math.ceil(tanks.length / Math.max(1, Math.floor((bottom - top) / TANK_PITCH))))
+    classes.reduce((d, c) => d + islandDepth(size(c), cols), 0) + ISLAND_GAP * Math.max(0, classes.length - 1)
+  const largest = Math.max(0, ...classes.map(size))
+  const count = tanks.length + orphans.length
+  let cols = Math.max(TANK_COLS, Math.ceil(count / Math.max(1, Math.floor((bottom - top) / TANK_PITCH))))
   while (cols < largest && depthWith(cols) > bottom - top) cols++
 
   const q = city.queue
@@ -209,17 +217,22 @@ export function layoutNetwork(city: CityLayout, relays: RelayInput[], gates: str
   const width = cols * TANK_PITCH + 0.8
   const islands: Island[] = []
   const tankSlots = new Map<string, TankSlot>()
+  const orphanSlots: TankSlot[] = []
   let z = top
   for (const c of classes) {
-    const ts = byClass.get(c)!.sort((a, b) => byName(a.namespace, b.namespace) || byName(a.name, b.name))
-    const depth = islandDepth(ts.length, cols)
+    const e = byClass.get(c)!
+    const ts = e.tanks.sort((a, b) => byName(a.namespace, b.namespace) || byName(a.name, b.name))
+    const os = e.orphans.sort((a, b) => byName(a.name, b.name))
+    const depth = islandDepth(ts.length + os.length, cols)
     islands.push({ storageClass: c, x: wx + width / 2, z: z + depth / 2, width, depth })
-    ts.forEach((t, k) => tankSlots.set(t.key, {
-      key: t.key,
+    const slot = (k: number, key: string, bytes: number): TankSlot => ({
+      key,
       x: wx + 0.4 + TANK_PITCH * ((k % cols) + 0.5),
       z: z + ISLAND_LABEL + TANK_PITCH * (Math.floor(k / cols) + 0.5),
-      r: tankRadius(t.requested),
-    }))
+      r: tankRadius(bytes),
+    })
+    ts.forEach((t, k) => tankSlots.set(t.key, slot(k, t.key, t.requested)))
+    os.forEach((o, j) => orphanSlots.push(slot(ts.length + j, o.key, o.capacity)))
     z += depth + ISLAND_GAP
   }
   const zEnd = z - ISLAND_GAP
@@ -231,5 +244,5 @@ export function layoutNetwork(city: CityLayout, relays: RelayInput[], gates: str
     const span = (names.length - 1) * GATE_PITCH + 2 * GATE_PITCH
     bounds = union(bounds, { x: gx, z: a0.z, width: 2, depth: span })
   }
-  return { segments, relays: out, groups, gates: gateSlots, islands, tanks: tankSlots, warehouse, lanes, westX, eastX, bounds }
+  return { segments, relays: out, groups, gates: gateSlots, islands, tanks: tankSlots, orphans: orphanSlots, warehouse, lanes, westX, eastX, bounds }
 }
