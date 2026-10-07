@@ -20,6 +20,8 @@ type catalog struct {
 	services  []serviceDef
 	routes    []model.Route
 	volumes   []volumeDef
+	gateways  []model.Gateway
+	pvs       []model.PersistentVolume
 }
 
 // Workloads d'une équipe simulée : 25 pods, CPU modeste.
@@ -37,7 +39,8 @@ const teamPods = 25
 
 func catalogFor(sc Scale) catalog {
 	if sc.Nodes == 0 {
-		return catalog{pools: pools, workloads: workloads, services: services, routes: baseRoutes, volumes: volumes}
+		return catalog{pools: pools, workloads: workloads, services: services, routes: baseRoutes, volumes: volumes,
+			gateways: gateways, pvs: orphanPVs}
 	}
 	// Répartition des nodes : 60 % standard, 30 % spot, le reste en GPU (au moins 1).
 	gpu := max(1, sc.Nodes/25)
@@ -52,6 +55,8 @@ func catalogFor(sc Scale) catalog {
 	c.services = append(c.services, services...)
 	c.routes = append(c.routes, baseRoutes...)
 	c.volumes = append(c.volumes, volumes...)
+	c.gateways = append(c.gateways, gateways...)
+	c.pvs = append(c.pvs, orphanPVs...)
 	// Pods déjà prévus : catalogue de base (≈ 30) et un node-exporter par node.
 	target := sc.Nodes*sc.PodsPerNode - 30 - sc.Nodes
 	for i := 1; i <= max(0, target/teamPods); i++ {
@@ -64,6 +69,8 @@ func catalogFor(sc Scale) catalog {
 		c.services = append(c.services, svcs...)
 		c.routes = append(c.routes, routes...)
 		c.volumes = append(c.volumes, vols...)
+		c.gateways = append(c.gateways, teamGateways(i, ns)...)
+		c.pvs = append(c.pvs, teamPVs(i, ns)...)
 	}
 	return c
 }
