@@ -22,11 +22,25 @@ func pvFixtures() []runtime.Object {
 		pvObj("pv-bound", corev1.VolumeBound, "prod/data"), // PVC data : netFixtures
 		pvObj("pv-released", corev1.VolumeReleased, "prod/old"),
 		pvObj("pv-free", corev1.VolumeAvailable, ""),
+		pvObj("pv-noclaim", corev1.VolumeBound, ""), // Bound sans claimRef : jamais publié
 	)
 }
 
 func TestOrphanPersistentVolumes(t *testing.T) {
 	client, sk := startSource(t, pvFixtures()...)
+	first := sk.atReady[stream.KindPersistentVolume]
+	if _, ok := first["pv-bound"]; ok {
+		t.Error("premier snapshot : pv-bound publié")
+	}
+	if _, ok := first["pv-noclaim"]; ok {
+		t.Error("premier snapshot : PV Bound sans claimRef publié")
+	}
+	if _, ok := first["pv-released"]; !ok {
+		t.Error("premier snapshot : pv-released absent")
+	}
+	if _, ok := sk.get(stream.KindPersistentVolume, "pv-noclaim"); ok {
+		t.Error("PV Bound sans claimRef publié")
+	}
 	if _, ok := sk.get(stream.KindPersistentVolume, "pv-bound"); ok {
 		t.Error("PV lié à un PVC existant publié")
 	}

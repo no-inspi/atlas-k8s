@@ -25,7 +25,7 @@ import (
 // IngressClass, PVC ; types apportés par une CRD (dynkinds.go).
 
 const (
-	indexByClaim   = "claim"   // pods par PVC monté : « ns/claim »
+	indexByClaim   = "claim"   // pods par PVC monté, PV par claim réclamé : « ns/claim »
 	indexByService = "service" // EndpointSlices par Service : « ns/name »
 	indexByBackend = "backend" // routes par Service visé : « ns/name »
 )
