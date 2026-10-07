@@ -45,21 +45,26 @@ test('un Service en panne, puis le chemin d’un Service sain', async ({ page })
 })
 
 test('porte traefik : une route vers un Service introuvable', async ({ page }) => {
+  const problems = collectProblems(page)
   await page.goto('/gates/traefik')
   const p = panel(page)
   await expect(p.getByText("Porte d'entrée")).toBeVisible()
   await p.getByTestId('gate-routes').getByRole('button', { name: /admin/ }).click()
   await expect(p.getByTestId('rules')).toContainText('Service introuvable')
   await expect(page).toHaveURL(/\/routes\/ingressroute\/production\/admin$/)
+  expect(problems).toEqual([])
 })
 
 test('PVC en attente : la raison est affichée', async ({ page }) => {
+  const problems = collectProblems(page)
   await page.goto('/volumes/staging/uploads-preview')
   await expect(panel(page).getByText('PVC · staging')).toBeVisible()
   await expect(panel(page).getByTestId('pvc-why')).toContainText('WaitForFirstConsumer')
+  expect(problems).toEqual([])
 })
 
 test('recherche d’une route par son hôte', async ({ page }) => {
+  const problems = collectProblems(page)
   await page.goto('/')
   await expect(page.getByTestId('pods-running')).toHaveText(/\d+\/\d+/)
   await page.keyboard.press('/')
@@ -67,4 +72,5 @@ test('recherche d’une route par son hôte', async ({ page }) => {
   await page.keyboard.press('Enter')
   await expect(panel(page).getByText('IngressRoute · monitoring')).toBeVisible()
   await expect(page).toHaveURL(/\/routes\/ingressroute\/monitoring\/grafana$/)
+  expect(problems).toEqual([])
 })

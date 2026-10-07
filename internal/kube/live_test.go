@@ -38,7 +38,11 @@ func startLive(t *testing.T) (*kubernetes.Clientset, *stream.Subscription, conte
 	src := NewSource(client, hub, Options{Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Dynamic: dynamic.NewForConfigOrDie(rc)})
 	go func() { _ = src.Run(ctx) }()
 	for !hub.Ready() {
-		time.Sleep(50 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			t.Fatal("source jamais prête : cluster injoignable ?")
+		case <-time.After(50 * time.Millisecond):
+		}
 	}
 	_, sub := hub.Subscribe(hub.Rev())
 	t.Cleanup(sub.Close)
