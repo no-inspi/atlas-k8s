@@ -34,6 +34,6 @@ export function fmtShare(permille: number): string {
 }
 
 /** Miroir : « miroir 10 % » ; sans pourcentage publié, 0 % (le serveur omet percent = 0). */
-export function mirrorLabel(b: { percent?: number }): string {
-  return `miroir ${b.percent ?? 0} %`
+export function mirrorLabel(b: { percent?: number }, service?: string): string {
+  return `miroir ${service ? `${service} ` : ''}${b.percent ?? 0} %`
 }

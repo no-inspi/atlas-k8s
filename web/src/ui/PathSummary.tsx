@@ -22,7 +22,7 @@ function exists(sel: NonNullable<Selection>, st: ClusterState): boolean {
 export function splitText(r: Pick<Route, 'rules'>): string {
   const parts = new Map<string, string>()
   for (const { backend: b } of r.rules) {
-    if (b.mirror) parts.set(`${b.namespace}/${b.service}/${mirrorLabel(b)}`, `miroir ${b.service} ${b.percent ?? 0} %`)
+    if (b.mirror) parts.set(`${b.namespace}/${b.service}/${mirrorLabel(b)}`, mirrorLabel(b, b.service))
     else if (b.weight !== undefined) parts.set(`${b.namespace}/${b.service}/${b.weight}`, `${b.service} ${fmtShare(b.weight)}`)
   }
   return parts.size ? `Répartition : ${[...parts.values()].join(', ')}` : ''

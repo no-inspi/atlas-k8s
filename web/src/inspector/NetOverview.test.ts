@@ -45,7 +45,7 @@ describe('shareLabel', () => {
     expect(shareLabel({ weight: 900 })).toBe('90 %')
     expect(shareLabel({ weight: 0 })).toBe('0 %')
   })
-  it('affiche un miroir avec son pourcentage, 100 % par défaut', () => {
+  it('affiche un miroir avec son pourcentage, 0 % sans percent publié', () => {
     expect(shareLabel({ mirror: true, percent: 10 })).toBe('miroir 10 %')
     expect(shareLabel({ mirror: true })).toBe('miroir 0 %')
   })
