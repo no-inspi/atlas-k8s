@@ -92,9 +92,16 @@ var lastSource *Source
 
 func startSource(t *testing.T, objs ...runtime.Object) (*fake.Clientset, *sink) {
 	t.Helper()
-	client := fake.NewClientset(objs...)
+	return startSourceWith(t, fake.NewClientset(objs...), Options{})
+}
+
+// startSourceWith démarre une source sur un client préparé (réacteurs, découverte).
+func startSourceWith(t *testing.T, client *fake.Clientset, opts Options) (*fake.Clientset, *sink) {
+	t.Helper()
 	sk := newSink()
-	src := NewSource(client, sk, Options{Log: slog.New(slog.NewTextHandler(io.Discard, nil)), ReconcileInterval: 10 * time.Millisecond})
+	opts.Log = slog.New(slog.NewTextHandler(io.Discard, nil))
+	opts.ReconcileInterval = 10 * time.Millisecond
+	src := NewSource(client, sk, opts)
 	lastSource = src
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)

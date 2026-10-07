@@ -16,11 +16,14 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/dynamic/dynamicinformer"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	appslisters "k8s.io/client-go/listers/apps/v1"
 	batchlisters "k8s.io/client-go/listers/batch/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
+	networkinglisters "k8s.io/client-go/listers/networking/v1"
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/no-inspi/atlas-k8s/internal/model"
@@ -39,6 +42,8 @@ type Options struct {
 	// ReconcileInterval regroupe les événements des informers (100 ms par défaut).
 	ReconcileInterval time.Duration
 	Log               *slog.Logger
+	// Dynamic lit les IngressRoute Traefik (CRD) ; nil : pas d'IngressRoute.
+	Dynamic dynamic.Interface
 }
 
 const (
@@ -73,7 +78,19 @@ type Source struct {
 	daemonsets   appslisters.DaemonSetLister
 	jobs         batchlisters.JobLister
 	events       cache.Indexer
-	synced       []cache.InformerSynced
+	client       kubernetes.Interface
+
+	// Jalon 8 : types optionnels, nil quand le ServiceAccount ne peut pas les lister.
+	services   corelisters.ServiceLister
+	slices     cache.Indexer
+	pvcs       corelisters.PersistentVolumeClaimLister
+	ingresses  networkinglisters.IngressLister
+	ingressIdx cache.Indexer
+	classes    networkinglisters.IngressClassLister
+	traefik    []traefikInformer
+	dynFactory dynamicinformer.DynamicSharedInformerFactory
+
+	synced []cache.InformerSynced
 
 	mu    sync.Mutex
 	dirty map[ref]struct{}
@@ -90,7 +107,7 @@ func NewSource(client kubernetes.Interface, sink Sink, opts Options) *Source {
 		opts.Log = slog.Default()
 	}
 	f := informers.NewSharedInformerFactoryWithOptions(client, 0, informers.WithTransform(transform))
-	s := &Source{opts: opts, sink: sink, factory: f, dirty: map[ref]struct{}{}, last: map[ref]any{}}
+	s := &Source{opts: opts, sink: sink, factory: f, client: client, dirty: map[ref]struct{}{}, last: map[ref]any{}}
 
 	pods := f.Core().V1().Pods()
 	_ = pods.Informer().AddIndexers(cache.Indexers{
@@ -100,6 +117,14 @@ func NewSource(client kubernetes.Interface, sink Sink, opts Options) *Source {
 				return []string{string(c.UID)}, nil
 			}
 			return nil, nil
+		},
+		indexByClaim: func(obj any) ([]string, error) {
+			p := obj.(*corev1.Pod)
+			var out []string
+			for _, c := range PodClaims(p) {
+				out = append(out, p.Namespace+"/"+c)
+			}
+			return out, nil
 		},
 	})
 	s.pods, s.podIndex = pods.Lister(), pods.Informer().GetIndexer()
@@ -134,7 +159,11 @@ func NewSource(client kubernetes.Interface, sink Sink, opts Options) *Source {
 // Run démarre les informers, attend leur synchronisation, publie l'état
 // complet, signale que le hub est prêt puis suit les changements.
 func (s *Source) Run(ctx context.Context) error {
+	s.startNetwork(ctx)
 	s.factory.Start(ctx.Done())
+	if s.dynFactory != nil {
+		s.dynFactory.Start(ctx.Done())
+	}
 	if !cache.WaitForCacheSync(ctx.Done(), s.synced...) {
 		return errors.New("synchronisation des caches interrompue")
 	}
@@ -151,6 +180,9 @@ func (s *Source) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			s.factory.Shutdown()
+			if s.dynFactory != nil {
+				s.dynFactory.Shutdown()
+			}
 			return nil
 		case <-t.C:
 			s.reconcile()
@@ -194,6 +226,11 @@ func (s *Source) onPod(o any) {
 	s.mark(ref{stream.KindPod, p.Namespace + "/" + p.Name})
 	if p.Spec.NodeName != "" {
 		s.mark(ref{stream.KindNode, p.Spec.NodeName})
+	}
+	if s.pvcs != nil {
+		for _, c := range PodClaims(p) {
+			s.mark(ref{stream.KindVolume, p.Namespace + "/" + c})
+		}
 	}
 }
 
@@ -265,6 +302,7 @@ func (s *Source) markAll() error {
 	for _, o := range jobs {
 		s.onWorkload("Job")(o)
 	}
+	s.markNetwork()
 	return nil
 }
 
@@ -340,6 +378,12 @@ func (s *Source) build(r ref) (any, string, error) {
 			return nil, "", err
 		}
 		return *w, r.id, nil
+	case stream.KindService:
+		return s.buildService(r.id)
+	case stream.KindRoute:
+		return s.buildRoute(r.id)
+	case stream.KindVolume:
+		return s.buildVolume(r.id)
 	}
 	return nil, "", fmt.Errorf("type inconnu %q", r.kind)
 }
