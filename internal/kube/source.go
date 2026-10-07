@@ -1,6 +1,7 @@
 package kube
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -45,6 +46,11 @@ type Options struct {
 	Log               *slog.Logger
 	// Dynamic lit les types apportés par une CRD (Traefik, Gateway API) ; nil : aucun.
 	Dynamic dynamic.Interface
+
+	// Réglages des types dynamiques, raccourcis par les tests (zéro : valeur par défaut).
+	dynSync  time.Duration // attente du premier list d'un essai de démarrage (30 s)
+	dynRetry time.Duration // délai avant un nouvel essai après une erreur passagère (30 s)
+	dynWait  time.Duration // attente globale des types servis au démarrage (30 s)
 }
 
 const (
@@ -89,10 +95,11 @@ type Source struct {
 	ingressIdx cache.Indexer
 	classes    networkinglisters.IngressClassLister
 
-	// Jalon 9 : types apportés par une CRD, démarrés et arrêtés à chaud (dynkinds.go).
-	dynStart sync.Mutex // sérialise startDyn et stopDyn
-	dynMu    sync.RWMutex
-	dyn      map[schema.GroupVersionResource]*dynInformer
+	// Jalon 9 : types apportés par une CRD, démarrés et arrêtés à chaud (dynkinds.go, crd.go).
+	dynMu  sync.RWMutex
+	dyn    map[schema.GroupVersionResource]*dynInformer // types démarrés
+	wantMu sync.Mutex
+	wants  map[schema.GroupVersionResource]*dynWant // types servis, démarrés ou en cours de démarrage
 
 	synced []cache.InformerSynced
 
@@ -110,9 +117,12 @@ func NewSource(client kubernetes.Interface, sink Sink, opts Options) *Source {
 	if opts.Log == nil {
 		opts.Log = slog.Default()
 	}
+	opts.dynSync = cmp.Or(opts.dynSync, dynSyncTimeout)
+	opts.dynRetry = cmp.Or(opts.dynRetry, dynRetryInterval)
+	opts.dynWait = cmp.Or(opts.dynWait, dynStartupWait)
 	f := informers.NewSharedInformerFactoryWithOptions(client, 0, informers.WithTransform(transform))
 	s := &Source{opts: opts, sink: sink, factory: f, client: client, dirty: map[ref]struct{}{}, last: map[ref]any{},
-		dyn: map[schema.GroupVersionResource]*dynInformer{}}
+		dyn: map[schema.GroupVersionResource]*dynInformer{}, wants: map[schema.GroupVersionResource]*dynWant{}}
 
 	pods := f.Core().V1().Pods()
 	_ = pods.Informer().AddIndexers(cache.Indexers{
@@ -172,6 +182,10 @@ func (s *Source) Run(ctx context.Context) error {
 	}
 	// Après les caches typés : l'état des backends des routes dynamiques est juste dès leur premier calcul.
 	s.startDynamic(ctx)
+	if ctx.Err() != nil {
+		s.shutdown()
+		return nil
+	}
 	if err := s.markAll(); err != nil {
 		return err
 	}
@@ -184,13 +198,18 @@ func (s *Source) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			s.factory.Shutdown()
-			s.stopAllDyn()
+			s.shutdown()
 			return nil
 		case <-t.C:
 			s.reconcile()
 		}
 	}
+}
+
+// shutdown arrête les informers, sans rien publier.
+func (s *Source) shutdown() {
+	s.factory.Shutdown()
+	s.stopAllDyn()
 }
 
 /* ---------- événements ---------- */

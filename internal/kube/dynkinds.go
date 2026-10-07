@@ -3,6 +3,7 @@ package kube
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -61,8 +62,15 @@ type dynInformer struct {
 	stop chan struct{}
 }
 
-// dynSyncTimeout borne l'attente du premier list d'un type démarré à chaud.
-const dynSyncTimeout = 30 * time.Second
+const (
+	// dynSyncTimeout borne l'attente du premier list d'un essai de démarrage.
+	dynSyncTimeout = 30 * time.Second
+	// dynRetryInterval : délai avant un nouvel essai d'un type servi dont le
+	// démarrage a échoué pour une raison passagère.
+	dynRetryInterval = 30 * time.Second
+	// dynStartupWait borne l'attente des types servis avant le premier snapshot.
+	dynStartupWait = 30 * time.Second
+)
 
 // dynIndexer : cache du type, nil s'il n'est pas démarré.
 func (s *Source) dynIndexer(gvr schema.GroupVersionResource) cache.Indexer {
@@ -89,20 +97,30 @@ func (s *Source) dynRunning() []*dynInformer {
 // synchronisation, l'inscrit puis marque tous ses objets. Sans effet s'il
 // tourne déjà.
 func (s *Source) startDyn(ctx context.Context, k dynKind) bool {
+	ok, _ := s.tryStartDyn(ctx, k)
+	return ok
+}
+
+// tryStartDyn : comme startDyn ; retry signale un échec passager (API server
+// lent ou en erreur), qui vaut un nouvel essai. Refus (403), type absent (404)
+// ou ctx annulé : pas de nouvel essai.
+//
+// Pas de verrou pendant les attentes : deux essais concurrents du même type ne
+// coûtent qu'un list ; l'inscription, sous dynMu, n'en garde qu'un, et jamais
+// après l'annulation de ctx (unwantDyn, stopAllDyn annulent avant de retirer).
+func (s *Source) tryStartDyn(ctx context.Context, k dynKind) (ok, retry bool) {
 	dyn := s.opts.Dynamic
 	if dyn == nil {
-		return false
+		return false, false
 	}
-	s.dynStart.Lock()
-	defer s.dynStart.Unlock()
 	if s.dynIndexer(k.gvr) != nil {
-		return true
+		return true, false
 	}
 	if !s.probe(ctx, k.crd(), func(ctx context.Context) error {
 		_, err := dyn.Resource(k.gvr).List(ctx, probeOpts)
 		return err
 	}) {
-		return false
+		return false, false
 	}
 	inf := dynamicinformer.NewFilteredDynamicInformer(dyn, k.gvr, metav1.NamespaceAll, 0,
 		cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, nil).Informer()
@@ -113,14 +131,22 @@ func (s *Source) startDyn(ctx context.Context, k dynKind) bool {
 	s.handle(inf, func(o any) { k.on(s, o) })
 	stop := make(chan struct{})
 	go inf.Run(stop)
-	syncCtx, cancel := context.WithTimeout(ctx, dynSyncTimeout)
+	syncCtx, cancel := context.WithTimeout(ctx, s.opts.dynSync)
 	defer cancel()
 	if !cache.WaitForCacheSync(syncCtx.Done(), inf.HasSynced) {
 		close(stop)
+		if ctx.Err() != nil {
+			return false, false
+		}
 		s.opts.Log.Warn("type dynamique non synchronisé", "type", k.crd())
-		return false
+		return false, true
 	}
 	s.dynMu.Lock()
+	if _, running := s.dyn[k.gvr]; running || ctx.Err() != nil {
+		s.dynMu.Unlock()
+		close(stop) // un autre essai l'a emporté, ou le type n'est plus voulu
+		return running, false
+	}
 	s.dyn[k.gvr] = &dynInformer{kind: k, inf: inf, stop: stop}
 	s.dynMu.Unlock()
 	// Les événements reçus avant l'inscription ne trouvaient pas le type : on remarque tout.
@@ -128,15 +154,14 @@ func (s *Source) startDyn(ctx context.Context, k dynKind) bool {
 		k.on(s, o)
 	}
 	s.opts.Log.Info("type dynamique démarré", "type", k.crd())
-	return true
+	return true, false
 }
 
 // stopDyn arrête un type et retire ses objets du flux. Le type quitte d'abord
 // le registre, puis chaque objet est marqué : la réconciliation, qui ne le
 // trouve plus, publie leur suppression (et recalcule ce qui en dépendait).
+// Seul celui qui retire l'informer du registre ferme son canal.
 func (s *Source) stopDyn(gvr schema.GroupVersionResource) {
-	s.dynStart.Lock()
-	defer s.dynStart.Unlock()
 	s.dynMu.Lock()
 	d := s.dyn[gvr]
 	delete(s.dyn, gvr)
@@ -151,16 +176,97 @@ func (s *Source) stopDyn(gvr schema.GroupVersionResource) {
 	s.opts.Log.Info("type dynamique arrêté", "type", d.kind.crd())
 }
 
-// stopAllDyn : arrêt de la source, sans rien publier.
+// stopAllDyn : arrêt de la source, sans rien publier. Le ctx de Run est déjà
+// annulé : aucun essai en cours ne peut plus s'inscrire.
 func (s *Source) stopAllDyn() {
-	s.dynStart.Lock()
-	defer s.dynStart.Unlock()
+	s.wantMu.Lock()
+	for gvr, w := range s.wants {
+		w.cancel()
+		delete(s.wants, gvr)
+	}
+	s.wantMu.Unlock()
 	s.dynMu.Lock()
 	defer s.dynMu.Unlock()
 	for gvr, d := range s.dyn {
 		close(d.stop)
 		delete(s.dyn, gvr)
 	}
+}
+
+// dynWant : type servi (CRD présente, ou trouvé par la découverte en repli),
+// que la source cherche à faire tourner.
+type dynWant struct {
+	ctx    context.Context // annulé quand le type n'est plus servi
+	cancel context.CancelFunc
+	busy   bool // un essai (ou l'attente d'un nouvel essai) est en cours ; sous wantMu
+	once   sync.Once
+	first  chan struct{} // fermé à la fin du premier essai
+}
+
+// wantDyn déclare un type servi et lance, s'il ne tourne pas et qu'aucun essai
+// n'est en cours, un essai de démarrage en arrière-plan, renouvelé toutes les
+// dynRetry tant que l'échec est passager. Ne bloque pas. Le canal rendu est
+// fermé à la fin du premier essai.
+func (s *Source) wantDyn(ctx context.Context, k dynKind) <-chan struct{} {
+	s.wantMu.Lock()
+	defer s.wantMu.Unlock()
+	w := s.wants[k.gvr]
+	if w == nil {
+		wctx, cancel := context.WithCancel(ctx)
+		w = &dynWant{ctx: wctx, cancel: cancel, first: make(chan struct{})}
+		s.wants[k.gvr] = w
+	}
+	if !w.busy && s.dynIndexer(k.gvr) == nil {
+		w.busy = true
+		go s.keepStarting(w, k)
+	}
+	return w.first
+}
+
+func (s *Source) keepStarting(w *dynWant, k dynKind) {
+	defer func() {
+		w.once.Do(func() { close(w.first) })
+		s.wantMu.Lock()
+		w.busy = false
+		s.wantMu.Unlock()
+	}()
+	for {
+		ok, retry := s.tryStartDyn(w.ctx, k)
+		w.once.Do(func() { close(w.first) })
+		if ok || !retry {
+			return
+		}
+		s.opts.Log.Info("nouvel essai du type dynamique", "type", k.crd(), "dans", s.opts.dynRetry)
+		t := time.NewTimer(s.opts.dynRetry)
+		select {
+		case <-w.ctx.Done():
+			t.Stop()
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// unwantDyn : le type n'est plus servi ; ses essais cessent et il s'arrête.
+func (s *Source) unwantDyn(gvr schema.GroupVersionResource) {
+	s.wantMu.Lock()
+	if w := s.wants[gvr]; w != nil {
+		w.cancel() // avant stopDyn : un essai en cours ne s'inscrira plus
+		delete(s.wants, gvr)
+	}
+	s.wantMu.Unlock()
+	s.stopDyn(gvr)
+}
+
+// wantedFirsts : fins des premiers essais des types servis.
+func (s *Source) wantedFirsts() []<-chan struct{} {
+	s.wantMu.Lock()
+	defer s.wantMu.Unlock()
+	out := make([]<-chan struct{}, 0, len(s.wants))
+	for _, w := range s.wants {
+		out = append(out, w.first)
+	}
+	return out
 }
 
 // markDynamic marque tous les objets des types démarrés.
@@ -199,14 +305,4 @@ func servedKinds(d discovery.DiscoveryInterface, log *slog.Logger) []dynKind {
 		}
 	}
 	return out
-}
-
-// startDynamic démarre les types servis au démarrage (remplacé par le suivi des CRD, crd.go).
-func (s *Source) startDynamic(ctx context.Context) {
-	if s.opts.Dynamic == nil {
-		return
-	}
-	for _, k := range servedKinds(s.client.Discovery(), s.opts.Log) {
-		s.startDyn(ctx, k)
-	}
 }

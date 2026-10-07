@@ -36,7 +36,9 @@ const probeTimeout = 10 * time.Second
 
 // probe : list d'essai. Refusé (403) ou absent (404) : le type est désactivé
 // plutôt que de bloquer la synchronisation des caches. Une autre erreur
-// (API server momentanément injoignable) laisse l'informer réessayer.
+// (API server momentanément injoignable) rend vrai : l'informer réessaie de
+// lui-même ; pour un type dynamique, dont la synchronisation est bornée
+// (opts.dynSync), un échec est ensuite réessayé en arrière-plan (wantDyn).
 func (s *Source) probe(ctx context.Context, what string, list func(context.Context) error) bool {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()

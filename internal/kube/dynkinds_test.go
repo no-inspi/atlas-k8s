@@ -17,27 +17,39 @@ import (
 
 var irGVR = gvrIngressRoute("traefik.io")
 
-// fakeDynamic : client dynamique factice qui sait lister tous les types du registre.
+// fakeDynamic : client dynamique factice qui sait lister les CRD et tous les types du registre.
 func fakeDynamic(objs ...runtime.Object) *dynamicfake.FakeDynamicClient {
-	kinds := map[schema.GroupVersionResource]string{}
+	kinds := map[schema.GroupVersionResource]string{gvrCRD: "CustomResourceDefinitionList"}
 	for _, k := range dynKinds {
 		kinds[k.gvr] = k.gvr.Resource + "List"
 	}
 	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), kinds, objs...)
 }
 
-// servedDyn : client dynamique factice d'un cluster qui sert les types donnés
-// (déclarés à la découverte du client typé).
+// servedDyn : client dynamique factice d'un cluster qui sert les types donnés :
+// CRD installées, et déclarées à la découverte (repli sans droit sur les CRD).
+// Ne jamais lui passer deux fois le même type (la CRD serait créée deux fois).
 func servedDyn(client *fake.Clientset, served []dynKind, objs ...runtime.Object) *dynamicfake.FakeDynamicClient {
 	byGV := map[string][]metav1.APIResource{}
 	for _, k := range served {
 		gv := k.gvr.GroupVersion().String()
 		byGV[gv] = append(byGV[gv], metav1.APIResource{Name: k.gvr.Resource, Namespaced: true})
+		objs = append(objs, crdObject(k, true))
 	}
 	for gv, rs := range byGV {
 		client.Resources = append(client.Resources, &metav1.APIResourceList{GroupVersion: gv, APIResources: rs})
 	}
 	return fakeDynamic(objs...)
+}
+
+// crdObject : CRD factice du type ; served=false : installée, version attendue non servie.
+func crdObject(k dynKind, served bool) *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "apiextensions.k8s.io/v1", "kind": "CustomResourceDefinition",
+		"metadata": map[string]any{"name": k.crd()},
+		"spec": map[string]any{"group": k.gvr.Group, "versions": []any{
+			map[string]any{"name": k.gvr.Version, "served": served, "storage": true}}},
+	}}
 }
 
 // kindsOf : entrées du registre pour ces ressources, dans l'ordre donné.
