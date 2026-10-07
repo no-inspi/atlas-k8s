@@ -16,7 +16,8 @@ export const pvSignal = (p: Pick<PersistentVolume, 'phase'>): Signal => (p.phase
  * Porte déduite (IngressClass, traefik) : orange si une route est cassée ou
  * refusée. Porte Gateway : rouge si le Gateway n'est pas programmé ; orange si
  * un listener n'est pas prêt ou une route cassée ou refusée ; grise sans statut
- * écrit ou sans Gateway visible ; verte sinon.
+ * écrit ou sans Gateway visible (une route en échec, orange, l'emporte sur
+ * l'état inconnu, gris) ; verte sinon.
  */
 export function gateSignal(g: Pick<Gate, 'name' | 'broken'> & Partial<Pick<Gate, 'refused' | 'gateway'>>): Signal {
   const troubled = g.broken > 0 || (g.refused ?? 0) > 0

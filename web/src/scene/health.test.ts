@@ -20,6 +20,8 @@ describe('signaux', () => {
     expect(g({}, 1)).toBe('warn')
     expect(g({ listeners: [{ name: 'h', protocol: 'HTTP', port: 80, attachedRoutes: 0, ready: 'false' }] })).toBe('warn')
     expect(g({ programmed: 'unknown' })).toBe('mute')
+    expect(g({ programmed: 'unknown' }, 0, 1)).toBe('warn')
+    expect(g({ programmed: 'false', listeners: [{ name: 'h', protocol: 'HTTP', port: 80, attachedRoutes: 0, ready: 'false' }] })).toBe('err')
     expect(gateSignal({ name: 'infra/public', broken: 0, refused: 0 })).toBe('mute') // Gateway invisible
     expect(gateSignal({ name: 'infra/public', broken: 1, refused: 0 })).toBe('warn')
   })
