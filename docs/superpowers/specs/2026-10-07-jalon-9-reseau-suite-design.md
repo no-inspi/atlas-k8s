@@ -64,7 +64,7 @@ Le kind `route` gagne deux sources, `HTTPRoute` et `GRPCRoute` (groupe `gateway.
   - `ok` sinon, y compris sans statut (pas de contrôleur).
 - **Index** : routes par Service visé (existant) et par Gateway parente (`ns/name`), pour qu'un Gateway créé ou supprimé recalcule ses routes.
 
-`gatewayclasses` est lu pour l'inspecteur d'un Gateway (contrôleur, `Accepted`) ; ce n'est pas un objet du flux.
+`gatewayclasses` n'a pas d'informer : seul son YAML est lisible (il porte `controllerName`) ; ce n'est pas un objet du flux.
 
 ## Lot 3 — Traefik complet
 
@@ -92,7 +92,7 @@ Publié seulement pour un PV **sans PVC existant** : phase `Available`, `Release
 
 ## Droits
 
-- **ServiceAccount** (chart) : `list` et `watch` sur `customresourcedefinitions` (`apiextensions.k8s.io`), `gatewayclasses`, `gateways`, `httproutes`, `grpcroutes` (`gateway.networking.k8s.io`), `ingressroutetcps`, `ingressrouteudps`, `traefikservices` (`traefik.io` et `traefik.containo.us`), `persistentvolumes` ; `get` en plus sur `gateways`, `httproutes`, `grpcroutes`, `ingressroutetcps`, `ingressrouteudps`, `persistentvolumes` pour l'onglet YAML en `auth.mode=none`. Toujours aucune écriture.
+- **ServiceAccount** (chart) : `list` et `watch` sur `customresourcedefinitions` (`apiextensions.k8s.io`), `gatewayclasses`, `gateways`, `httproutes`, `grpcroutes` (`gateway.networking.k8s.io`), `ingressroutetcps`, `ingressrouteudps`, `traefikservices` (`traefik.io` et `traefik.containo.us`), `persistentvolumes` ; `get` en plus sur `gatewayclasses`, `gateways`, `httproutes`, `grpcroutes`, `ingressroutetcps`, `ingressrouteudps`, `traefikservices`, `persistentvolumes` pour l'onglet YAML en `auth.mode=none`. Toujours aucune écriture.
 - **Sondes** : chaque type est sondé comme au jalon 8 ; refusé, il est désactivé avec un warning.
 - **Filtre du flux** (`internal/access`) :
   - `gateway` exige `list gateways` dans son namespace ;
@@ -130,7 +130,7 @@ Dans l'îlot de leur StorageClass, après les PVC, en fil de fer : `Available` g
 
 | Objet | Aperçu | Onglets |
 | --- | --- | --- |
-| Gateway | Classe (et son contrôleur), état et raison, adresses, tableau des listeners (protocole, port, hôte, routes attachées, ready), puis ses routes avec leur état | YAML, Événements |
+| Gateway | Classe, état et raison, adresses, tableau des listeners (protocole, port, hôte, routes attachées, ready), puis ses routes avec leur état | YAML, Événements |
 | HTTPRoute, GRPCRoute | Portes, hôtes, tableau règle → backend avec poids et état, conditions par parent | YAML, Événements |
 | IngressRouteTCP/UDP | Porte, `match`, backends | YAML, Événements |
 | Route via TraefikService | Colonnes poids et `via`, miroirs avec leur pourcentage | — |
