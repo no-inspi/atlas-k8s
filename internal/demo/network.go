@@ -5,6 +5,7 @@ import (
 	"hash/fnv"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -402,46 +403,240 @@ func (s *Sim) netObject(ref inspect.Ref) map[string]any {
 			status["capacity"] = map[string]any{"storage": size}
 		}
 		return map[string]any{"apiVersion": "v1", "kind": "PersistentVolumeClaim", "metadata": meta, "spec": spec, "status": status}
-	case "Ingress", "IngressRoute":
-		r, ok := s.netLast["route|"+ref.Kind+"/"+ref.Namespace+"/"+ref.Name].(model.Route)
-		if !ok || (ref.Kind == "IngressRoute" && ref.Group != r.Group) {
+	case "Ingress":
+		r, ok := s.netLast["route|Ingress/"+ref.Namespace+"/"+ref.Name].(model.Route)
+		if !ok {
 			return nil
 		}
-		if ref.Kind == "Ingress" {
-			byHost := map[string][]any{}
-			var hosts []string
-			for _, rule := range r.Rules {
-				if _, ok := byHost[rule.Host]; !ok {
-					hosts = append(hosts, rule.Host)
-				}
-				byHost[rule.Host] = append(byHost[rule.Host], map[string]any{"path": rule.Path, "pathType": "Prefix",
-					"backend": map[string]any{"service": map[string]any{"name": rule.Backend.Service, "port": map[string]any{"number": rule.Backend.Port}}}})
-			}
-			rules := []any{}
-			for _, h := range hosts {
-				rules = append(rules, map[string]any{"host": h, "http": map[string]any{"paths": byHost[h]}})
-			}
-			return map[string]any{"apiVersion": "networking.k8s.io/v1", "kind": "Ingress", "metadata": meta,
-				"spec": map[string]any{"ingressClassName": r.Gate, "rules": rules}}
-		}
-		routes := []any{}
+		byHost := map[string][]any{}
+		var hosts []string
 		for _, rule := range r.Rules {
-			routes = append(routes, map[string]any{"match": rule.Match, "kind": "Rule",
-				"services": []any{map[string]any{"name": rule.Backend.Service, "port": rule.Backend.Port}}})
+			if _, ok := byHost[rule.Host]; !ok {
+				hosts = append(hosts, rule.Host)
+			}
+			byHost[rule.Host] = append(byHost[rule.Host], map[string]any{"path": rule.Path, "pathType": "Prefix",
+				"backend": map[string]any{"service": map[string]any{"name": rule.Backend.Service, "port": map[string]any{"number": rule.Backend.Port}}}})
 		}
-		return map[string]any{"apiVersion": r.Group + "/v1alpha1", "kind": "IngressRoute", "metadata": meta,
-			"spec": map[string]any{"entryPoints": []any{"websecure"}, "routes": routes}}
+		rules := []any{}
+		for _, h := range hosts {
+			rules = append(rules, map[string]any{"host": h, "http": map[string]any{"paths": byHost[h]}})
+		}
+		return map[string]any{"apiVersion": "networking.k8s.io/v1", "kind": "Ingress", "metadata": meta,
+			"spec": map[string]any{"ingressClassName": r.Gate, "rules": rules}}
+	case "IngressRoute", "IngressRouteTCP", "IngressRouteUDP":
+		r, ok := s.netLast["route|"+ref.Kind+"/"+ref.Namespace+"/"+ref.Name].(model.Route)
+		if !ok || ref.Group != r.Group {
+			return nil
+		}
+		return traefikObject(r, meta)
+	case "TraefikService":
+		spec, ok := traefikServices[ref.Namespace+"/"+ref.Name]
+		if !ok || ref.Group != "traefik.io" {
+			return nil
+		}
+		return map[string]any{"apiVersion": "traefik.io/v1alpha1", "kind": "TraefikService", "metadata": meta, "spec": spec}
+	case "HTTPRoute", "GRPCRoute":
+		r, ok := s.netLast["route|"+ref.Kind+"/"+ref.Namespace+"/"+ref.Name].(model.Route)
+		if !ok {
+			return nil
+		}
+		return gatewayRouteObject(r, meta)
+	case "Gateway":
+		g, ok := s.netLast["gateway|"+ref.Namespace+"/"+ref.Name].(model.Gateway)
+		if !ok {
+			return nil
+		}
+		return gatewayObject(g, meta)
+	case "GatewayClass":
+		for _, g := range s.catalog.gateways {
+			if g.Class == ref.Name {
+				return map[string]any{"apiVersion": gatewayAPI + "/v1", "kind": "GatewayClass", "metadata": map[string]any{"name": ref.Name},
+					"spec":   map[string]any{"controllerName": envoyController},
+					"status": map[string]any{"conditions": []any{condObj("Accepted", model.CondTrue, "", "")}}}
+			}
+		}
+	case "PersistentVolume":
+		p, ok := s.netLast["persistentVolume|"+ref.Name].(model.PersistentVolume)
+		if !ok {
+			return nil
+		}
+		return pvObject(p)
 	}
 	return nil
 }
 
+// portValue : un port numérique en nombre, un port nommé tel quel.
+func portValue(p string) any {
+	if n, err := strconv.Atoi(p); err == nil {
+		return n
+	}
+	return p
+}
+
+// condObj : condition de statut Kubernetes depuis un tri-état.
+func condObj(typ, tri, reason, message string) map[string]any {
+	st := "Unknown"
+	switch tri {
+	case model.CondTrue:
+		st = "True"
+	case model.CondFalse:
+		st = "False"
+	}
+	if reason == "" {
+		reason = typ
+	}
+	c := map[string]any{"type": typ, "status": st, "reason": reason}
+	if message != "" {
+		c["message"] = message
+	}
+	return c
+}
+
+// traefikObject : une route Traefik ; les feuilles d'un TraefikService
+// redeviennent une seule référence à lui.
+func traefikObject(r model.Route, meta map[string]any) map[string]any {
+	routes := []any{}
+	byMatch := map[string]int{}
+	for _, rule := range r.Rules {
+		svc := map[string]any{"name": rule.Backend.Service, "port": portValue(rule.Backend.Port)}
+		if rule.Backend.Via != "" {
+			_, name, _ := strings.Cut(rule.Backend.Via, "/")
+			svc = map[string]any{"name": name, "kind": "TraefikService"}
+		}
+		i, ok := byMatch[rule.Match]
+		if !ok {
+			i = len(routes)
+			byMatch[rule.Match] = i
+			ro := map[string]any{"services": []any{}}
+			if r.Source == model.SourceIngressRoute {
+				ro["kind"] = "Rule"
+			}
+			if rule.Match != "" {
+				ro["match"] = rule.Match
+			}
+			routes = append(routes, ro)
+		}
+		ro := routes[i].(map[string]any)
+		svcs := ro["services"].([]any)
+		dup := false
+		for _, x := range svcs {
+			dup = dup || reflect.DeepEqual(x, svc)
+		}
+		if !dup {
+			ro["services"] = append(svcs, svc)
+		}
+	}
+	entry := map[string]string{model.SourceIngressRoute: "websecure", model.SourceIngressRouteTCP: "postgres", model.SourceIngressRouteUDP: "statsd"}[r.Source]
+	return map[string]any{"apiVersion": r.Group + "/v1alpha1", "kind": r.Source, "metadata": meta,
+		"spec": map[string]any{"entryPoints": []any{entry}, "routes": routes}}
+}
+
+// gatewayRouteObject : une HTTPRoute ou une GRPCRoute, règles regroupées par chemin ou méthode.
+func gatewayRouteObject(r model.Route, meta map[string]any) map[string]any {
+	parents := []any{}
+	for _, g := range r.Gates {
+		ns, name, _ := strings.Cut(g, "/")
+		parents = append(parents, map[string]any{"name": name, "namespace": ns})
+	}
+	spec := map[string]any{"parentRefs": parents}
+	if len(r.Rules) > 0 && r.Rules[0].Host != "" {
+		spec["hostnames"] = []any{r.Rules[0].Host}
+	}
+	rules := []any{}
+	idx := map[string]int{}
+	for _, rule := range r.Rules {
+		k := rule.Path + "|" + rule.Match
+		i, ok := idx[k]
+		if !ok {
+			i = len(rules)
+			idx[k] = i
+			ro := map[string]any{"backendRefs": []any{}}
+			if rule.Path != "" {
+				ro["matches"] = []any{map[string]any{"path": map[string]any{"type": "PathPrefix", "value": rule.Path}}}
+			}
+			if rule.Match != "" {
+				svc, meth, _ := strings.Cut(rule.Match, "/")
+				m := map[string]any{"service": svc}
+				if meth != "" {
+					m["method"] = meth
+				}
+				ro["matches"] = []any{map[string]any{"method": m}}
+			}
+			rules = append(rules, ro)
+		}
+		ro := rules[i].(map[string]any)
+		ref := map[string]any{"name": rule.Backend.Service, "port": portValue(rule.Backend.Port)}
+		if rule.Backend.Namespace != r.Namespace {
+			ref["namespace"] = rule.Backend.Namespace
+		}
+		if rule.Backend.Weight != nil {
+			ref["weight"] = *rule.Backend.Weight
+		}
+		ro["backendRefs"] = append(ro["backendRefs"].([]any), ref)
+	}
+	spec["rules"] = rules
+	status := []any{}
+	for _, p := range r.Parents {
+		ns, name, _ := strings.Cut(p.Gateway, "/")
+		reason := ""
+		if p.Accepted == model.CondFalse {
+			reason = p.Reason
+		}
+		status = append(status, map[string]any{"parentRef": map[string]any{"name": name, "namespace": ns}, "controllerName": envoyController,
+			"conditions": []any{condObj("Accepted", p.Accepted, reason, ""), condObj("ResolvedRefs", p.ResolvedRefs, "", "")}})
+	}
+	return map[string]any{"apiVersion": gatewayAPI + "/v1", "kind": r.Source, "metadata": meta, "spec": spec,
+		"status": map[string]any{"parents": status}}
+}
+
+func gatewayObject(g model.Gateway, meta map[string]any) map[string]any {
+	listeners, lstatus := []any{}, []any{}
+	for _, l := range g.Listeners {
+		spec := map[string]any{"name": l.Name, "protocol": l.Protocol, "port": l.Port}
+		if l.Hostname != "" {
+			spec["hostname"] = l.Hostname
+		}
+		listeners = append(listeners, spec)
+		lstatus = append(lstatus, map[string]any{"name": l.Name, "attachedRoutes": l.AttachedRoutes,
+			"conditions": []any{condObj("Programmed", l.Ready, "", "")}})
+	}
+	status := map[string]any{"listeners": lstatus, "conditions": []any{
+		condObj("Accepted", g.Accepted, "", ""), condObj("Programmed", g.Programmed, g.Reason, g.Message)}}
+	if len(g.Addresses) > 0 {
+		addrs := []any{}
+		for _, a := range g.Addresses {
+			addrs = append(addrs, map[string]any{"type": "IPAddress", "value": a})
+		}
+		status["addresses"] = addrs
+	}
+	return map[string]any{"apiVersion": gatewayAPI + "/v1", "kind": "Gateway", "metadata": meta,
+		"spec": map[string]any{"gatewayClassName": g.Class, "listeners": listeners}, "status": status}
+}
+
+func pvObject(p model.PersistentVolume) map[string]any {
+	spec := map[string]any{"capacity": map[string]any{"storage": fmt.Sprintf("%dGi", p.Capacity/gi)}, "accessModes": p.AccessModes,
+		"persistentVolumeReclaimPolicy": p.ReclaimPolicy, "storageClassName": p.StorageClass}
+	if ns, name, ok := strings.Cut(p.ClaimRef, "/"); ok {
+		spec["claimRef"] = map[string]any{"kind": "PersistentVolumeClaim", "namespace": ns, "name": name}
+	}
+	return map[string]any{"apiVersion": "v1", "kind": "PersistentVolume", "metadata": map[string]any{"name": p.Name},
+		"spec": spec, "status": map[string]any{"phase": p.Phase}}
+}
+
 // netEvents : un PVC en attente attend son premier consommateur (StorageClass
-// en WaitForFirstConsumer), comme sur GKE ou kind.
+// en WaitForFirstConsumer), comme sur GKE ou kind ; un Gateway non programmé
+// répète son avertissement.
 func (s *Sim) netEvents(kind, ns, name string) []model.Event {
-	if kind == "PersistentVolumeClaim" {
+	switch kind {
+	case "PersistentVolumeClaim":
 		if v, ok := s.netLast["volume|"+ns+"/"+name].(model.Volume); ok && v.Phase == "Pending" {
 			return []model.Event{{Type: "Normal", Reason: "WaitForFirstConsumer", Count: 12, Source: "persistentvolume-controller",
 				Message: "waiting for first consumer to be created before binding", FirstSeen: s.now.Add(-time.Hour), LastSeen: s.now}}
+		}
+	case "Gateway":
+		if g, ok := s.netLast["gateway|"+ns+"/"+name].(model.Gateway); ok && g.Programmed == model.CondFalse {
+			return []model.Event{{Type: "Warning", Reason: g.Reason, Count: 30, Source: "envoy-gateway",
+				Message: g.Message, FirstSeen: s.now.Add(-2 * time.Hour), LastSeen: s.now}}
 		}
 	}
 	return []model.Event{}

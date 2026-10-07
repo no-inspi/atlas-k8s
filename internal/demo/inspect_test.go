@@ -205,3 +205,52 @@ func TestDemoNetworkInspector(t *testing.T) {
 		t.Errorf("événements du PVC en attente = %+v", evs)
 	}
 }
+
+func TestDemoGatewayInspector(t *testing.T) {
+	s, _ := start(5)
+	ctx := context.Background()
+	gw := func(kind, ns, name string) inspect.Ref {
+		return inspect.Ref{Group: "gateway.networking.k8s.io", Version: "v1", Kind: kind, Namespace: ns, Name: name}
+	}
+	tr := func(kind, ns, name string) inspect.Ref {
+		return inspect.Ref{Group: "traefik.io", Version: "v1alpha1", Kind: kind, Namespace: ns, Name: name}
+	}
+	cases := []struct {
+		ref  inspect.Ref
+		want []string
+	}{
+		{gw("Gateway", "infra", "internal"), []string{"kind: Gateway", "gatewayClassName: eg", "AddressNotAssigned"}},
+		{gw("GatewayClass", "", "eg"), []string{"controllerName: gateway.envoyproxy.io/gatewayclass-controller"}},
+		{gw("HTTPRoute", "production", "storefront"), []string{"weight: 900", "name: frontend-canary", "namespace: infra"}},
+		{gw("GRPCRoute", "production", "orders-grpc"), []string{"service: orders.v1.Orders", "method: PlaceOrder", "name: internal"}},
+		{gw("HTTPRoute", "staging", "preview"), []string{"NotAllowedByListeners", "name: checkout-preview"}},
+		{tr("IngressRoute", "production", "checkout"), []string{"kind: TraefikService", "name: checkout-split"}},
+		{tr("TraefikService", "production", "checkout-mirror"), []string{"mirrors:", "percent: 10", "name: payment-worker"}},
+		{tr("IngressRouteTCP", "production", "postgres"), []string{"HostSNI(`*`)", "port: 5432"}},
+		{tr("IngressRouteUDP", "monitoring", "statsd"), []string{"name: prometheus", "port: 9125"}},
+		{inspect.Ref{Version: "v1", Kind: "PersistentVolume", Name: "pv-old-uploads"},
+			[]string{"phase: Released", "persistentVolumeReclaimPolicy: Retain", "name: old-uploads", "storage: 5Gi"}},
+	}
+	for _, c := range cases {
+		doc, err := s.YAML(ctx, anyone, c.ref)
+		if err != nil {
+			t.Errorf("%+v : %v", c.ref, err)
+			continue
+		}
+		for _, w := range c.want {
+			if !strings.Contains(doc.YAML, w) {
+				t.Errorf("%s %s/%s : %q absent de\n%s", c.ref.Kind, c.ref.Namespace, c.ref.Name, w, doc.YAML)
+			}
+		}
+	}
+	if _, err := s.YAML(ctx, anyone, tr("TraefikService", "production", "absent")); err == nil {
+		t.Error("TraefikService absent : erreur attendue")
+	}
+	evs, _ := s.Events(ctx, anyone, "Gateway", "infra", "internal")
+	if len(evs) != 1 || evs[0].Reason != "AddressNotAssigned" || evs[0].Type != "Warning" {
+		t.Errorf("événements du Gateway non programmé = %+v", evs)
+	}
+	if evs, _ := s.Events(ctx, anyone, "PersistentVolume", "", "pv-old-uploads"); len(evs) != 0 {
+		t.Errorf("événements du PV = %+v", evs)
+	}
+}

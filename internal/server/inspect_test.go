@@ -93,3 +93,19 @@ func TestNsParam(t *testing.T) {
 		}
 	}
 }
+
+func TestInspectorClusterScopedAndGatewayObjects(t *testing.T) {
+	h, _ := demoServer(t)
+	if rec := get(h, "/api/yaml/core/v1/PersistentVolume/_/pv-old-uploads"); rec.Code != 200 || !strings.Contains(rec.Body.String(), "kind: PersistentVolume") {
+		t.Errorf("yaml du PV = %d %s", rec.Code, rec.Body)
+	}
+	if rec := get(h, "/api/namespaces/_/persistentvolumes/pv-old-uploads/events"); rec.Code != 200 {
+		t.Errorf("événements du PV = %d", rec.Code)
+	}
+	if rec := get(h, "/api/yaml/gateway.networking.k8s.io/v1/Gateway/infra/public"); rec.Code != 200 || !strings.Contains(rec.Body.String(), "kind: Gateway") {
+		t.Errorf("yaml du Gateway = %d", rec.Code)
+	}
+	if rec := get(h, "/api/namespaces/infra/gateways/internal/events"); rec.Code != 200 || !strings.Contains(rec.Body.String(), "AddressNotAssigned") {
+		t.Errorf("événements du Gateway = %d %s", rec.Code, rec.Body)
+	}
+}
