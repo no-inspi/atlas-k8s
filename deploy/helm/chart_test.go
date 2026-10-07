@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 
@@ -158,6 +159,42 @@ func TestClusterRoleMatchesSpec(t *testing.T) {
 	restricted := find(mustRender(t, append(oidc, "--set", "rbac.impersonate.groups={oidc:sre,oidc:dev}")...), "ClusterRole")
 	if names := toStrings(get(restricted, "rules.1.resourceNames")); len(names) != 2 || names[0] != "oidc:sre" {
 		t.Errorf("resourceNames des groupes = %v", names)
+	}
+}
+
+func TestClusterRoleReadsJalon9Types(t *testing.T) {
+	role := find(mustRender(t, oidc...), "ClusterRole")
+	allowed := func(group, resource, verb string) bool {
+		for _, r := range get(role, "rules").([]any) {
+			if slices.Contains(toStrings(get(r, "apiGroups")), group) && slices.Contains(toStrings(get(r, "resources")), resource) &&
+				slices.Contains(toStrings(get(r, "verbs")), verb) {
+				return true
+			}
+		}
+		return false
+	}
+	inspectable := []struct{ group, resource string }{
+		{"gateway.networking.k8s.io", "gatewayclasses"}, {"gateway.networking.k8s.io", "gateways"},
+		{"gateway.networking.k8s.io", "httproutes"}, {"gateway.networking.k8s.io", "grpcroutes"},
+		{"traefik.io", "ingressroutetcps"}, {"traefik.containo.us", "ingressroutetcps"},
+		{"traefik.io", "ingressrouteudps"}, {"traefik.containo.us", "ingressrouteudps"},
+		{"traefik.io", "traefikservices"}, {"traefik.containo.us", "traefikservices"},
+		{"", "persistentvolumes"},
+	}
+	for _, c := range append(inspectable, struct{ group, resource string }{"apiextensions.k8s.io", "customresourcedefinitions"}) {
+		for _, verb := range []string{"list", "watch"} {
+			if !allowed(c.group, c.resource, verb) {
+				t.Errorf("%s %s.%s absent du ClusterRole", verb, c.resource, c.group)
+			}
+		}
+	}
+	for _, c := range inspectable {
+		if !allowed(c.group, c.resource, "get") {
+			t.Errorf("get %s.%s absent (onglet YAML en auth.mode=none)", c.resource, c.group)
+		}
+	}
+	if allowed("apiextensions.k8s.io", "customresourcedefinitions", "get") {
+		t.Error("les CRD ne sont pas inspectables : list et watch suffisent")
 	}
 }
 
