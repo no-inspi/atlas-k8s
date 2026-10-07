@@ -61,7 +61,7 @@ func attributes(kind stream.Kind, obj any) (Attributes, bool) {
 		return Attributes{Verb: "list", Resource: "services", Namespace: o.Namespace}, true
 	case model.Route:
 		res, ok := routeResources[o.Source]
-		return Attributes{Verb: "list", Group: o.Group, Resource: res, Namespace: o.Namespace}, ok
+		return Attributes{Verb: "list", Group: o.Group, Resource: res, Namespace: o.Namespace}, ok && o.Group != ""
 	case model.Gateway:
 		return Attributes{Verb: "list", Group: "gateway.networking.k8s.io", Resource: "gateways", Namespace: o.Namespace}, true
 	case model.PersistentVolume:
