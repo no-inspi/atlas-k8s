@@ -6,6 +6,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -168,5 +169,35 @@ func TestConvertIngressRoute(t *testing.T) {
 	u.SetAnnotations(map[string]string{"kubernetes.io/ingress.class": "traefik-internal"})
 	if g := ConvertIngressRoute(u, nil).Gate; g != "traefik-internal" {
 		t.Errorf("porte annotée = %s", g)
+	}
+}
+
+func TestConvertPVC(t *testing.T) {
+	class := "standard-rwo"
+	pvc := &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: "data-0", Namespace: "prod"},
+		Spec: corev1.PersistentVolumeClaimSpec{StorageClassName: &class, VolumeName: "pvc-123",
+			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			Resources:   corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("10Gi")}}},
+		Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimBound, Capacity: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("20Gi")}}}
+	v := ConvertPVC(pvc, []string{"u1"})
+	if v.StorageClass != "standard-rwo" || v.Requested != 10<<30 || v.Capacity != 20<<30 || v.Phase != "Bound" ||
+		v.AccessModes[0] != "ReadWriteOnce" || v.VolumeName != "pvc-123" || v.Pods[0] != "u1" {
+		t.Errorf("volume = %+v", v)
+	}
+	empty := ConvertPVC(&corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: "x"}}, nil)
+	if empty.Phase != "Pending" || empty.Pods == nil || empty.AccessModes == nil {
+		t.Errorf("PVC neuf = %+v", empty)
+	}
+}
+
+func TestPodClaims(t *testing.T) {
+	p := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "web-0"}, Spec: corev1.PodSpec{Volumes: []corev1.Volume{
+		{Name: "data", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "data-web-0"}}},
+		{Name: "scratch", VolumeSource: corev1.VolumeSource{Ephemeral: &corev1.EphemeralVolumeSource{}}},
+		{Name: "cfg", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{}}},
+	}}}
+	got := PodClaims(p)
+	if len(got) != 2 || got[0] != "data-web-0" || got[1] != "web-0-scratch" {
+		t.Errorf("PodClaims = %v", got)
 	}
 }

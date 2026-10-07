@@ -222,3 +222,57 @@ func routeBackends(r model.Route) []string {
 	}
 	return out
 }
+
+// ConvertPVC réduit un PersistentVolumeClaim ; pods : UID des pods qui le montent.
+func ConvertPVC(p *corev1.PersistentVolumeClaim, pods []string) model.Volume {
+	v := model.Volume{Namespace: p.Namespace, Name: p.Name, Phase: string(p.Status.Phase), VolumeName: p.Spec.VolumeName,
+		AccessModes: []string{}, Pods: pods}
+	if v.Phase == "" {
+		v.Phase = string(corev1.ClaimPending)
+	}
+	if p.Spec.StorageClassName != nil {
+		v.StorageClass = *p.Spec.StorageClassName
+	}
+	if q, ok := p.Spec.Resources.Requests[corev1.ResourceStorage]; ok {
+		v.Requested = q.Value()
+	}
+	if q, ok := p.Status.Capacity[corev1.ResourceStorage]; ok {
+		v.Capacity = q.Value()
+	}
+	for _, m := range p.Spec.AccessModes {
+		v.AccessModes = append(v.AccessModes, string(m))
+	}
+	if v.Pods == nil {
+		v.Pods = []string{}
+	}
+	return v
+}
+
+// PodClaims : PVC montés par le pod. Un volume éphémère crée le PVC « <pod>-<volume> ».
+func PodClaims(p *corev1.Pod) []string {
+	var out []string
+	for _, v := range p.Spec.Volumes {
+		switch {
+		case v.PersistentVolumeClaim != nil:
+			out = append(out, v.PersistentVolumeClaim.ClaimName)
+		case v.Ephemeral != nil:
+			out = append(out, p.Name+"-"+v.Name)
+		}
+	}
+	return out
+}
+
+// claimVolumes : seuls volumes gardés en cache, sans leurs détails.
+func claimVolumes(vs []corev1.Volume) []corev1.Volume {
+	var out []corev1.Volume
+	for _, v := range vs {
+		switch {
+		case v.PersistentVolumeClaim != nil:
+			out = append(out, corev1.Volume{Name: v.Name, VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: v.PersistentVolumeClaim.ClaimName}}})
+		case v.Ephemeral != nil:
+			out = append(out, corev1.Volume{Name: v.Name, VolumeSource: corev1.VolumeSource{Ephemeral: &corev1.EphemeralVolumeSource{}}})
+		}
+	}
+	return out
+}

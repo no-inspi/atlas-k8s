@@ -205,6 +205,15 @@ func TestTransformStripsUnusedFields(t *testing.T) {
 	if q.Spec.Volumes != nil || q.Spec.Containers[0].Env != nil || q.Spec.Containers[0].Command != nil || q.Spec.Containers[0].Image != "i" {
 		t.Errorf("spec = %+v", q.Spec)
 	}
+	withClaims, _ := transform(&corev1.Pod{Spec: corev1.PodSpec{Volumes: []corev1.Volume{
+		{Name: "data", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "c", ReadOnly: true}}},
+		{Name: "tmp", VolumeSource: corev1.VolumeSource{Ephemeral: &corev1.EphemeralVolumeSource{VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{}}}},
+		{Name: "secret", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: "s"}}},
+	}}})
+	vs := withClaims.(*corev1.Pod).Spec.Volumes
+	if len(vs) != 2 || vs[0].PersistentVolumeClaim.ClaimName != "c" || vs[0].PersistentVolumeClaim.ReadOnly || vs[1].Ephemeral.VolumeClaimTemplate != nil {
+		t.Errorf("volumes gardés = %+v", vs)
+	}
 	d, _ := transform(&appsv1.Deployment{Spec: appsv1.DeploymentSpec{Replicas: i32(2), Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c"}}}}}})
 	if dd := d.(*appsv1.Deployment); dd.Spec.Template.Spec.Containers != nil || *dd.Spec.Replicas != 2 {
 		t.Errorf("deployment = %+v", dd.Spec)

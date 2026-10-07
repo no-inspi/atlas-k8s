@@ -412,7 +412,7 @@ func (s *Source) requestedOn(node string) model.Resources {
 /* ---------- transformations ---------- */
 
 // transform allège les objets avant leur mise en cache : la vue n'a besoin ni
-// des managedFields, ni des volumes, variables d'environnement ou templates.
+// des managedFields, ni des volumes (sauf les PVC montés), variables d'environnement ou templates.
 // Les onglets YAML (jalon 5) relisent l'objet complet depuis l'API server.
 func transform(obj any) (any, error) {
 	m, ok := obj.(metav1.Object)
@@ -425,7 +425,7 @@ func transform(obj any) (any, error) {
 	}
 	switch o := obj.(type) {
 	case *corev1.Pod:
-		o.Spec.Volumes = nil
+		o.Spec.Volumes = claimVolumes(o.Spec.Volumes) // PVC montés (jalon 8), rien d'autre
 		slimContainers(o.Spec.InitContainers)
 		slimContainers(o.Spec.Containers)
 		o.Spec.EphemeralContainers = nil
