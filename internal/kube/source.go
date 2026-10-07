@@ -51,6 +51,7 @@ type Options struct {
 	dynSync  time.Duration // attente du premier list d'un essai de démarrage (30 s)
 	dynRetry time.Duration // délai avant un nouvel essai après une erreur passagère (30 s)
 	dynWait  time.Duration // attente globale des types servis au démarrage (30 s)
+	dynAgain time.Duration // délai minimal d'un essai relancé par un événement de CRD après une erreur passagère (dynRetry/10)
 }
 
 const (
@@ -122,6 +123,7 @@ func NewSource(client kubernetes.Interface, sink Sink, opts Options) *Source {
 	opts.dynSync = cmp.Or(opts.dynSync, dynSyncTimeout)
 	opts.dynRetry = cmp.Or(opts.dynRetry, dynRetryInterval)
 	opts.dynWait = cmp.Or(opts.dynWait, dynStartupWait)
+	opts.dynAgain = cmp.Or(opts.dynAgain, opts.dynRetry/10)
 	f := informers.NewSharedInformerFactoryWithOptions(client, 0, informers.WithTransform(transform))
 	s := &Source{opts: opts, sink: sink, factory: f, client: client, dirty: map[ref]struct{}{}, last: map[ref]any{},
 		dyn: map[schema.GroupVersionResource]*dynInformer{}, wants: map[schema.GroupVersionResource]*dynWant{}}

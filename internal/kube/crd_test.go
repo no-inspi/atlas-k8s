@@ -201,6 +201,11 @@ func TestRunStopsWithoutReadyWhenCancelledDuringDynamicStart(t *testing.T) {
 // gateFirstList : le premier list des IngressRoute traefik.io attend release,
 // puis échoue avec err ; les suivants passent. Le client factice reste
 // verrouillé pendant l'attente : ne pas l'appeler avant release.
+// Hypothèse : sans CRD au démarrage, aucun list de ce type n'a lieu avant
+// l'ADD de la CRD ; le premier list est donc la sonde (probe) de l'essai que
+// lance cet ADD, et non le list de l'informer. Si le démarrage listait ce type
+// sans CRD (découverte, autre sonde), la porte se refermerait sur le mauvais
+// appel et le test ne reproduirait plus la course.
 func gateFirstList(dyn *dynamicfake.FakeDynamicClient, err error) (entered <-chan struct{}, release chan<- struct{}) {
 	in, out := make(chan struct{}), make(chan struct{})
 	var first atomic.Bool
@@ -249,7 +254,7 @@ func TestCRDEventCutsRetryWait(t *testing.T) {
 	down.Store(true)
 	failingLists(dyn, "traefik.io", &down)
 	_, sk := startSourceWith(t, client, Options{Dynamic: dyn,
-		dynSync: 500 * time.Millisecond, dynRetry: time.Hour, dynWait: 100 * time.Millisecond})
+		dynSync: 500 * time.Millisecond, dynRetry: time.Hour, dynAgain: 50 * time.Millisecond, dynWait: 100 * time.Millisecond})
 	for _, first := range lastSource.wantedFirsts() {
 		select {
 		case <-first: // premier essai en échec : la source attend dynRetry
@@ -263,4 +268,35 @@ func TestCRDEventCutsRetryWait(t *testing.T) {
 		_, ok := sk.get(stream.KindRoute, adminID)
 		return ok
 	})
+}
+
+// Une CRD modifiée en continu pendant que l'API server échoue : chaque
+// événement relance un essai, mais pas plus d'un par dynAgain.
+func TestCRDEventsAfterTransientFailureAreThrottled(t *testing.T) {
+	client := fake.NewClientset(netFixtures()...)
+	k := kindsOf(irGVR)[0]
+	dyn := servedDyn(client, []dynKind{k}, adminRoute("traefik.io", "api"))
+	var down atomic.Bool
+	down.Store(true)
+	lists := failingLists(dyn, "traefik.io", &down)
+	const again = 200 * time.Millisecond
+	startSourceWith(t, client, Options{Dynamic: dyn,
+		dynSync: 10 * time.Millisecond, dynRetry: time.Hour, dynAgain: again, dynWait: 50 * time.Millisecond})
+	for _, first := range lastSource.wantedFirsts() {
+		<-first
+	}
+	n := lists.Load()
+	const flood = time.Second
+	for end := time.Now().Add(flood); time.Now().Before(end); time.Sleep(time.Millisecond) {
+		lastSource.syncCRD(context.Background(), crdObject(k, true))
+	}
+	// Un essai = la sonde et au plus quelques list de l'informer.
+	tries := int32(flood/again) + 1
+	got := lists.Load() - n
+	if got < 2 {
+		t.Fatalf("les événements doivent relancer des essais : %d list", got)
+	}
+	if got > 3*tries {
+		t.Fatalf("%d list en %v : au plus un essai par %v attendu", got, flood, again)
+	}
 }

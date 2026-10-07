@@ -258,21 +258,46 @@ func (s *Source) keepStarting(w *dynWant, k dynKind) {
 			return
 		}
 		s.wantMu.Unlock()
-		if again {
+		if again && !retry { // après un succès, un 404 ou un 403 : sans délai
+			s.opts.Log.Debug("essai relancé par un événement de CRD", "type", k.crd())
 			continue
 		}
-		s.opts.Log.Info("nouvel essai du type dynamique", "type", k.crd(), "dans", s.opts.dynRetry)
-		t := time.NewTimer(s.opts.dynRetry)
+		if !s.waitRetry(w, k, again) {
+			return
+		}
+	}
+}
+
+// waitRetry : attente après un échec passager, dynRetry, ramenée à dynAgain
+// (depuis la fin de l'essai) par un événement de CRD : une CRD modifiée en
+// continu pendant que l'API server est lent ne relance pas plus d'un essai
+// par dynAgain. Faux si le type n'est plus voulu.
+func (s *Source) waitRetry(w *dynWant, k dynKind, again bool) bool {
+	end := time.Now()
+	delay := s.opts.dynRetry
+	if again {
+		delay = s.opts.dynAgain
+		s.opts.Log.Debug("essai relancé par un événement de CRD", "type", k.crd(), "dans", delay)
+	} else {
+		s.opts.Log.Info("nouvel essai du type dynamique", "type", k.crd(), "dans", delay)
+	}
+	t := time.NewTimer(delay)
+	defer t.Stop()
+	for {
 		select {
 		case <-w.ctx.Done():
-			t.Stop()
 			s.wantMu.Lock()
 			w.busy = false
 			s.wantMu.Unlock()
-			return
-		case <-w.again: // un événement de CRD avance l'essai
-			t.Stop()
+			return false
+		case <-w.again:
+			if !again {
+				again = true
+				s.opts.Log.Debug("essai relancé par un événement de CRD", "type", k.crd())
+				t.Reset(time.Until(end.Add(s.opts.dynAgain)))
+			}
 		case <-t.C:
+			return true
 		}
 	}
 }
