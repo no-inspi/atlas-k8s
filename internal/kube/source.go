@@ -17,8 +17,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/dynamic/dynamicinformer"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	appslisters "k8s.io/client-go/listers/apps/v1"
@@ -43,7 +43,7 @@ type Options struct {
 	// ReconcileInterval regroupe les événements des informers (100 ms par défaut).
 	ReconcileInterval time.Duration
 	Log               *slog.Logger
-	// Dynamic lit les IngressRoute Traefik (CRD) ; nil : pas d'IngressRoute.
+	// Dynamic lit les types apportés par une CRD (Traefik, Gateway API) ; nil : aucun.
 	Dynamic dynamic.Interface
 }
 
@@ -88,8 +88,11 @@ type Source struct {
 	ingresses  networkinglisters.IngressLister
 	ingressIdx cache.Indexer
 	classes    networkinglisters.IngressClassLister
-	traefik    []traefikInformer
-	dynFactory dynamicinformer.DynamicSharedInformerFactory
+
+	// Jalon 9 : types apportés par une CRD, démarrés et arrêtés à chaud (dynkinds.go).
+	dynStart sync.Mutex // sérialise startDyn et stopDyn
+	dynMu    sync.RWMutex
+	dyn      map[schema.GroupVersionResource]*dynInformer
 
 	synced []cache.InformerSynced
 
@@ -108,7 +111,8 @@ func NewSource(client kubernetes.Interface, sink Sink, opts Options) *Source {
 		opts.Log = slog.Default()
 	}
 	f := informers.NewSharedInformerFactoryWithOptions(client, 0, informers.WithTransform(transform))
-	s := &Source{opts: opts, sink: sink, factory: f, client: client, dirty: map[ref]struct{}{}, last: map[ref]any{}}
+	s := &Source{opts: opts, sink: sink, factory: f, client: client, dirty: map[ref]struct{}{}, last: map[ref]any{},
+		dyn: map[schema.GroupVersionResource]*dynInformer{}}
 
 	pods := f.Core().V1().Pods()
 	_ = pods.Informer().AddIndexers(cache.Indexers{
@@ -157,17 +161,17 @@ func NewSource(client kubernetes.Interface, sink Sink, opts Options) *Source {
 	return s
 }
 
-// Run démarre les informers, attend leur synchronisation, publie l'état
-// complet, signale que le hub est prêt puis suit les changements.
+// Run démarre les informers, attend leur synchronisation, démarre les types
+// dynamiques, publie l'état complet, signale que le hub est prêt puis suit les
+// changements.
 func (s *Source) Run(ctx context.Context) error {
 	s.startNetwork(ctx)
 	s.factory.Start(ctx.Done())
-	if s.dynFactory != nil {
-		s.dynFactory.Start(ctx.Done())
-	}
 	if !cache.WaitForCacheSync(ctx.Done(), s.synced...) {
 		return errors.New("synchronisation des caches interrompue")
 	}
+	// Après les caches typés : l'état des backends des routes dynamiques est juste dès leur premier calcul.
+	s.startDynamic(ctx)
 	if err := s.markAll(); err != nil {
 		return err
 	}
@@ -181,9 +185,7 @@ func (s *Source) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			s.factory.Shutdown()
-			if s.dynFactory != nil {
-				s.dynFactory.Shutdown()
-			}
+			s.stopAllDyn()
 			return nil
 		case <-t.C:
 			s.reconcile()
@@ -195,6 +197,11 @@ func (s *Source) Run(ctx context.Context) error {
 
 func (s *Source) watch(inf cache.SharedIndexInformer, on func(any)) {
 	s.synced = append(s.synced, inf.HasSynced)
+	s.handle(inf, on)
+}
+
+// handle branche on sur les événements d'un informer, sans que /readyz l'attende.
+func (s *Source) handle(inf cache.SharedIndexInformer, on func(any)) {
 	_, _ = inf.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: on,
 		UpdateFunc: func(old, cur any) {

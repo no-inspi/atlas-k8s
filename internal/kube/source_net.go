@@ -16,11 +16,12 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/tools/cache"
 
+	"github.com/no-inspi/atlas-k8s/internal/model"
 	"github.com/no-inspi/atlas-k8s/internal/stream"
 )
 
 // Réseau et stockage (jalon 8) : Services et EndpointSlices, Ingress et
-// IngressClass, PVC, IngressRoute Traefik (traefik.go).
+// IngressClass, PVC ; types apportés par une CRD (dynkinds.go).
 
 const (
 	indexByClaim   = "claim"   // pods par PVC monté : « ns/claim »
@@ -101,7 +102,6 @@ func (s *Source) startNetwork(ctx context.Context) {
 		s.ingresses, s.ingressIdx = inf.Lister(), inf.Informer().GetIndexer()
 		s.watch(inf.Informer(), s.onIngress)
 	}
-	s.startTraefik(ctx)
 }
 
 /* ---------- événements ---------- */
@@ -124,10 +124,13 @@ func (s *Source) markRoutesTo(svc string) {
 			s.onIngress(o)
 		}
 	}
-	for _, t := range s.traefik {
-		objs, _ := t.index.ByIndex(indexByBackend, svc)
+	for _, d := range s.dynRunning() {
+		objs, err := d.inf.GetIndexer().ByIndex(indexByBackend, svc)
+		if err != nil {
+			continue // type sans index par Service
+		}
 		for _, o := range objs {
-			s.onIngressRoute(o)
+			d.kind.on(s, o)
 		}
 	}
 }
@@ -191,12 +194,7 @@ func (s *Source) markNetwork() {
 			s.onIngress(o)
 		}
 	}
-	for _, t := range s.traefik {
-		all, _ := t.lister.List(sel)
-		for _, o := range all {
-			s.onIngressRoute(o)
-		}
-	}
+	s.markDynamic()
 }
 
 /* ---------- construction ---------- */
@@ -238,7 +236,7 @@ func (s *Source) buildRoute(id string) (any, string, error) {
 	source, rest, _ := strings.Cut(id, "/")
 	ns, name, _ := cache.SplitMetaNamespaceKey(rest)
 	switch source {
-	case "Ingress":
+	case model.SourceIngress:
 		if s.ingresses == nil {
 			return nil, "", nil
 		}
@@ -251,17 +249,20 @@ func (s *Source) buildRoute(id string) (any, string, error) {
 			classes, _ = s.classes.List(labels.Everything())
 		}
 		return ConvertIngress(i, IngressGate(i, classes), s.serviceExists()), id, nil
-	case "IngressRoute":
+	case model.SourceIngressRoute:
 		// traefik.io avant traefik.containo.us (ordre de traefikGroups).
-		for _, t := range s.traefik {
-			o, err := t.lister.ByNamespace(ns).Get(name)
-			if apierrors.IsNotFound(err) {
+		for _, g := range traefikGroups {
+			idx := s.dynIndexer(gvrIngressRoute(g))
+			if idx == nil {
 				continue
 			}
+			o, ok, err := idx.GetByKey(ns + "/" + name)
 			if err != nil {
 				return nil, "", err
 			}
-			return ConvertIngressRoute(o.(*unstructured.Unstructured), s.serviceExists()), id, nil
+			if ok {
+				return ConvertIngressRoute(o.(*unstructured.Unstructured), s.serviceExists()), id, nil
+			}
 		}
 		return nil, "", nil
 	}
