@@ -56,7 +56,7 @@ describe('Gateway API et PV', () => {
 
   it('trouve un Gateway par son nom court, un PV, et nomme les portes d’une route', () => {
     expect(search('public', gw)[0]).toEqual(expect.objectContaining({
-      type: 'gateway', key: 'infra/public', detail: 'Gateway · gke-l7-global-external-managed · 1 routes',
+      type: 'gateway', key: 'infra/public', detail: 'Gateway · gke-l7-global-external-managed · 1 route',
     }))
     expect(search('pv-old', gw)[0]).toEqual(expect.objectContaining({ type: 'pv', key: 'pv-old-uploads', detail: 'PV · Released · standard-rwo' }))
     expect(search('storefront', gw)[0].detail).toBe('HTTPRoute · production · porte infra/public')

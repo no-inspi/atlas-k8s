@@ -60,8 +60,8 @@ export function search(query: string, st: {
     const ss = [score(g.name, 0), g.gateway ? score(g.gateway.name, 0) : -1].filter((x) => x >= 0)
     if (!ss.length) continue
     scored.push([Math.min(...ss), g.gateway
-      ? { type: 'gateway', key: g.name, label: g.name, detail: `Gateway · ${g.gateway.class} · ${g.routes.length} routes` }
-      : { type: 'gate', key: g.name, label: g.name, detail: `Porte · ${g.routes.length} routes` }])
+      ? { type: 'gateway', key: g.name, label: g.name, detail: `Gateway · ${g.gateway.class} · ${g.routes.length} ${g.routes.length === 1 ? 'route' : 'routes'}` }
+      : { type: 'gate', key: g.name, label: g.name, detail: `Porte · ${g.routes.length} ${g.routes.length === 1 ? 'route' : 'routes'}` }])
   }
   for (const sv of st.services?.values() ?? []) {
     const s = score(sv.name, 1)
