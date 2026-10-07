@@ -5,6 +5,7 @@ import { expect, test, type Page } from '@playwright/test'
 // miroir, IngressRouteTCP, PV orphelin, liens profonds et vue Liste.
 
 const panel = (page: Page) => page.locator('aside.panel')
+// Monaco rend les espaces en insécables (U+00A0) : on les ramène à des espaces.
 const editorText = (page: Page) =>
   page.getByTestId('yaml-editor').locator('.view-lines').innerText().then((t) => t.replace(/ /g, ' '))
 
@@ -51,9 +52,11 @@ test('Gateway non programmé : badge rouge et raison', async ({ page }) => {
 })
 
 test('lien /gates/infra%2Fpublic : ouvre le Gateway et réécrit l’URL', async ({ page }) => {
+  const problems = collectProblems(page)
   await page.goto('/gates/infra%2Fpublic')
   await expect(panel(page).getByText('Gateway · infra')).toBeVisible()
   await expect(page).toHaveURL(/\/gateways\/infra\/public$/)
+  expect(problems).toEqual([])
 })
 
 test('route refusée par son Gateway', async ({ page }) => {
@@ -78,12 +81,14 @@ test('IngressRoute via un TraefikService pondéré avec miroir', async ({ page }
 })
 
 test('IngressRouteTCP : porte traefik et match HostSNI', async ({ page }) => {
+  const problems = collectProblems(page)
   await page.goto('/routes/ingressroutetcp/production/postgres')
   const p = panel(page)
   await expect(p.getByText('IngressRouteTCP · production')).toBeVisible()
   await expect(p.locator('.badge')).toHaveText('Porte traefik')
   await expect(p.getByTestId('rules')).toContainText('HostSNI')
   await expect(p.getByTestId('rules')).toContainText('postgres-payments')
+  expect(problems).toEqual([])
 })
 
 test('PV libéré : inspectable, YAML compris', async ({ page }) => {
@@ -121,7 +126,7 @@ test('recherche d’un Gateway par son nom court', async ({ page }) => {
   await page.keyboard.press('/')
   await page.getByRole('combobox', { name: /Rechercher/ }).fill('internal')
   // Entrée n'agit que sur un résultat affiché : attendre la liste évite la course.
-  await expect(page.getByRole('option').first()).toContainText('infra/internal')
+  await expect(page.getByRole('option').first()).toContainText('internal')
   await page.keyboard.press('Enter')
   await expect(page).toHaveURL(/\/gateways\/infra\/internal$/)
 })

@@ -38,7 +38,8 @@ test('alice (view sur tout le cluster) voit kube-system et les nodes', async ({ 
   await expect.poll(() => stream()).toContain('"namespace":"kube-system"')
   // Jalon 9 : PV sans PVC (hack/scenarios/30-storage.yaml) et HTTPRoute
   // (hack/scenarios-gateway), lisibles avec « view » sur tout le cluster.
-  await expect.poll(() => stream()).toContain('"persistentVolumes":[')
+  // PV Released créé par hack/scenarios/30-storage.yaml.
+  await expect.poll(() => stream()).toContain('"name":"atlas-it-released"')
   await expect.poll(() => stream()).toContain('"source":"HTTPRoute"')
   await page.waitForTimeout(2000) // premier rendu WebGL (logiciel en headless)
   await page.screenshot({ path: 'e2e/__screenshots__/auth-alice.png' })
@@ -52,9 +53,11 @@ test('bob (edit dans production et staging) ne reçoit rien de kube-system', asy
   await expect(page.getByRole('button', { name: 'kube-system' })).toHaveCount(0)
   // Pas le droit de lister les nodes : bâtiments anonymes, compteur indisponible.
   await expect(page.locator('.stat').first()).toContainText('—')
-  await page.waitForTimeout(2000)
+  // Témoin positif avant les absences : le snapshot de bob est bien arrivé.
+  await expect.poll(() => stream()).toContain('"namespace":"staging"')
   const frames = stream()
   expect(frames).toContain('"namespace":"production"')
+  // Rien de kube-system : ni pod, ni Service, ni Gateway, ni route.
   expect(frames).not.toContain('kube-system')
   expect(frames).not.toContain('"kind":"node"')
   // Les PV sont cluster-scoped : sans droit de les lister, bob n'en reçoit aucun.
