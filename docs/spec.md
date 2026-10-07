@@ -138,7 +138,7 @@ Le cluster est une ville vue en isométrique : les node pools sont des quartiers
 | Pod de Job | Icône pyramidale, disparaît une fois `Completed` | Tâche ponctuelle |
 | Pods en attente | File d'attente devant la ville | Pods `Pending` sans `nodeName` |
 | Contrôleur d'entrée (IngressClass, ou `traefik` pour les IngressRoute) | **Porte** en arche à l'entrée ouest de la première avenue | Nombre de routes ; orange si une de ses routes est cassée |
-| Gateway (Gateway API) | **Porte** nommée `namespace/nom`, avec les portes des contrôleurs d'entrée | Rouge si non programmé, orange si un listener n'est pas prêt ou une route est refusée ou cassée, grise sans statut ou si le Gateway est invisible |
+| Gateway (Gateway API) | **Porte** nommée `namespace/nom`, avec les portes des contrôleurs d'entrée | Rouge si non programmé, orange si un listener n'est pas prêt ou une route est refusée ou cassée, grise sans statut ou si le Gateway est invisible, sauf route cassée ou refusée (orange) |
 | Ingress, IngressRoute | **Route** : ligne principale de la porte vers chaque Service visé | Hôtes, chemins ou `match`, état du backend ; route cassée en rouge pointillé avec un panneau « ? » |
 | HTTPRoute, GRPCRoute, IngressRouteTCP, IngressRouteUDP | **Route** : une ligne principale par porte (une route Gateway API peut en avoir plusieurs) | Part du trafic (survol, inspecteur) ; miroir en pointillé discret ; route refusée en rouge pointillé avec un panneau « ⊘ » |
 | Service | **Relais** : disque posé sur l'avenue, bordé de la couleur du namespace, voyant dessus | Voyant vert (`ok`), orange (`degraded`), rouge clignotant (`down`) ; panneau pour `ExternalName` |
