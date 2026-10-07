@@ -197,3 +197,70 @@ func TestRunStopsWithoutReadyWhenCancelledDuringDynamicStart(t *testing.T) {
 		t.Fatalf("rien ne doit être publié après l'annulation : prêt=%v objets=%v", sk.ready, sk.objs)
 	}
 }
+
+// gateFirstList : le premier list des IngressRoute traefik.io attend release,
+// puis échoue avec err ; les suivants passent. Le client factice reste
+// verrouillé pendant l'attente : ne pas l'appeler avant release.
+func gateFirstList(dyn *dynamicfake.FakeDynamicClient, err error) (entered <-chan struct{}, release chan<- struct{}) {
+	in, out := make(chan struct{}), make(chan struct{})
+	var first atomic.Bool
+	dyn.PrependReactor("list", "ingressroutes", func(a k8stesting.Action) (bool, runtime.Object, error) {
+		if a.GetResource().Group != "traefik.io" || !first.CompareAndSwap(false, true) {
+			return false, nil, nil
+		}
+		close(in)
+		<-out
+		return true, nil, err
+	})
+	return in, out
+}
+
+// Une CRD toute neuve : l'ADD lance un essai dont la sonde reçoit un 404 (CRD
+// pas encore servie), et l'UPDATE (Established) arrive pendant cet essai. Il
+// doit valoir un nouvel essai, sans attendre dynRetry ni une autre modification.
+func TestCRDEventDuringStartRetriesAfterNotFound(t *testing.T) {
+	k := kindsOf(irGVR)[0]
+	dyn := fakeDynamic(adminRoute("traefik.io", "api"))
+	entered, release := gateFirstList(dyn, apierrors.NewNotFound(irGVR.GroupResource(), ""))
+	_, sk := startSourceWith(t, fake.NewClientset(netFixtures()...), Options{Dynamic: dyn, dynRetry: time.Hour})
+	crd := crdObject(k, true)
+	if _, err := dyn.Resource(gvrCRD).Create(context.Background(), crd, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-entered: // ADD : l'essai est en cours, sa sonde attend
+	case <-time.After(3 * time.Second):
+		t.Fatal("aucun essai après l'installation de la CRD")
+	}
+	lastSource.syncCRD(context.Background(), crd) // UPDATE (Established) pendant l'essai
+	close(release)                                // la sonde finit en 404
+	eventually(t, "IngressRoute publiée après le 404 passager", func() bool {
+		_, ok := sk.get(stream.KindRoute, adminID)
+		return ok
+	})
+}
+
+// Un événement de CRD reçu pendant l'attente d'un nouvel essai l'avance.
+func TestCRDEventCutsRetryWait(t *testing.T) {
+	client := fake.NewClientset(netFixtures()...)
+	k := kindsOf(irGVR)[0]
+	dyn := servedDyn(client, []dynKind{k}, adminRoute("traefik.io", "api"))
+	var down atomic.Bool
+	down.Store(true)
+	failingLists(dyn, "traefik.io", &down)
+	_, sk := startSourceWith(t, client, Options{Dynamic: dyn,
+		dynSync: 500 * time.Millisecond, dynRetry: time.Hour, dynWait: 100 * time.Millisecond})
+	for _, first := range lastSource.wantedFirsts() {
+		select {
+		case <-first: // premier essai en échec : la source attend dynRetry
+		case <-time.After(3 * time.Second):
+			t.Fatal("premier essai sans fin")
+		}
+	}
+	down.Store(false)
+	lastSource.syncCRD(context.Background(), crdObject(k, true))
+	eventually(t, "IngressRoute publiée sans attendre dynRetry", func() bool {
+		_, ok := sk.get(stream.KindRoute, adminID)
+		return ok
+	})
+}

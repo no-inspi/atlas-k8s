@@ -107,7 +107,7 @@ func (s *Source) startDyn(ctx context.Context, k dynKind) bool {
 
 // tryStartDyn : comme startDyn ; retry signale un échec passager (API server
 // lent ou en erreur), qui vaut un nouvel essai. Refus (403), type absent (404)
-// ou ctx annulé : pas de nouvel essai.
+// ou ctx annulé : pas de nouvel essai, sauf événement de CRD (wantDyn).
 //
 // Pas de verrou pendant les attentes : deux essais concurrents du même type ne
 // coûtent qu'un list ; l'inscription, sous dynMu, n'en garde qu'un, et jamais
@@ -203,24 +203,35 @@ type dynWant struct {
 	ctx    context.Context // annulé quand le type n'est plus servi
 	cancel context.CancelFunc
 	busy   bool // un essai (ou l'attente d'un nouvel essai) est en cours ; sous wantMu
-	once   sync.Once
-	first  chan struct{} // fermé à la fin du premier essai
+	// again : événement de CRD reçu pendant un essai ou son attente (capacité 1,
+	// envoi sous wantMu). Il vaut un nouvel essai immédiat : sans lui, un 404
+	// de la sonde d'une CRD pas encore servie perdrait l'UPDATE Established.
+	again chan struct{}
+	once  sync.Once
+	first chan struct{} // fermé à la fin du premier essai
 }
 
 // wantDyn déclare un type servi et lance, s'il ne tourne pas et qu'aucun essai
 // n'est en cours, un essai de démarrage en arrière-plan, renouvelé toutes les
-// dynRetry tant que l'échec est passager. Ne bloque pas. Le canal rendu est
-// fermé à la fin du premier essai.
+// dynRetry tant que l'échec est passager. Si un essai est en cours, il en
+// demande un nouveau dès sa fin, quel qu'en soit le résultat. Ne bloque pas.
+// Le canal rendu est fermé à la fin du premier essai.
 func (s *Source) wantDyn(ctx context.Context, k dynKind) <-chan struct{} {
 	s.wantMu.Lock()
 	defer s.wantMu.Unlock()
 	w := s.wants[k.gvr]
 	if w == nil {
 		wctx, cancel := context.WithCancel(ctx)
-		w = &dynWant{ctx: wctx, cancel: cancel, first: make(chan struct{})}
+		w = &dynWant{ctx: wctx, cancel: cancel, again: make(chan struct{}, 1), first: make(chan struct{})}
 		s.wants[k.gvr] = w
 	}
-	if !w.busy && s.dynIndexer(k.gvr) == nil {
+	switch {
+	case w.busy:
+		select {
+		case w.again <- struct{}{}:
+		default: // déjà demandé
+		}
+	case s.dynIndexer(k.gvr) == nil:
 		w.busy = true
 		go s.keepStarting(w, k)
 	}
@@ -228,24 +239,39 @@ func (s *Source) wantDyn(ctx context.Context, k dynKind) <-chan struct{} {
 }
 
 func (s *Source) keepStarting(w *dynWant, k dynKind) {
-	defer func() {
-		w.once.Do(func() { close(w.first) })
-		s.wantMu.Lock()
-		w.busy = false
-		s.wantMu.Unlock()
-	}()
+	defer w.once.Do(func() { close(w.first) })
 	for {
 		ok, retry := s.tryStartDyn(w.ctx, k)
 		w.once.Do(func() { close(w.first) })
-		if ok || !retry {
+		// La décision de s'arrêter et busy=false sous le même verrou que
+		// l'envoi de wantDyn : aucune demande ne se perd entre les deux.
+		s.wantMu.Lock()
+		again := false
+		select {
+		case <-w.again:
+			again = true
+		default:
+		}
+		if w.ctx.Err() != nil || (!again && (ok || !retry)) {
+			w.busy = false
+			s.wantMu.Unlock()
 			return
+		}
+		s.wantMu.Unlock()
+		if again {
+			continue
 		}
 		s.opts.Log.Info("nouvel essai du type dynamique", "type", k.crd(), "dans", s.opts.dynRetry)
 		t := time.NewTimer(s.opts.dynRetry)
 		select {
 		case <-w.ctx.Done():
 			t.Stop()
+			s.wantMu.Lock()
+			w.busy = false
+			s.wantMu.Unlock()
 			return
+		case <-w.again: // un événement de CRD avance l'essai
+			t.Stop()
 		case <-t.C:
 		}
 	}
