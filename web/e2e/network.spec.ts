@@ -35,7 +35,8 @@ test('un Service en panne, puis le chemin d’un Service sain', async ({ page })
   await page.goto('/services/production/api-gateway')
   await expect(panel(page).getByText(/\d+\/\d+ ready/).first()).toBeVisible()
   await expect(panel(page).getByTestId('endpoints').getByRole('button').first()).toBeVisible()
-  await expect(page.getByTestId('path-summary')).toContainText('1 porte')
+  // api-gateway est atteint par deux portes (nginx et traefik) dans la démo.
+  await expect(page.getByTestId('path-summary')).toContainText('2 portes')
   await page.waitForTimeout(1500)
   await page.screenshot({ path: 'e2e/__screenshots__/network-service.png' })
 
@@ -69,6 +70,7 @@ test('recherche d’une route par son hôte', async ({ page }) => {
   await expect(page.getByTestId('pods-running')).toHaveText(/\d+\/\d+/)
   await page.keyboard.press('/')
   await page.getByRole('combobox', { name: /Rechercher/ }).fill('grafana.example')
+  await expect(page.getByRole('option').first()).toContainText('grafana')
   await page.keyboard.press('Enter')
   await expect(panel(page).getByText('IngressRoute · monitoring')).toBeVisible()
   await expect(page).toHaveURL(/\/routes\/ingressroute\/monitoring\/grafana$/)

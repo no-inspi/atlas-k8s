@@ -36,6 +36,10 @@ test('alice (view sur tout le cluster) voit kube-system et les nodes', async ({ 
   await expect(page.getByRole('button', { name: 'kube-system' })).toBeVisible()
   await expect(page.locator('.stat').first()).toContainText(/\d+\/\d+/)
   await expect.poll(() => stream()).toContain('"namespace":"kube-system"')
+  // Jalon 9 : PV sans PVC (hack/scenarios/30-storage.yaml) et HTTPRoute
+  // (hack/scenarios-gateway), lisibles avec « view » sur tout le cluster.
+  await expect.poll(() => stream()).toContain('"persistentVolumes":[')
+  await expect.poll(() => stream()).toContain('"source":"HTTPRoute"')
   await page.waitForTimeout(2000) // premier rendu WebGL (logiciel en headless)
   await page.screenshot({ path: 'e2e/__screenshots__/auth-alice.png' })
 })
@@ -53,6 +57,9 @@ test('bob (edit dans production et staging) ne reçoit rien de kube-system', asy
   expect(frames).toContain('"namespace":"production"')
   expect(frames).not.toContain('kube-system')
   expect(frames).not.toContain('"kind":"node"')
+  // Les PV sont cluster-scoped : sans droit de les lister, bob n'en reçoit aucun.
+  expect(frames).not.toContain('"persistentVolumes"')
+  expect(frames).not.toContain('"kind":"persistentVolume"')
   await page.screenshot({ path: 'e2e/__screenshots__/auth-bob.png' })
 
   // Revue d'accès au nom de bob : delete dans production oui, dans kube-system non.
