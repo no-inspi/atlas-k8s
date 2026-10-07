@@ -163,6 +163,9 @@ func TestConvertIngressRoute(t *testing.T) {
 	if w := r.Rules[2].Backend; w.Kind != "TraefikService" || w.State != model.BackendMissing {
 		t.Errorf("weighted = %+v", w)
 	}
+	if w(r.Rules[0].Backend) != 334 || w(r.Rules[1].Backend) != 333 || w(r.Rules[2].Backend) != 333 {
+		t.Errorf("poids (plus fort reste) = %+v", r.Rules)
+	}
 	if got := routeBackends(r); len(got) != 2 {
 		t.Errorf("un TraefikService n'est pas un Service : %v", got)
 	}

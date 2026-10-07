@@ -1,6 +1,7 @@
 package kube
 
 import (
+	"reflect"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -232,5 +233,24 @@ func TestConvertHTTPRouteSameGatewayTwice(t *testing.T) {
 	r := ConvertGatewayRoute(unstr(gwAPI, "HTTPRoute", "prod", "shop", spec, map[string]any{"parents": []any{ref, ref}}), model.SourceHTTPRoute, nil)
 	if r.Rules[0].Backend.State != model.BackendRefused {
 		t.Errorf("toutes refusées = %+v", r)
+	}
+}
+
+func TestPermilles(t *testing.T) {
+	cases := []struct {
+		in   []float64
+		want []int
+	}{
+		{[]float64{9, 1}, []int{900, 100}},
+		{[]float64{1, 3}, []int{250, 750}},
+		{[]float64{1, 1, 1}, []int{334, 333, 333}},
+		{[]float64{1, 0}, []int{1000, 0}},
+		{[]float64{0, 0}, []int{0, 0}},
+		{[]float64{1, 1, 1, 1, 1, 1, 1}, []int{143, 143, 143, 143, 143, 143, 142}},
+	}
+	for _, c := range cases {
+		if got := permilles(c.in); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("permilles(%v) = %v, attendu %v", c.in, got, c.want)
+		}
 	}
 }

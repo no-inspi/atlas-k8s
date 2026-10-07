@@ -3,6 +3,7 @@ package kube
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -50,12 +51,41 @@ func toInt(v any) int64 {
 	return 0
 }
 
-// permille : part w/total en pour mille, arrondie.
-func permille(w, total float64) int {
-	if total <= 0 {
-		return 0
+// permilles répartit 1000 ‰ entre des parts (≥ 0) proportionnellement, par la
+// méthode du plus fort reste : la somme fait exactement 1000 (0 si toutes les
+// parts sont nulles), une part nulle reste à 0. À reste égal, l'ordre l'emporte.
+func permilles(shares []float64) []int {
+	out := make([]int, len(shares))
+	total := 0.0
+	for _, s := range shares {
+		total += max(s, 0)
 	}
-	return int(math.Round(1000 * w / total))
+	if total <= 0 {
+		return out
+	}
+	rest := make([]float64, len(shares))
+	left := 1000
+	for i, s := range shares {
+		x := 1000 * max(s, 0) / total
+		out[i] = int(math.Floor(x))
+		rest[i] = x - float64(out[i])
+		left -= out[i]
+	}
+	idx := make([]int, len(shares))
+	for i := range idx {
+		idx[i] = i
+	}
+	sort.SliceStable(idx, func(a, b int) bool { return rest[idx[a]] > rest[idx[b]] })
+	for _, i := range idx {
+		if left <= 0 {
+			break
+		}
+		if shares[i] > 0 {
+			out[i]++
+			left--
+		}
+	}
+	return out
 }
 
 // ConvertGateway réduit un Gateway. Raison et message : ceux de Programmed,
@@ -260,7 +290,6 @@ func ConvertGatewayRoute(u *unstructured.Unstructured, source string, exists Ser
 		path, match := firstMatch(rm, source)
 		refs, _ := rm["backendRefs"].([]any)
 		ws := make([]float64, len(refs))
-		total := 0.0
 		for i, x := range refs {
 			ws[i] = 1
 			if m, ok := x.(map[string]any); ok {
@@ -268,8 +297,8 @@ func ConvertGatewayRoute(u *unstructured.Unstructured, source string, exists Ser
 					ws[i] = float64(toInt(w))
 				}
 			}
-			total += ws[i]
 		}
+		pm := permilles(ws)
 		for i, x := range refs {
 			m, ok := x.(map[string]any)
 			if !ok {
@@ -277,7 +306,7 @@ func ConvertGatewayRoute(u *unstructured.Unstructured, source string, exists Ser
 			}
 			b := gatewayBackend(r.Namespace, m, exists)
 			if len(refs) > 1 {
-				b.Weight = model.Weight(permille(ws[i], total))
+				b.Weight = model.Weight(pm[i])
 			}
 			r.Rules = append(r.Rules, model.Rule{Host: host, Path: path, Match: match, Backend: b})
 		}

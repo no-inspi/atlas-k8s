@@ -2,7 +2,6 @@ package kube
 
 import (
 	"fmt"
-	"math"
 	"regexp"
 	"sort"
 	"strconv"
@@ -206,10 +205,10 @@ func traefikRef(ns string, m map[string]any) (refNS, name, kind, port string) {
 	return refNS, name, kind, port
 }
 
-// weightOf : poids Traefik d'une référence, 1 par défaut.
+// weightOf : poids Traefik d'une référence, 1 par défaut, négatif ramené à 0.
 func weightOf(m map[string]any) float64 {
 	if w, ok := m["weight"]; ok && w != nil {
-		return float64(toInt(w))
+		return float64(max(toInt(w), 0))
 	}
 	return 1
 }
@@ -220,85 +219,156 @@ type leaf struct {
 	share float64
 }
 
-// resolveTraefik résout le TraefikService ns/name jusqu'à ses Services. weighted :
-// chaque enfant reçoit sa part normalisée ; mirroring : le service principal
-// garde toute la part, chaque miroir devient une feuille mirror avec son
-// percent. ok=false : introuvable, cycle, plus de traefikMaxDepth niveaux, ou
-// ni weighted ni mirroring.
-func resolveTraefik(lookup TraefikLookup, ns, name string) ([]leaf, bool) {
-	var out []leaf
-	path := map[string]bool{}
-	var walk func(ns, name string, share float64, depth int, mirror bool, percent int) bool
-	walk = func(ns, name string, share float64, depth int, mirror bool, percent int) bool {
-		key := ns + "/" + name
-		if lookup == nil || depth > traefikMaxDepth || path[key] {
-			return false
+// leafKey : identité d'une feuille ; deux feuilles de même clé sont fusionnées.
+type leafKey struct {
+	ns, service, port, kind string
+	mirror                  bool
+	percent                 int
+}
+
+// leafSet : feuilles fusionnées (parts sommées), dans l'ordre de première apparition.
+type leafSet struct {
+	list []leaf
+	at   map[leafKey]int
+}
+
+func (ls *leafSet) add(l leaf) {
+	k := leafKey{l.b.Namespace, l.b.Service, l.b.Port, l.b.Kind, l.b.Mirror, l.b.Percent}
+	if ls.at == nil {
+		ls.at = map[leafKey]int{}
+	}
+	if i, ok := ls.at[k]; ok {
+		ls.list[i].share += l.share
+		return
+	}
+	ls.at[k] = len(ls.list)
+	ls.list = append(ls.list, l)
+}
+
+// resolvedTS : feuilles d'un TraefikService (parts relatives à lui) et sa
+// hauteur (niveaux de TraefikService, lui compris).
+type resolvedTS struct {
+	leaves []leaf
+	height int
+}
+
+// traefikResolver résout des TraefikService en mémoïsant chaque nœud résolu :
+// un nœud visé plusieurs fois (éventail, diamant) n'est parcouru qu'une fois,
+// d'où un coût en O(nœuds + arêtes). Les échecs ne sont pas mémoïsés (une
+// limite de profondeur dépend du chemin) mais interrompent toute la résolution.
+type traefikResolver struct {
+	lookup TraefikLookup
+	memo   map[string]resolvedTS
+	path   map[string]bool // chemin courant, pour détecter les cycles
+}
+
+// resolve : TraefikService ns/name, atteint au niveau depth (1 : racine).
+func (t *traefikResolver) resolve(ns, name string, depth int) (resolvedTS, bool) {
+	key := ns + "/" + name
+	if depth > traefikMaxDepth || t.path[key] {
+		return resolvedTS{}, false
+	}
+	if r, ok := t.memo[key]; ok {
+		return r, depth+r.height-1 <= traefikMaxDepth
+	}
+	u, ok := t.lookup(ns, name)
+	if !ok {
+		return resolvedTS{}, false
+	}
+	t.path[key] = true
+	defer delete(t.path, key)
+	var acc leafSet
+	height := 1
+	// child ajoute une référence avec sa part. Miroir : ses feuilles deviennent
+	// des miroirs de pourcentage percent. Le percent d'un miroir est local à
+	// son TraefikService de mirroring : ni multiplié par la part de ce
+	// TraefikService, ni par le percent d'un mirroring englobant (une feuille
+	// déjà miroir garde le sien).
+	child := func(m map[string]any, share float64, mirror bool, percent int) bool {
+		rns, rname, kind, port := traefikRef(ns, m)
+		if kind != "TraefikService" {
+			acc.add(leaf{b: model.Backend{Namespace: rns, Service: rname, Port: port, Kind: kind, Mirror: mirror, Percent: percent}, share: share})
+			return true
 		}
-		u, ok := lookup(ns, name)
+		sub, ok := t.resolve(rns, rname, depth+1)
 		if !ok {
 			return false
 		}
-		path[key] = true
-		defer delete(path, key)
-		visit := func(m map[string]any, share float64, mirror bool, percent int) bool {
-			rns, rname, kind, port := traefikRef(ns, m)
-			if kind == "TraefikService" {
-				return walk(rns, rname, share, depth+1, mirror, percent)
+		height = max(height, sub.height+1)
+		for _, l := range sub.leaves {
+			l.share *= share
+			if mirror && !l.b.Mirror {
+				l.b.Mirror, l.b.Percent = true, percent
 			}
-			out = append(out, leaf{b: model.Backend{Namespace: rns, Service: rname, Port: port, Kind: kind, Mirror: mirror, Percent: percent}, share: share})
-			return true
+			acc.add(l)
 		}
-		if ws, found, _ := unstructured.NestedSlice(u.Object, "spec", "weighted", "services"); found {
-			total := 0.0
-			for _, x := range ws {
-				if m, ok := x.(map[string]any); ok {
-					total += weightOf(m)
-				}
-			}
-			for _, x := range ws {
-				m, ok := x.(map[string]any)
-				if !ok {
-					continue
-				}
-				s := 0.0
-				if total > 0 {
-					s = share * weightOf(m) / total
-				}
-				if !visit(m, s, mirror, percent) {
-					return false
-				}
-			}
-			return true
-		}
-		if main, found, _ := unstructured.NestedMap(u.Object, "spec", "mirroring"); found {
-			if !visit(main, share, mirror, percent) {
-				return false
-			}
-			mirrors, _ := main["mirrors"].([]any)
-			for _, x := range mirrors {
-				m, ok := x.(map[string]any)
-				if !ok {
-					continue
-				}
-				if !visit(m, 0, true, int(toInt(m["percent"]))) {
-					return false
-				}
-			}
-			return true
-		}
-		return false
+		return true
 	}
-	if !walk(ns, name, 1, 1, false, 0) {
+	if ws, found, _ := unstructured.NestedSlice(u.Object, "spec", "weighted", "services"); found {
+		total := 0.0
+		for _, x := range ws {
+			if m, ok := x.(map[string]any); ok {
+				total += weightOf(m)
+			}
+		}
+		for _, x := range ws {
+			m, ok := x.(map[string]any)
+			if !ok {
+				continue
+			}
+			s := 0.0
+			if total > 0 {
+				s = weightOf(m) / total
+			}
+			if !child(m, s, false, 0) {
+				return resolvedTS{}, false
+			}
+		}
+	} else if main, found, _ := unstructured.NestedMap(u.Object, "spec", "mirroring"); found {
+		if !child(main, 1, false, 0) {
+			return resolvedTS{}, false
+		}
+		mirrors, _ := main["mirrors"].([]any)
+		for _, x := range mirrors {
+			m, ok := x.(map[string]any)
+			if !ok {
+				continue
+			}
+			if !child(m, 0, true, int(toInt(m["percent"]))) {
+				return resolvedTS{}, false
+			}
+		}
+	} else {
+		return resolvedTS{}, false
+	}
+	r := resolvedTS{leaves: acc.list, height: height}
+	t.memo[key] = r
+	return r, true
+}
+
+// resolveTraefik résout le TraefikService ns/name jusqu'à ses Services, feuilles
+// identiques fusionnées. weighted : chaque enfant reçoit sa part normalisée ;
+// mirroring : le service principal garde toute la part, chaque miroir devient
+// une feuille mirror avec son percent. ok=false : pas de résolveur, introuvable,
+// cycle, plus de traefikMaxDepth niveaux, ou ni weighted ni mirroring.
+func resolveTraefik(lookup TraefikLookup, ns, name string) ([]leaf, bool) {
+	if lookup == nil {
 		return nil, false
 	}
-	return out, true
+	t := &traefikResolver{lookup: lookup, memo: map[string]resolvedTS{}, path: map[string]bool{}}
+	r, ok := t.resolve(ns, name, 1)
+	if !ok {
+		return nil, false
+	}
+	return r.leaves, true
 }
 
 // ConvertTraefikRoute lit une IngressRoute, IngressRouteTCP ou IngressRouteUDP
 // (traefik.io ou traefik.containo.us). Chaque service de chaque routes[] donne
 // une règle ; un TraefikService est remplacé par ses Services (via : son nom),
 // ou par une seule règle missing s'il ne se résout pas. Les poids, en pour
-// mille de la route, ne sont publiés que s'il y a plusieurs backends non miroirs.
+// mille de la règle source (plus fort reste : somme de 1000), ne sont publiés
+// que s'il y a plusieurs backends non miroirs.
 func ConvertTraefikRoute(u *unstructured.Unstructured, source string, exists ServiceExists, lookup TraefikLookup) model.Route {
 	gate := u.GetAnnotations()[ingressClassAnnotation]
 	if gate == "" {
@@ -353,19 +423,24 @@ func ConvertTraefikRoute(u *unstructured.Unstructured, source string, exists Ser
 				leaves = append(leaves, l)
 			}
 		}
-		weighted := 0
+		var shares []float64
 		for _, l := range leaves {
 			if !l.b.Mirror {
-				weighted++
+				shares = append(shares, l.share)
 			}
 		}
+		pm := permilles(shares)
+		next := 0
 		for _, l := range leaves {
 			b := l.b
 			if b.State == "" {
 				b.State = backendState(exists, b.Namespace, b.Service)
 			}
-			if weighted > 1 && !b.Mirror {
-				b.Weight = model.Weight(int(math.Round(l.share * 1000)))
+			if !b.Mirror {
+				if len(shares) > 1 {
+					b.Weight = model.Weight(pm[next])
+				}
+				next++
 			}
 			r.Rules = append(r.Rules, model.Rule{Host: host, Path: path, Match: match, Backend: b})
 		}

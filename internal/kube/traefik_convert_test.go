@@ -150,3 +150,99 @@ func TestTraefikRefs(t *testing.T) {
 		t.Errorf("mirroring : services %v, TraefikService %v", svcs, ts)
 	}
 }
+
+// fan : TraefikService ts0 → … → ts(n-1), chacun visant 10 fois le suivant ;
+// le dernier vise les Services api et web.
+func fan(n int) []*unstructured.Unstructured {
+	var out []*unstructured.Unstructured
+	for i := range n {
+		var svcs []any
+		if i == n-1 {
+			svcs = []any{map[string]any{"name": "api"}, map[string]any{"name": "web"}}
+		} else {
+			for range 10 {
+				svcs = append(svcs, toTS(fmt.Sprintf("ts%d", i+1)))
+			}
+		}
+		out = append(out, traefikService("prod", fmt.Sprintf("ts%d", i), map[string]any{"weighted": map[string]any{"services": svcs}}))
+	}
+	return out
+}
+
+func TestResolveTraefikServiceFanOut(t *testing.T) {
+	r := ConvertTraefikRoute(checkoutRoute(toTS("ts0")), model.SourceIngressRoute, nil, lookupOf(fan(8)...))
+	if len(r.Rules) != 2 || r.Rules[0].Backend.Service != "api" || w(r.Rules[0].Backend) != 500 || w(r.Rules[1].Backend) != 500 {
+		t.Errorf("éventail : %+v", r.Rules)
+	}
+	r = ConvertTraefikRoute(checkoutRoute(toTS("ts0")), model.SourceIngressRoute, nil, lookupOf(fan(9)...))
+	if len(r.Rules) != 1 || r.Rules[0].Backend.State != model.BackendMissing {
+		t.Errorf("éventail trop profond : %+v", r.Rules)
+	}
+}
+
+func TestResolveTraefikServiceDiamond(t *testing.T) {
+	to := func(names ...string) map[string]any {
+		var s []any
+		for _, n := range names {
+			s = append(s, toTS(n))
+		}
+		return map[string]any{"weighted": map[string]any{"services": s}}
+	}
+	d := traefikService("prod", "D", map[string]any{"weighted": map[string]any{"services": []any{
+		map[string]any{"name": "x"}, map[string]any{"name": "y"}, map[string]any{"name": "z"}}}})
+	r := ConvertTraefikRoute(checkoutRoute(toTS("A")), model.SourceIngressRoute, nil, lookupOf(
+		traefikService("prod", "A", to("B", "C")), traefikService("prod", "B", to("D")), traefikService("prod", "C", to("D")), d))
+	if len(r.Rules) != 3 {
+		t.Fatalf("diamant : %+v", r.Rules)
+	}
+	for i, want := range []struct {
+		svc string
+		w   int
+	}{{"x", 334}, {"y", 333}, {"z", 333}} {
+		if b := r.Rules[i].Backend; b.Service != want.svc || w(b) != want.w || b.Via != "prod/A" {
+			t.Errorf("diamant %d : %+v", i, b)
+		}
+	}
+}
+
+func TestConvertTraefikRouteNegativeWeight(t *testing.T) {
+	r := ConvertTraefikRoute(checkoutRoute(map[string]any{"name": "a", "weight": int64(-5)}, map[string]any{"name": "b"}),
+		model.SourceIngressRoute, nil, nil)
+	if w(r.Rules[0].Backend) != 0 || w(r.Rules[1].Backend) != 1000 {
+		t.Errorf("poids négatif : %+v", r.Rules)
+	}
+}
+
+func TestResolveTraefikMirroringOfTraefikService(t *testing.T) {
+	split := traefikService("prod", "split", map[string]any{"weighted": map[string]any{"services": []any{
+		map[string]any{"name": "api", "weight": int64(3)}, map[string]any{"name": "web", "weight": int64(1)}}}})
+	shadow := traefikService("prod", "shadow", map[string]any{"mirroring": map[string]any{"name": "split", "kind": "TraefikService",
+		"mirrors": []any{map[string]any{"name": "audit", "percent": int64(10)}}}})
+	r := ConvertTraefikRoute(checkoutRoute(toTS("shadow")), model.SourceIngressRoute, nil, lookupOf(split, shadow))
+	if len(r.Rules) != 3 {
+		t.Fatalf("règles = %+v", r.Rules)
+	}
+	api, web, audit := r.Rules[0].Backend, r.Rules[1].Backend, r.Rules[2].Backend
+	if api.Service != "api" || w(api) != 750 || web.Service != "web" || w(web) != 250 || api.Via != "prod/shadow" ||
+		audit.Service != "audit" || !audit.Mirror || audit.Percent != 10 || audit.Weight != nil {
+		t.Errorf("règles = %+v", r.Rules)
+	}
+}
+
+func TestResolveTraefikServiceOtherNamespace(t *testing.T) {
+	split := traefikService("infra", "split", map[string]any{"weighted": map[string]any{"services": []any{map[string]any{"name": "api"}}}})
+	ref := map[string]any{"name": "split", "namespace": "infra", "kind": "TraefikService"}
+	r := ConvertTraefikRoute(checkoutRoute(ref), model.SourceIngressRoute, nil, lookupOf(split))
+	if len(r.Rules) != 1 || r.Rules[0].Backend.Namespace != "infra" || r.Rules[0].Backend.Service != "api" || r.Rules[0].Backend.Via != "infra/split" {
+		t.Errorf("règles = %+v", r.Rules)
+	}
+}
+
+func TestConvertTraefikRouteTCPContainous(t *testing.T) {
+	u := unstr("traefik.containo.us/v1alpha1", "IngressRouteTCP", "prod", "pg", map[string]any{
+		"routes": []any{map[string]any{"match": "HostSNI(`db.example.com`)", "services": []any{map[string]any{"name": "pg", "port": int64(5432)}}}}}, nil)
+	r := ConvertTraefikRoute(u, model.SourceIngressRouteTCP, nil, nil)
+	if r.Group != "traefik.containo.us" || r.Source != model.SourceIngressRouteTCP || len(r.Rules) != 1 || r.Rules[0].Host != "db.example.com" {
+		t.Errorf("TCP containo.us = %+v", r)
+	}
+}
