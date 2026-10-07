@@ -10,6 +10,7 @@ import (
 	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/no-inspi/atlas-k8s/internal/model"
 )
@@ -579,8 +580,10 @@ func ConvertPV(pv *corev1.PersistentVolume) model.PersistentVolume {
 	return m
 }
 
-// ClaimExists : « ce PVC existe-t-il ? ». nil quand les PVC ne sont pas listables.
-type ClaimExists func(namespace, name string) bool
+// ClaimExists : « ce PVC existe-t-il ? ». uid est celui du claimRef du PV
+// (vide s'il est inconnu) : un PVC de même nom mais d'UID différent a été
+// recréé et ne réclame plus ce PV. nil quand les PVC ne sont pas listables.
+type ClaimExists func(namespace, name string, uid types.UID) bool
 
 // PublishPV : un PV n'est publié que s'il n'est lié à aucun PVC existant
 // (Available, Released, Failed, ou Bound à un PVC disparu). Sans lecture des
@@ -591,7 +594,7 @@ func PublishPV(pv *corev1.PersistentVolume, exists ClaimExists) bool {
 		return true
 	case corev1.VolumeBound:
 		c := pv.Spec.ClaimRef
-		return exists != nil && c != nil && !exists(c.Namespace, c.Name)
+		return exists != nil && c != nil && !exists(c.Namespace, c.Name, c.UID)
 	}
 	return false
 }

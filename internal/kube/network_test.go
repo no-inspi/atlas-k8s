@@ -295,7 +295,13 @@ func TestConvertPV(t *testing.T) {
 }
 
 func TestPublishPV(t *testing.T) {
-	exists := func(ns, name string) bool { return ns == "prod" && name == "data" }
+	exists := func(ns, name string, uid types.UID) bool {
+		return ns == "prod" && name == "data" && (uid == "" || uid == "uid-1")
+	}
+	withUID := func(pv *corev1.PersistentVolume, uid types.UID) *corev1.PersistentVolume {
+		pv.Spec.ClaimRef.UID = uid
+		return pv
+	}
 	cases := []struct {
 		pv     *corev1.PersistentVolume
 		exists ClaimExists
@@ -308,6 +314,8 @@ func TestPublishPV(t *testing.T) {
 		{pvObj("d", corev1.VolumeBound, "prod/gone"), exists, true},
 		{pvObj("d", corev1.VolumeBound, "prod/gone"), nil, false}, // PVC non listables : on ne sait pas
 		{pvObj("p", corev1.VolumePending, ""), exists, false},
+		{withUID(pvObj("u1", corev1.VolumeBound, "prod/data"), "uid-1"), exists, false}, // même PVC
+		{withUID(pvObj("u2", corev1.VolumeBound, "prod/data"), "uid-0"), exists, true},  // PVC recréé
 	}
 	for _, c := range cases {
 		if got := PublishPV(c.pv, c.exists); got != c.want {

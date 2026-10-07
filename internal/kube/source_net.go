@@ -14,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/no-inspi/atlas-k8s/internal/model"
@@ -85,6 +86,20 @@ func (s *Source) startNetwork(ctx context.Context) {
 		s.pvcs = inf.Lister()
 		s.watch(inf.Informer(), s.onPVC)
 	}
+	if s.probe(ctx, "persistentvolumes", func(ctx context.Context) error {
+		_, err := c.CoreV1().PersistentVolumes().List(ctx, probeOpts)
+		return err
+	}) {
+		inf := f.Core().V1().PersistentVolumes()
+		_ = inf.Informer().AddIndexers(cache.Indexers{indexByClaim: func(o any) ([]string, error) {
+			if r := o.(*corev1.PersistentVolume).Spec.ClaimRef; r != nil && r.Name != "" {
+				return []string{r.Namespace + "/" + r.Name}, nil
+			}
+			return nil, nil
+		}})
+		s.pvs, s.pvIdx = inf.Lister(), inf.Informer().GetIndexer()
+		s.watch(inf.Informer(), s.onPV)
+	}
 	if s.probe(ctx, "ingressclasses", func(ctx context.Context) error {
 		_, err := c.NetworkingV1().IngressClasses().List(ctx, probeOpts)
 		return err
@@ -147,9 +162,29 @@ func (s *Source) onEndpointSlice(o any) {
 	}
 }
 
+// onPVC : le volume, et les PV qu'il réclame (ils deviennent orphelins ou non).
 func (s *Source) onPVC(o any) {
-	if p, ok := o.(*corev1.PersistentVolumeClaim); ok {
-		s.mark(ref{stream.KindVolume, p.Namespace + "/" + p.Name})
+	p, ok := o.(*corev1.PersistentVolumeClaim)
+	if !ok {
+		return
+	}
+	id := p.Namespace + "/" + p.Name
+	s.mark(ref{stream.KindVolume, id})
+	if s.pvIdx == nil {
+		return
+	}
+	pvs, _ := s.pvIdx.ByIndex(indexByClaim, id)
+	for _, pv := range pvs {
+		s.onPV(pv)
+	}
+	if p.Spec.VolumeName != "" {
+		s.mark(ref{stream.KindPersistentVolume, p.Spec.VolumeName})
+	}
+}
+
+func (s *Source) onPV(o any) {
+	if pv, ok := o.(*corev1.PersistentVolume); ok {
+		s.mark(ref{stream.KindPersistentVolume, pv.Name})
 	}
 }
 
@@ -188,6 +223,12 @@ func (s *Source) markNetwork() {
 		all, _ := s.pvcs.List(sel)
 		for _, o := range all {
 			s.onPVC(o)
+		}
+	}
+	if s.pvs != nil {
+		all, _ := s.pvs.List(sel)
+		for _, o := range all {
+			s.onPV(o)
 		}
 	}
 	if s.ingresses != nil {
@@ -293,4 +334,25 @@ func (s *Source) buildVolume(id string) (any, string, error) {
 	}
 	sort.Strings(uids)
 	return ConvertPVC(p, uids), id, nil
+}
+
+func (s *Source) buildPersistentVolume(name string) (any, string, error) {
+	if s.pvs == nil {
+		return nil, "", nil
+	}
+	pv, err := s.pvs.Get(name)
+	if err != nil {
+		return nil, "", err
+	}
+	var exists ClaimExists
+	if s.pvcs != nil {
+		exists = func(ns, claim string, uid types.UID) bool {
+			p, err := s.pvcs.PersistentVolumeClaims(ns).Get(claim)
+			return err == nil && (uid == "" || p.UID == uid)
+		}
+	}
+	if !PublishPV(pv, exists) {
+		return nil, "", nil
+	}
+	return ConvertPV(pv), name, nil
 }

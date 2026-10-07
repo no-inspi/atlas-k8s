@@ -91,6 +91,8 @@ type Source struct {
 	services   corelisters.ServiceLister
 	slices     cache.Indexer
 	pvcs       corelisters.PersistentVolumeClaimLister
+	pvs        corelisters.PersistentVolumeLister // jalon 9 : PV orphelins
+	pvIdx      cache.Indexer
 	ingresses  networkinglisters.IngressLister
 	ingressIdx cache.Indexer
 	classes    networkinglisters.IngressClassLister
@@ -408,6 +410,8 @@ func (s *Source) build(r ref) (any, string, error) {
 		return *w, r.id, nil
 	case stream.KindGateway:
 		return s.buildGateway(r.id)
+	case stream.KindPersistentVolume:
+		return s.buildPersistentVolume(r.id)
 	case stream.KindService:
 		return s.buildService(r.id)
 	case stream.KindRoute:
