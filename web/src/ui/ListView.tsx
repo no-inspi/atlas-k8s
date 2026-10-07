@@ -5,8 +5,11 @@ import { buildTree, flatten, keyAction, type TreeNode } from './tree'
 
 const BADGE: Record<string, string> = { ok: 's-ok', warn: 's-warn', err: 's-err', mute: 's-mute', done: 's-mute' }
 
+// Couleurs alignées sur gateSignal : non programmé = rouge ; refusée, cassée, listener non prêt = orange.
 const NET_STATUS: Record<string, string> = {
-  down: 's-err', Lost: 's-err', 'Service introuvable': 's-err', degraded: 's-warn', Pending: 's-warn', 'route cassée': 's-warn',
+  down: 's-err', Lost: 's-err', Failed: 's-err', 'Service introuvable': 's-err', 'non programmé': 's-err',
+  degraded: 's-warn', Pending: 's-warn', 'route cassée': 's-warn', 'route refusée': 's-warn', 'listener non prêt': 's-warn',
+  Released: 's-mute', Available: 's-mute',
 }
 
 function statusClass(n: TreeNode): string {

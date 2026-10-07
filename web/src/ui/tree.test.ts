@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { node, pod, route, service, volume, workload } from '../store/fixtures'
+import { gateway, node, pod, pv, route, service, volume, workload } from '../store/fixtures'
 import { buildTree, flatten, keyAction } from './tree'
 
 const st = {
@@ -72,5 +72,45 @@ describe('réseau et stockage', () => {
     expect(services.children![0].children!.map((s) => [s.label, s.status])).toEqual([['api', undefined], ['ghost', 'down']])
     expect(storage.children![0].label).toBe('standard-rwo')
     expect(storage.children![0].children![0]).toEqual(expect.objectContaining({ label: 'data-0', select: { type: 'volume', key: 'production/data-0' } }))
+  })
+})
+
+describe('Gateway API et PV', () => {
+  const withGw = {
+    ...st,
+    routes: new Map([['HTTPRoute/production/storefront', route({
+      source: 'HTTPRoute', group: 'gateway.networking.k8s.io', gate: 'infra/public', gates: ['infra/public', 'infra/internal'],
+    })]]),
+    gateways: new Map([
+      ['infra/public', gateway({ namespace: 'infra', name: 'public', programmed: 'true' })],
+      ['infra/internal', gateway({ namespace: 'infra', name: 'internal', programmed: 'false' })],
+      ['infra/idle', gateway({ namespace: 'infra', name: 'idle', programmed: 'true' })],
+    ]),
+    volumes: new Map([['production/data-0', volume()]]),
+    persistentVolumes: new Map([['pv-old-uploads', pv({ name: 'pv-old-uploads', storageClass: 'standard-rwo', phase: 'Released' })]]),
+  }
+
+  it('range les Gateways parmi les entrées, même sans route, et une route sous chacune de ses portes', () => {
+    const gates = buildTree(withGw).find((g) => g.label === 'Entrées')!
+    expect(gates.children!.map((g) => [g.label, g.select, g.status])).toEqual([
+      ['infra/idle', { type: 'gateway', key: 'infra/idle' }, undefined],
+      ['infra/internal', { type: 'gateway', key: 'infra/internal' }, 'non programmé'],
+      ['infra/public', { type: 'gateway', key: 'infra/public' }, undefined],
+    ])
+    const ids = gates.children!.flatMap((g) => (g.children ?? []).map((r) => r.id))
+    expect(ids).toHaveLength(2)
+    expect(new Set(ids).size).toBe(2)
+    expect(gates.children![2].children![0].select).toEqual({ type: 'route', key: 'HTTPRoute/production/storefront' })
+  })
+
+  it('range les PV orphelins avec les PVC de leur classe', () => {
+    const storage = buildTree(withGw).find((g) => g.label === 'Stockage')!
+    expect(storage.detail).toBe('2')
+    const cls = storage.children![0]
+    expect(cls.detail).toBe('1 PVC · 1 PV')
+    expect(cls.children!.map((n) => [n.label, n.select, n.status])).toEqual([
+      ['data-0', { type: 'volume', key: 'production/data-0' }, undefined],
+      ['pv-old-uploads', { type: 'pv', key: 'pv-old-uploads' }, 'Released'],
+    ])
   })
 })
