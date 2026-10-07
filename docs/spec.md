@@ -39,7 +39,7 @@ Le MVP couvre un seul cluster (celui où l'application est installée), les Depl
 - Port-forward, copie de fichiers, containers éphémères de debug.
 - Coûts et FinOps.
 
-Services, Ingress et PVC représentés dans la 3D ne sont plus hors périmètre : livrés au jalon 8 (design [`superpowers/specs/2026-10-07-jalon-8-reseau-stockage-design.md`](superpowers/specs/2026-10-07-jalon-8-reseau-stockage-design.md)).
+Services, Ingress et PVC représentés dans la 3D ne sont plus hors périmètre : livrés au jalon 8 (design [`superpowers/specs/2026-10-07-jalon-8-reseau-stockage-design.md`](superpowers/specs/2026-10-07-jalon-8-reseau-stockage-design.md)). Gateway API, IngressRouteTCP/UDP, TraefikService, CRD à chaud et PV sans PVC le sont aussi, au jalon 9 (design [`superpowers/specs/2026-10-07-jalon-9-reseau-suite-design.md`](superpowers/specs/2026-10-07-jalon-9-reseau-suite-design.md)).
 
 ## Architecture
 
@@ -138,10 +138,13 @@ Le cluster est une ville vue en isométrique : les node pools sont des quartiers
 | Pod de Job | Icône pyramidale, disparaît une fois `Completed` | Tâche ponctuelle |
 | Pods en attente | File d'attente devant la ville | Pods `Pending` sans `nodeName` |
 | Contrôleur d'entrée (IngressClass, ou `traefik` pour les IngressRoute) | **Porte** en arche à l'entrée ouest de la première avenue | Nombre de routes ; orange si une de ses routes est cassée |
+| Gateway (Gateway API) | **Porte** nommée `namespace/nom`, avec les portes des contrôleurs d'entrée | Rouge si non programmé, orange si un listener n'est pas prêt ou une route est refusée ou cassée, grise sans statut ou si le Gateway est invisible |
 | Ingress, IngressRoute | **Route** : ligne principale de la porte vers chaque Service visé | Hôtes, chemins ou `match`, état du backend ; route cassée en rouge pointillé avec un panneau « ? » |
+| HTTPRoute, GRPCRoute, IngressRouteTCP, IngressRouteUDP | **Route** : une ligne principale par porte (une route Gateway API peut en avoir plusieurs) | Part du trafic (survol, inspecteur) ; miroir en pointillé discret ; route refusée en rouge pointillé avec un panneau « ⊘ » |
 | Service | **Relais** : disque posé sur l'avenue, bordé de la couleur du namespace, voyant dessus | Voyant vert (`ok`), orange (`degraded`), rouge clignotant (`down`) ; panneau pour `ExternalName` |
 | Endpoints d'un Service | **Fibres** au sol, du relais aux pods par les rues | Visibles au survol ou à la sélection |
 | PVC | **Citerne** dans le quartier Entrepôts, un îlot par StorageClass | Rayon selon la capacité (log, borné) ; Pending en orange translucide, Lost en rouge |
+| PV sans PVC | **Citerne vide** en fil de fer, dans l'îlot de sa StorageClass | `Available` gris, `Released` gris avec un panneau, `Failed` rouge ; aucune conduite |
 | Montage d'un PVC par un pod | **Conduite** au sol de la citerne au pod | Toujours visible ; gouttes de data quand le pod est Running |
 
 Sur chaque parcelle, les blocs sont rangés selon le tri choisi (request RAM ou CPU décroissante, type de workload, namespace, nom) : les plus gros au fond, où ils ne masquent pas les autres. Les namespaces système (`kube-system`, `kube-public`, `kube-node-lease`) sont masqués par défaut, sauf s'ils sont choisis dans la légende ; chaque type de workload peut être masqué. Ces réglages sont mémorisés dans le navigateur. Au survol, une infobulle donne le nom, le workload, le statut et les requests du pod.
@@ -362,7 +365,7 @@ Sept jalons pour le MVP, puis des jalons hors MVP, chacun livrable et testable s
 6. **Terminal et actions** : exec WebSocket, xterm.js, delete, scale, restart, cordon, uncordon, drain, confirmations, audit. Fin : critères exec, drain et audit validés.
 7. **Échelle et finition** : LOD, regroupement des pods, rendu à la demande, recherche, vue Liste accessible, thème sombre, test de charge kwok, CI et publication. Fin : tous les critères d'acceptation cochés.
 8. **Réseau et stockage** : Services, Ingress et IngressRoute, PVC dans la ville ; design `docs/superpowers/specs/2026-10-07-jalon-8-reseau-stockage-design.md`.
-
+9. **Suite du réseau et du stockage** : Gateway API, Traefik complet (IngressRouteTCP/UDP, TraefikService), CRD à chaud, PV sans PVC ; design `docs/superpowers/specs/2026-10-07-jalon-9-reseau-suite-design.md`.
 **Consignes pour Claude Code**
 
 - Ne jamais ajouter de droit d'écriture au ServiceAccount pour contourner un problème : toute écriture passe par impersonation.
