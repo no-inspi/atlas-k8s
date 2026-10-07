@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { NS_PALETTE, nsColors } from './colors'
+import { NS_PALETTE, clusterColors, nsColors } from './colors'
+import { pod, service, volume } from '../store/fixtures'
 
 describe('nsColors', () => {
   it('donne une couleur de la palette, stable d’un appel à l’autre', () => {
@@ -24,5 +25,16 @@ describe('nsColors', () => {
   it('accepte plus de namespaces que de teintes', () => {
     const colors = nsColors(Array.from({ length: 20 }, (_, i) => `ns-${i}`))
     expect(colors.size).toBe(20)
+  })
+})
+
+describe('clusterColors', () => {
+  it('colore aussi les namespaces qui n’ont que des Services ou des volumes', () => {
+    const colors = clusterColors({
+      pods: new Map([['u1', pod()]]), namespaces: new Map(),
+      services: new Map([['edge/lb', service({ namespace: 'edge', name: 'lb' })]]),
+      volumes: new Map([['data/d', volume({ namespace: 'data', name: 'd' })]]),
+    })
+    expect([...colors.keys()].sort()).toEqual(['data', 'edge', 'production'])
   })
 })
