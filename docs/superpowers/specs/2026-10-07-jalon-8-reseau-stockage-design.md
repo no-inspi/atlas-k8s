@@ -102,7 +102,7 @@ Le simulateur produit le même modèle :
 | Conduites | citerne → avenue → allée → pod | Toujours ; gouttes animées si le pod est Running |
 | Fibres | relais → avenue → allée → pod | Survol ou sélection d'un relais, d'une porte, d'un pod ou d'un workload |
 
-Chaque famille est une seule géométrie (un draw call), reconstruite quand la topologie change. L'animation est un décalage dans le shader. `prefers-reduced-motion` coupe les paquets, les gouttes et le clignotement.
+Chaque famille est une seule géométrie (un draw call), reconstruite quand la topologie change. L'animation est un décalage dans le shader, redessiné à 15 images/s et seulement de près (`GroundLinks.tsx`). `prefers-reduced-motion` coupe les paquets, les gouttes et le clignotement.
 
 ### Interactions
 
@@ -111,13 +111,13 @@ Chaque famille est une seule géométrie (un draw call), reconstruite quand la t
 - Les chips de namespace filtrent aussi relais, routes, citernes, liens au sol et panneaux « ? » (opacité 10 % hors du namespace choisi).
 - Recherche (`/`) : Services, routes et PVC par nom.
 - Vue Liste : trois nouveaux groupes, Entrées (portes, puis leurs routes), Services, Stockage.
-- Liens profonds : `?select=service/<ns>/<nom>`, `route/<source>/<ns>/<nom>`, `volume/<ns>/<nom>`, `gate/<nom>`.
+- Liens profonds : `/services/<ns>/<nom>`, `/routes/<ingress|ingressroute>/<ns>/<nom>`, `/volumes/<ns>/<nom>`, `/gates/<nom>`.
 
 ### Échelle
 
 - Vu de loin, les relais d'un tronçon se fondent en un bloc avec un compteur, dont le voyant prend la pire couleur du groupe. Fibres, paquets et gouttes n'apparaissent que de près.
 - Relais et citernes sont des `InstancedMesh` (un par pièce). Le rendu reste à la demande.
-- Banc : 100 nodes, 3 000 pods, environ 400 Services et 150 PVC, avec la même cible que la spec (60 images/s sur un portable récent).
+- Banc : 100 nodes et 3 000 pods, avec environ 450 Services et 230 PVC en démo (`--demo-scale 100x30`), 400 Services et 150 PVC sur kwok ; même cible que la spec (60 images/s sur un portable récent). Mesures dans le README (jalon 8).
 
 ### Thème
 

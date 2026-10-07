@@ -36,9 +36,10 @@ Le MVP couvre un seul cluster (celui où l'application est installée), les Depl
 - Multi-cluster.
 - Édition de YAML et apply depuis l'interface.
 - Métriques historiques (graphiques sur 24 h) : le MVP n'affiche que l'instantané de metrics-server.
-- Services, Ingress, PVC représentés dans la 3D.
 - Port-forward, copie de fichiers, containers éphémères de debug.
 - Coûts et FinOps.
+
+Services, Ingress et PVC représentés dans la 3D ne sont plus hors périmètre : livrés au jalon 8 (design [`superpowers/specs/2026-10-07-jalon-8-reseau-stockage-design.md`](superpowers/specs/2026-10-07-jalon-8-reseau-stockage-design.md)).
 
 ## Architecture
 
@@ -136,6 +137,12 @@ Le cluster est une ville vue en isométrique : les node pools sont des quartiers
 | Pod de StatefulSet | Icône en disque | Pod avec identité et stockage |
 | Pod de Job | Icône pyramidale, disparaît une fois `Completed` | Tâche ponctuelle |
 | Pods en attente | File d'attente devant la ville | Pods `Pending` sans `nodeName` |
+| Contrôleur d'entrée (IngressClass, ou `traefik` pour les IngressRoute) | **Porte** en arche à l'entrée ouest de la première avenue | Nombre de routes ; orange si une de ses routes est cassée |
+| Ingress, IngressRoute | **Route** : ligne principale de la porte vers chaque Service visé | Hôtes, chemins ou `match`, état du backend ; route cassée en rouge pointillé avec un panneau « ? » |
+| Service | **Relais** : disque posé sur l'avenue, bordé de la couleur du namespace, voyant dessus | Voyant vert (`ok`), orange (`degraded`), rouge clignotant (`down`) ; panneau pour `ExternalName` |
+| Endpoints d'un Service | **Fibres** au sol, du relais aux pods par les rues | Visibles au survol ou à la sélection |
+| PVC | **Citerne** dans le quartier Entrepôts, un îlot par StorageClass | Rayon selon la capacité (log, borné) ; Pending en orange translucide, Lost en rouge |
+| Montage d'un PVC par un pod | **Conduite** au sol de la citerne au pod | Toujours visible ; gouttes de data quand le pod est Running |
 
 Sur chaque parcelle, les blocs sont rangés selon le tri choisi (request RAM ou CPU décroissante, type de workload, namespace, nom) : les plus gros au fond, où ils ne masquent pas les autres. Les namespaces système (`kube-system`, `kube-public`, `kube-node-lease`) sont masqués par défaut, sauf s'ils sont choisis dans la légende ; chaque type de workload peut être masqué. Ces réglages sont mémorisés dans le navigateur. Au survol, une infobulle donne le nom, le workload, le statut et les requests du pod.
 
@@ -215,6 +222,8 @@ L'application s'installe avec `helm install cluster-atlas oci://<registry>/chart
 | `nodes`, `pods`, `namespaces`, `events` | `get`, `list`, `watch` | Cache partagé de la vue 3D |
 | `apps/*` (deployments, replicasets, statefulsets, daemonsets), `batch/jobs` | `get`, `list`, `watch` | Résolution des propriétaires, replicas |
 | `metrics.k8s.io/pods`, `metrics.k8s.io/nodes` | `get`, `list` | Usage CPU et mémoire |
+| `services`, `persistentvolumeclaims`, `networking.k8s.io/ingresses`, `ingressroutes` (`traefik.io`, `traefik.containo.us`) | `get`, `list`, `watch` | Relais, routes et citernes (jalon 8) ; `get` pour le YAML en `auth.mode=none` |
+| `discovery.k8s.io/endpointslices`, `networking.k8s.io/ingressclasses` | `list`, `watch` | Endpoints des Services, porte des Ingress (jalon 8) |
 | `authorization.k8s.io/subjectaccessreviews` | `create` | Filtrage par droits de l'utilisateur |
 
 Le ServiceAccount n'a aucun droit d'écriture sur les workloads ni sur `pods/exec` : toutes les écritures passent par impersonation. Aucune lecture de `secrets` ni de `configmaps`.
@@ -343,7 +352,7 @@ Le MVP est accepté quand les scénarios ci-dessous passent sur un cluster kind 
 
 ## Plan de livraison
 
-Sept jalons, chacun livrable et testable seul ; Claude Code termine un jalon (code, tests, README à jour) avant de passer au suivant.
+Sept jalons pour le MVP, puis des jalons hors MVP, chacun livrable et testable seul ; Claude Code termine un jalon (code, tests, README à jour) avant de passer au suivant.
 
 1. **Squelette et mode démo** : monorepo, binaire Go qui sert le front, scène R3F avec ville, bâtiments et robots instanciés alimentés par le simulateur (`--demo`). Fin : le prototype tourne depuis le binaire.
 2. **Lecture du cluster** : informers, modèle réduit, `displayStatus`, flux `/api/stream` snapshot + deltas, front branché sur le flux. Fin : la vue reflète un cluster kind en direct (sans auth, `auth.mode: none`).
@@ -352,6 +361,7 @@ Sept jalons, chacun livrable et testable seul ; Claude Code termine un jalon (co
 5. **Inspecteur en lecture** : aperçu pod et node, YAML, événements, logs en streaming. Fin : critères logs et YAML validés.
 6. **Terminal et actions** : exec WebSocket, xterm.js, delete, scale, restart, cordon, uncordon, drain, confirmations, audit. Fin : critères exec, drain et audit validés.
 7. **Échelle et finition** : LOD, regroupement des pods, rendu à la demande, recherche, vue Liste accessible, thème sombre, test de charge kwok, CI et publication. Fin : tous les critères d'acceptation cochés.
+8. **Réseau et stockage** : Services, Ingress et IngressRoute, PVC dans la ville ; design `docs/superpowers/specs/2026-10-07-jalon-8-reseau-stockage-design.md`.
 
 **Consignes pour Claude Code**
 

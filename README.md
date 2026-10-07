@@ -1,6 +1,6 @@
 # Cluster Atlas
 
-Console Kubernetes web, déployée dans le cluster qu'elle observe, qui montre l'état du cluster en temps réel sous la forme d'une ville isométrique en 3D : chaque node pool est un quartier, chaque node un bâtiment, chaque pod un petit robot dont la couleur indique le namespace et l'antenne le statut.
+Console Kubernetes web, déployée dans le cluster qu'elle observe, qui montre l'état du cluster en temps réel sous la forme d'une ville isométrique en 3D : chaque node pool est un quartier, chaque node un bâtiment, chaque pod un bloc ; les Services sont des relais sur les avenues, les entrées (Ingress, IngressRoute Traefik) des portes à l'ouest, les PVC des citernes dans le quartier Entrepôts.
 
 La spécification complète est dans [`docs/spec.md`](docs/spec.md) et le prototype d'origine dans [`docs/prototype.html`](docs/prototype.html).
 
@@ -48,10 +48,12 @@ make kind-down kind-up scenarios kind-oidc helm-kind-oidc
 
 ```sh
 make kind-up     # cluster « atlas » : control-plane + 4 workers en 3 pools, taint GPU, metrics-server
-make scenarios   # CrashLoopBackOff, ImagePullBackOff, Pending, non ready, StatefulSet, DaemonSet, CronJob
+make scenarios   # CrashLoopBackOff, ImagePullBackOff, Pending, non ready, StatefulSet, DaemonSet, CronJob ; réseau et stockage
 make run-kind    # atlas --auth-mode=none --context kind-atlas sur :8080
 make kind-down
 ```
+
+`make scenarios` installe aussi la CRD Traefik (`ingressroutes.traefik.io`, sans contrôleur) et ajoute des Services (sain, en panne, headless, ExternalName), un Ingress nginx avec un backend manquant, une IngressRoute vers un Service introuvable, un StatefulSet avec ses PVC et un PVC en attente de consommateur.
 
 Sans `--demo`, atlas lit le cluster de son kubeconfig (ou en in-cluster quand il tourne dans un pod). Le mode par défaut est `oidc` ; `--auth-mode=none` (sans authentification ni impersonation) est réservé au développement.
 
@@ -99,7 +101,7 @@ networkPolicy:
 
 Toutes les options sont commentées dans [`values.yaml`](deploy/helm/cluster-atlas/values.yaml) et typées par `values.schema.json`.
 
-**Droits du ServiceAccount** : lecture de nodes, pods, namespaces, events, Deployments, ReplicaSets, StatefulSets, DaemonSets, Jobs et metrics.k8s.io ; `create` sur `subjectaccessreviews` ; `impersonate` sur users et groups (restreignable par `rbac.impersonate`). Aucun droit d'écriture sur les workloads, ni `pods/exec`, ni secrets, ni configmaps : logs, exec et actions passent toujours par impersonation de l'utilisateur.
+**Droits du ServiceAccount** : lecture de nodes, pods, namespaces, events, Deployments, ReplicaSets, StatefulSets, DaemonSets, Jobs et metrics.k8s.io ; `get`, `list` et `watch` sur services, persistentvolumeclaims, ingresses et ingressroutes (`traefik.io`, `traefik.containo.us`), `list` et `watch` sur endpointslices et ingressclasses (le `get` sert l'onglet YAML en `auth.mode=none`) ; `create` sur `subjectaccessreviews` ; `impersonate` sur users et groups (restreignable par `rbac.impersonate`). Aucun droit d'écriture sur les workloads, ni `pods/exec`, ni secrets, ni configmaps : logs, exec et actions passent toujours par impersonation de l'utilisateur. Un type réseau ou stockage que le ServiceAccount ne peut pas lister (sonde bornée à 10 s) est désactivé, avec un warning dans les logs ; sans EndpointSlices, les Services sont désactivés aussi. Une CRD Traefik installée après le démarrage est prise en compte au prochain redémarrage.
 
 **NetworkPolicy** : entrée HTTP seulement depuis `networkPolicy.allowFrom`, métriques depuis `networkPolicy.metricsFrom` ; sortie vers le DNS du cluster, l'API server (IP lues sur l'EndpointSlice `default/kubernetes` à l'installation, ou `networkPolicy.apiServer.cidrs`) et l'issuer OIDC. Après un changement d'IP de l'API server, relancez `helm upgrade`.
 
@@ -126,7 +128,7 @@ ATLAS_URL=http://atlas.localtest.me npx playwright test -c playwright.auth.confi
 make scan        # image + Trivy (échoue sur une vulnérabilité critique)
 ```
 
-**Performance.** `atlas --demo-scale 100x30` simule 100 nodes et 3 000 pods ; `?perf=1` dans l'URL affiche images/s, temps de frame, coût des robots et draw calls. Sur un vrai cluster, `make load-up` crée 100 nodes [kwok](https://kwok.sigs.k8s.io/) et 3 000 pods `pause` dans le cluster kind (`NODES=…`, `PODS=…` pour changer), `make load-down` les supprime.
+**Performance.** `atlas --demo-scale 100x30` simule 100 nodes et 3 000 pods (avec environ 470 Services, 160 routes et 230 PVC) ; `?perf=1` dans l'URL affiche images/s, temps de frame, coût des robots et draw calls. Sur un vrai cluster, `make load-up` crée 100 nodes [kwok](https://kwok.sigs.k8s.io/) et 3 000 pods `pause` dans le cluster kind, plus 4 Services par Deployment (400) et 150 PVC sans consommateur (`NODES=…`, `PODS=…`, `SERVICES_PER_DEPLOY=…`, `PVCS=…` pour changer), `make load-down` les supprime.
 
 **CI** (`.github/workflows/`) : `ci.yml` sur chaque push et pull request (gofmt, `go vet`, `go test -race`, tests et `helm lint` du chart, `tsc`, Vitest, e2e Playwright en mode démo, image multi-arch, Trivy) ; `release.yml` sur un tag `vX.Y.Z` pousse l'image `ghcr.io/<owner>/cluster-atlas` (amd64 et arm64) et le chart `oci://ghcr.io/<owner>/charts/cluster-atlas`. Les workflows sont vérifiés localement par `go run github.com/rhysd/actionlint/cmd/actionlint@latest`.
 
@@ -135,6 +137,7 @@ make scan        # image + Trivy (échoue sur une vulnérabilité critique)
 - **Un binaire Go** (`cmd/atlas`) sert le front compilé (`embed.FS`), les probes `/healthz` et `/readyz`, `/api/me` et le flux `/api/stream`.
 - **`/api/stream`** (WebSocket) envoie un snapshot puis des deltas `upsert`/`delete` regroupés toutes les 250 ms et numérotés (`rev`). À la reconnexion, le client renvoie son dernier `rev` et reçoit seulement les deltas manquants, ou un nouveau snapshot si l'écart est trop grand. Les métriques arrivent toutes les 15 s.
 - **La source Kubernetes** (`internal/kube`) : un informer partagé par type (nodes, pods, namespaces, Deployments, ReplicaSets, StatefulSets, DaemonSets, Jobs), allégé par `SetTransform` (ni managedFields, ni volumes, ni env, ni templates). Chaque événement marque des objets « sales », recalculés toutes les 100 ms depuis le cache ; seuls les vrais changements sont publiés. Le `displayStatus` est un portage de `printPod` de kubectl, et `requested` suit la règle de kube-scheduler (init containers, sidecars, overhead). metrics-server est relevé toutes les 15 s.
+- **Réseau et stockage** (`internal/kube/source_net.go`, `traefik.go`) : Services (santé et endpoints lus dans les EndpointSlices, endpoints en arrêt ignorés), routes (Ingress et IngressRoute ramenées à une porte : IngressClass, annotation, classe par défaut, ou `traefik`) et PVC (pods qui les montent, lus dans le cache des pods) sont trois kinds du flux, calculés par la même boucle d'objets sales. Côté front, `netLayout.ts` range les relais par namespace sur les avenues (pas de 1,3, resserré jusqu'à 0,65, puis les plus gros namespaces repliés chacun en un bloc avec compteur ; deux objets ne partagent jamais une place), les portes à l'entrée ouest et les citernes par StorageClass (colonnes ajustées pour que les entrepôts restent à peu près aussi profonds que la ville ; PVC Pending en orange translucide) ; `links.ts` trace les liens en angles droits par les rues et `GroundLinks.tsx` les dessine. Sélectionner un objet allume son chemin (porte → Service → pods → PVC). Lignes principales et conduites sont toujours visibles, les fibres Service → pods seulement au survol ou à la sélection ; les paquets défilent à 15 images/s, et s'arrêtent de loin. Les chips de namespace estompent aussi relais, citernes et liens au sol.
 - **Le simulateur** (`internal/demo`) produit le même modèle et passe par le même hub (`internal/stream`) : le front ne sait pas s'il regarde un vrai cluster.
 - **Le front** (`web/`, React + React Three Fiber) garde l'état dans un store Zustand indexé par UID. La scène lit le store dans sa boucle de rendu sans re-render React par message. Robots et bâtiments sont des `InstancedMesh`, avec un draw call par pièce quel que soit le nombre de pods.
 - **Inspecteur** (`internal/inspect`, `internal/logs`) : chaîne de propriétaires, YAML (sans `managedFields`), logs et événements. Propriétaires, YAML et logs passent par le client impersonné de l'utilisateur ; les événements viennent d'un cache partagé, après vérification de son droit `list events`. Les logs passent par un WebSocket avec backpressure : 2 000 lignes en attente au plus côté serveur, les lignes en trop sont comptées et signalées. Les erreurs de l'API server (403, 404) sont affichées telles quelles.
@@ -149,7 +152,7 @@ make scan        # image + Trivy (échoue sur une vulnérabilité critique)
   `result` vaut `success`, `forbidden` ou `failure` (avec `error`), et `requested` pour `exec-open`, dont l'issue est portée par `exec-close`. Les commandes tapées dans le terminal ne sont pas enregistrées.
 - **Échelle** : de loin, un robot est un cube (une pièce au lieu de treize) ; fumée et ventilateurs seulement de près. Au-delà de 48 pods, un node montre une pile par workload (ou par namespace s'il y en a trop) avec un compteur. Le rendu est à la demande : une frame par changement d'état, mouvement de caméra ou animation en cours, aucune quand rien ne bouge ; les animations au repos s'arrêtent avec `prefers-reduced-motion` ou onglet caché.
 - **Recherche, vue Liste, thème** : `/` cherche un pod, un node ou un workload, centre la caméra et sélectionne. La vue Liste est un arbre namespace → workload → pod, plus les nodes, navigable au clavier (rôle `tree`) et ouvre le même inspecteur. Thème système, clair ou sombre, mémorisé dans le navigateur.
-- **Liens profonds** : `/pods/{namespace}/{nom}` et `/nodes/{nom}` ouvrent l'inspecteur sur l'objet ; l'URL suit la sélection.
+- **Liens profonds** : `/pods/{namespace}/{nom}`, `/nodes/{nom}`, `/services/{namespace}/{nom}`, `/routes/{ingress|ingressroute}/{namespace}/{nom}`, `/volumes/{namespace}/{nom}` et `/gates/{nom}` ouvrent l'inspecteur sur l'objet ; l'URL suit la sélection.
 - **Sécurité navigateur** : CSP stricte pour les scripts (`script-src 'self'`, aucun script externe), polices auto-hébergées ; styles en ligne autorisés pour Monaco (voir plus bas), vérification de l'`Origin` à l'ouverture du WebSocket, en-tête `X-Atlas-Request` exigé sur toute requête mutante (CSRF).
 - **Authentification** (`internal/auth`) : OIDC code + PKCE ; session dans un cookie chiffré AES-256-GCM (`HttpOnly`, `SameSite=Lax`, `Secure` en https), sans token côté navigateur. Un nom d'utilisateur `system:*` est refusé et les groupes `system:*` ignorés ; tous les groupes sont préfixés (`oidc:`).
 - **Droits** (`internal/access`) : chaque appel à l'API server pour un utilisateur passe par un client impersonné (`Impersonate-User`, `Impersonate-Group`). Le flux est filtré par client, hors du verrou du hub : un objet n'est envoyé que si l'utilisateur peut le lister dans son namespace (SubjectAccessReview, cache 60 s). Si ses droits changent, le flux se ferme (code 4000) et le front repart d'un snapshot ; à l'expiration de la session, code 4401 et retour à la connexion.
@@ -184,6 +187,7 @@ web/src/ui/        barre du haut, stats, filtres, recherche, vue Liste, thème, 
 | 5 | Inspecteur : logs, YAML, événements | fait |
 | 6 | Terminal et actions, audit | fait |
 | 7 | Échelle (LOD, regroupement, rendu à la demande), recherche, vue Liste, CI | fait |
+| 8 | Réseau et stockage : Services, Ingress et IngressRoute, PVC dans la ville | fait |
 
 Choix propres au jalon 1, détaillés dans [`docs/superpowers/plans/2026-10-06-jalon-1-squelette-demo.md`](docs/superpowers/plans/2026-10-06-jalon-1-squelette-demo.md) :
 
@@ -234,6 +238,24 @@ Mesures (kind sur MacBook M4, Chrome) :
 | Premier snapshot affiché | 186 ms |
 | Mémoire du backend à 3 142 pods | 92 Mi |
 | Pod créé / supprimé visible dans la vue, sous charge | 337 ms / 239 ms |
+
+Choix du jalon 8 ([design](docs/superpowers/specs/2026-10-07-jalon-8-reseau-stockage-design.md), [plan](docs/superpowers/plans/2026-10-07-jalon-8-reseau-stockage.md)) :
+
+- Lecture seule : aucune action nouvelle. Les portes ne sont pas des objets du flux, le front les déduit des routes.
+- Les routes vers un `TraefikService` sont marquées `indirect`, non résolues ; IngressRouteTCP/UDP, Gateway API et remplissage des citernes sont hors jalon.
+
+Mesures du banc (Chrome piloté par Playwright, GPU matériel Apple M4 via ANGLE Metal, écran 120 Hz donc plafond à 120 images/s, fenêtre 1440 × 900 ; indicatives) :
+
+| Cas | Au repos | Rotation continue | Draw calls |
+| --- | --- | --- | --- |
+| kind + kwok : 105 nodes, 3 144 pods, 412 Services, 153 PVC, vue par défaut | 120 images/s (8,3 ms) | 120 images/s, robots 1,1 à 1,5 ms | ≈ 400 |
+| idem, relais `load-test/load-001-1` sélectionné (30 pods allumés) | 120 images/s | 120 images/s, robots 1,5 à 2,1 ms | 400 |
+| idem, dézoom maximal | 120 images/s | 119 images/s | 399 |
+| démo `--demo-scale 100x30` : 100 nodes, 2 975 pods, 470 Services, 157 routes, 232 PVC, vue par défaut | 120 images/s | 120 images/s, robots 1,2 à 1,4 ms | ≈ 720 |
+| idem, relais `production/api-gateway` sélectionné / dézoom maximal | 120 images/s | 120 images/s, robots jusqu'à 2,7 ms | 721 |
+| les mêmes cas avec `prefers-reduced-motion` (sans pods ni paquets animés) | 0 image/s hors transitoires (arrivées de pods, flux) | 119 à 120 images/s | — |
+
+Au repos, la ville est redessinée à pleine cadence tant qu'un pod s'anime (CrashLoopBackOff, ImagePullBackOff, Pending : il y en a dans les deux bancs) : limite connue de `Pods.tsx`, antérieure à ce jalon, qui redemande une frame à chaque image pendant ces animations. Sans elles, le rendu à la demande tient (aucune frame au repos) ; les paquets seuls tournent à 15 images/s de près et s'arrêtent de loin.
 
 ## Critères d'acceptation
 
