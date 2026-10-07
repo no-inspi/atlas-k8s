@@ -66,6 +66,9 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 
 .hint{position:fixed;left:50%;top:calc(env(safe-area-inset-top,0px) + 124px);transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:10px;font-size:13.5px;z-index:4;transition:opacity .4s;white-space:nowrap}
 .hint.hide{opacity:0;pointer-events:none}
+.path-summary{position:fixed;top:calc(env(safe-area-inset-top,0px) + 64px);left:50%;transform:translateX(-50%);z-index:5;padding:4px 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--ink);font-size:12px;white-space:nowrap}
+/* Sous les compteurs quand ils occupent toute la largeur. */
+@media (max-width:1040px){.path-summary{top:calc(env(safe-area-inset-top,0px) + 132px);max-width:calc(100% - 24px);overflow:hidden;text-overflow:ellipsis}}
 
 /* Panel */
 .panel{position:fixed;z-index:5;background:var(--panel);border:1px solid var(--line);display:flex;flex-direction:column;transition:transform .28s cubic-bezier(.2,.8,.2,1)}
