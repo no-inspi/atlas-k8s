@@ -9,7 +9,7 @@ import { gatesOf, gatesOfRoute, isGatewayGate, readyCount, routeBroken, routeRef
 import { BADGE } from './common'
 import { EventsTab } from './EventsTab'
 import { LogsTab } from './LogsTab'
-import { GateOverview, GatewayOverview, PvOverview, RouteOverview, ServiceOverview, VolumeOverview, gatewayBadge } from './NetOverview'
+import { GateOverview, GatewayOverview, PvOverview, RouteOverview, ServiceOverview, VolumeOverview, gateBadge, gatewayBadge } from './NetOverview'
 import { GhostNode, NodeOverview } from './NodeOverview'
 import { PodOverview } from './PodOverview'
 import { RefYamlTab } from './RefYamlTab'
@@ -145,9 +145,7 @@ function NetPanel({ selection, onClose }: { selection: NonNullable<Selection>; o
       if (st.gateways.has(selection.key)) return gatewayPanel(selection.key)
       const g = gatesOf(st.routes.values(), st.gateways).find((x) => x.name === selection.key)
       if (!g) return gone("Porte d'entrée", 'Plus aucune route ne passe par cette porte.')
-      const [badge, badgeClass] = g.refused ? [`${g.refused} route(s) refusée(s)`, 's-err']
-        : g.broken ? [`${g.broken} route(s) cassée(s)`, 's-warn']
-        : [`${g.routes.length} route(s)`, 's-ok']
+      const [badge, badgeClass] = gateBadge(g)
       return (
         <>
           <Head kind={isGatewayGate(g.name) ? 'Gateway (non visible)' : "Porte d'entrée"} name={g.name} badge={badge}

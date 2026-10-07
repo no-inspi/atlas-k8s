@@ -1,6 +1,6 @@
 import { gateway, route } from '../store/fixtures'
 import { gatesOf } from '../store/net'
-import { gatewayBadge } from './NetOverview'
+import { gateBadge, gatewayBadge, pvNote, shareLabel } from './NetOverview'
 
 const refused = route({
   namespace: 'staging', name: 'preview', source: 'HTTPRoute', gates: ['infra/public'],
@@ -37,5 +37,44 @@ describe('gatewayBadge', () => {
   it('compte zéro listener sans planter', () => {
     const gw = gateway({ listeners: [] })
     expect(gatewayBadge(gw, gateFor(gw, []))).toEqual(['0/0 listeners prêts', 's-ok'])
+  })
+})
+
+describe('shareLabel', () => {
+  it('affiche la part en pour cent, un poids nul compris', () => {
+    expect(shareLabel({ weight: 900 })).toBe('90 %')
+    expect(shareLabel({ weight: 0 })).toBe('0 %')
+  })
+  it('affiche un miroir avec son pourcentage, 100 % par défaut', () => {
+    expect(shareLabel({ mirror: true, percent: 10 })).toBe('miroir 10 %')
+    expect(shareLabel({ mirror: true })).toBe('miroir 100 %')
+  })
+  it('affiche un tiret pour un backend unique', () => {
+    expect(shareLabel({})).toBe('—')
+  })
+})
+
+describe('gateBadge', () => {
+  const broken = route({
+    name: 'api', rules: [{ host: '', backend: { namespace: 'production', service: 'gone', kind: 'Service', state: 'missing' } }],
+  })
+  it('porte déduite saine : verte', () => {
+    expect(gateBadge(gatesOf([route()])[0])).toEqual(['1 route(s)', 's-ok'])
+  })
+  it('porte déduite avec route cassée : orange', () => {
+    expect(gateBadge(gatesOf([broken])[0])).toEqual(['1 route(s) cassée(s)', 's-warn'])
+  })
+  it('Gateway non visible avec route refusée : orange', () => {
+    expect(gateBadge(gatesOf([refused])[0])).toEqual(['1 route(s) refusée(s)', 's-warn'])
+  })
+  it('Gateway non visible sans problème : gris', () => {
+    expect(gateBadge(gatesOf([route({ gates: ['infra/public'] })])[0])).toEqual(['1 route(s)', 's-mute'])
+  })
+})
+
+describe('pvNote', () => {
+  it('distingue Retain et Delete pour un PV libéré', () => {
+    expect(pvNote({ phase: 'Released', reclaimPolicy: 'Retain' })).toMatch(/à la main/)
+    expect(pvNote({ phase: 'Released', reclaimPolicy: 'Delete' })).toMatch(/en attente ou a échoué/)
   })
 })

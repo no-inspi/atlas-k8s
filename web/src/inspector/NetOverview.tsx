@@ -1,6 +1,6 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useId, useState, type ReactNode } from 'react'
 import { getEvents, type KubeEvent } from '../api/inspect'
-import { routeKey, type Gateway, type PersistentVolume, type Route, type Service, type Tri, type Volume } from '../api/types'
+import { routeKey, type Backend, type Gateway, type PersistentVolume, type Route, type Service, type Tri, type Volume } from '../api/types'
 import { clusterColors } from '../scene/colors'
 import { gateSignal } from '../scene/health'
 import { postureFor } from '../scene/posture'
@@ -47,8 +47,8 @@ function PodItem({ uid, extra }: { uid: string; extra?: ReactNode }) {
 }
 
 /** Routes d'une porte ou d'un Gateway, avec leur état. */
-function RouteList({ routes, testid }: { routes: Route[]; testid: string }) {
-  if (!routes.length) return <p className="note">Aucune route visible ne s'attache à cette porte.</p>
+function RouteList({ routes, testid, of }: { routes: Route[]; testid: string; of: 'porte' | 'Gateway' }) {
+  if (!routes.length) return <p className="note">Aucune route visible ne s'attache à {of === 'porte' ? 'cette porte' : 'ce Gateway'}.</p>
   return (
     <ul className="podlist" data-testid={testid}>
       {routes.map((r) => (
@@ -110,7 +110,20 @@ export function ServiceOverview({ s }: { s: Service }) {
   )
 }
 
+/** Libellé de la colonne Part : miroir et son pourcentage, part du trafic, ou « — » (backend unique). */
+export function shareLabel(b: Pick<Backend, 'weight' | 'mirror' | 'percent'>): string {
+  if (b.mirror) return `miroir ${b.percent ?? 100} %`
+  return b.weight !== undefined ? fmtShare(b.weight) : '—'
+}
+
+/** Badge d'une porte (déduite, ou Gateway non visible) : libellé selon ses routes, couleur de la scène. */
+export function gateBadge(g: Gate): [string, string] {
+  const label = g.refused ? `${g.refused} route(s) refusée(s)` : g.broken ? `${g.broken} route(s) cassée(s)` : `${g.routes.length} route(s)`
+  return [label, BADGE[gateSignal(g)]]
+}
+
 export function RouteOverview({ r }: { r: Route }) {
+  const id = useId()
   const services = useCluster.getState().services
   const gates = gatesOfRoute(r)
   const shares = r.rules.some((x) => x.backend.weight !== undefined || x.backend.mirror)
@@ -129,8 +142,8 @@ export function RouteOverview({ r }: { r: Route }) {
       </dl>
       {r.parents?.length ? (
         <>
-          <h3>Gateways ({r.parents.length})</h3>
-          <table className="evt" data-testid="parents">
+          <h3 id={`${id}-parents`}>Gateways ({r.parents.length})</h3>
+          <table className="evt" data-testid="parents" aria-labelledby={`${id}-parents`}>
             <thead>
               <tr><th scope="col">Gateway</th><th scope="col">Acceptée</th><th scope="col">Références résolues</th><th scope="col">Raison</th></tr>
             </thead>
@@ -143,7 +156,7 @@ export function RouteOverview({ r }: { r: Route }) {
                     <td><button className="link" onClick={goGate(p.gateway)}>{p.gateway}</button></td>
                     <td><TriText v={p.accepted} /></td>
                     <td><TriText v={p.resolvedRefs} /></td>
-                    <td>{bad ? p.reason ?? '' : ''}</td>
+                    <td>{(bad && p.reason) || '—'}</td>
                   </tr>
                 )
               })}
@@ -151,9 +164,9 @@ export function RouteOverview({ r }: { r: Route }) {
           </table>
         </>
       ) : null}
-      <h3>Règles ({r.rules.length})</h3>
+      <h3 id={`${id}-rules`}>Règles ({r.rules.length})</h3>
       {r.rules.length ? (
-        <table className="evt" data-testid="rules">
+        <table className="evt" data-testid="rules" aria-labelledby={`${id}-rules`}>
           <thead>
             <tr>
               <th scope="col">Hôte · chemin</th><th scope="col">Backend</th>
@@ -178,7 +191,7 @@ export function RouteOverview({ r }: { r: Route }) {
                     {b.port ? `:${b.port}` : ''}{b.namespace !== r.namespace ? ` (${b.namespace})` : ''}
                     {label && <> <span className={cls}>{label}</span></>}
                   </td>
-                  {shares && <td>{b.mirror ? `miroir ${b.percent ?? 100} %` : b.weight !== undefined ? fmtShare(b.weight) : '—'}</td>}
+                  {shares && <td>{shareLabel(b)}</td>}
                   {via && <td>{b.via ?? '—'}</td>}
                 </tr>
               )
@@ -198,7 +211,7 @@ export function GateOverview({ g }: { g: Gate }) {
           ? `Gateway « ${g.name} » : vous ne pouvez pas le lire, ou il n'existe plus ; son état est inconnu. Les routes ci-dessous s'y rattachent.`
           : `Contrôleur d'entrée « ${g.name} » : chaque route ci-dessous entre dans la ville par cette porte.`}
       </p>
-      <RouteList routes={g.routes} testid="gate-routes" />
+      <RouteList routes={g.routes} testid="gate-routes" of="porte" />
     </div>
   )
 }
@@ -212,6 +225,7 @@ export function gatewayBadge(gw: Gateway, g: Gate): [string, string] {
 }
 
 export function GatewayOverview({ gw, g }: { gw: Gateway; g: Gate }) {
+  const id = useId()
   return (
     <div className="p-body">
       {gw.programmed === 'false' && (
@@ -224,9 +238,9 @@ export function GatewayOverview({ gw, g }: { gw: Gateway; g: Gate }) {
         <dt>Programmé</dt><dd><TriText v={gw.programmed} />{gw.reason && gw.programmed !== 'false' ? ` (${gw.reason})` : ''}</dd>
         {gw.addresses?.length ? <><dt>Adresses</dt><dd>{gw.addresses.join(', ')}</dd></> : null}
       </dl>
-      <h3>Listeners ({gw.listeners.length})</h3>
+      <h3 id={`${id}-listeners`}>Listeners ({gw.listeners.length})</h3>
       {gw.listeners.length ? (
-        <table className="evt" data-testid="listeners">
+        <table className="evt" data-testid="listeners" aria-labelledby={`${id}-listeners`}>
           <thead>
             <tr><th scope="col">Listener</th><th scope="col">Protocole · port</th><th scope="col">Hôte</th><th scope="col">Routes</th><th scope="col">Prêt</th></tr>
           </thead>
@@ -244,22 +258,35 @@ export function GatewayOverview({ gw, g }: { gw: Gateway; g: Gate }) {
         </table>
       ) : <p className="note">Aucun listener déclaré : ce Gateway n'accepte aucun trafic.</p>}
       <h3>Routes ({g.routes.length})</h3>
-      <RouteList routes={g.routes} testid="gateway-routes" />
+      <RouteList routes={g.routes} testid="gateway-routes" of="Gateway" />
     </div>
   )
 }
 
-const PV_NOTE: Record<PersistentVolume['phase'], string> = {
-  Available: 'Disponible : aucun PVC ne le réclame.',
-  Released: 'Libéré : son PVC a été supprimé. Avec la reclaim policy Retain, les données restent sur le disque jusqu’à la suppression du volume.',
-  Failed: 'En échec : la récupération automatique du volume a échoué (voir les événements).',
-  Bound: 'Lié à un PVC qui n’existe plus.',
+/** Explication d'un PV sans PVC, selon sa phase et sa reclaim policy. */
+export function pvNote(p: Pick<PersistentVolume, 'phase' | 'reclaimPolicy'>): string {
+  switch (p.phase) {
+    case 'Available':
+      return 'Disponible : aucun PVC ne le réclame.'
+    case 'Released':
+      return p.reclaimPolicy === 'Delete'
+        ? 'Libéré : son PVC a été supprimé et la reclaim policy Delete doit supprimer le volume ; la suppression est en attente ou a échoué.'
+        : p.reclaimPolicy === 'Retain'
+          ? 'Libéré : son PVC a été supprimé. Avec la reclaim policy Retain, les données restent sur le disque : à récupérer ou à supprimer à la main.'
+          : 'Libéré : son PVC a été supprimé.'
+    case 'Failed':
+      return 'En échec : la récupération automatique du volume a échoué (voir les événements).'
+    case 'Bound':
+      return 'Lié à un PVC qui n’existe plus.'
+    default:
+      return p.phase
+  }
 }
 
 export function PvOverview({ p }: { p: PersistentVolume }) {
   return (
     <div className="p-body">
-      <p className={`note ${p.phase === 'Failed' ? 's-err' : ''}`} data-testid="pv-why">{PV_NOTE[p.phase] ?? p.phase}</p>
+      <p className={`note ${p.phase === 'Failed' ? 's-err' : ''}`} data-testid="pv-why">{pvNote(p)}</p>
       <dl className="kv">
         <dt>Classe</dt><dd>{p.storageClass || '(aucune)'}</dd>
         <dt>Capacité</dt><dd>{p.capacity ? fmtMem(p.capacity) : '—'}</dd>
