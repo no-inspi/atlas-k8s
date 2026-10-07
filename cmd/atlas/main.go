@@ -226,7 +226,11 @@ func startClusterSource(ctx context.Context, f flags, rc *rest.Config, client ku
 	if err != nil {
 		return nil, err
 	}
-	src := kube.NewSource(client, hub, kube.Options{Node: kube.NodeOptions{PoolLabel: f.poolLabel}, Log: log})
+	dyn, err := dynamic.NewForConfig(rc)
+	if err != nil {
+		return nil, err
+	}
+	src := kube.NewSource(client, hub, kube.Options{Node: kube.NodeOptions{PoolLabel: f.poolLabel}, Log: log, Dynamic: dyn})
 	go func() {
 		if err := src.Run(ctx); err != nil {
 			log.Error("source Kubernetes arrêtée", "err", err)
