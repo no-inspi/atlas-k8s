@@ -27,3 +27,8 @@ export function pct(value: number, total: number): number {
   if (!total) return 0
   return Math.min(100, Math.max(0, (value / total) * 100))
 }
+
+/** Part du trafic, en pour mille → « 90 % », « 33.3 % ». */
+export function fmtShare(permille: number): string {
+  return `${Math.round(permille) / 10} %`
+}
