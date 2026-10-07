@@ -251,22 +251,24 @@ func (s *Source) buildRoute(id string) (any, string, error) {
 			classes, _ = s.classes.List(labels.Everything())
 		}
 		return ConvertIngress(i, IngressGate(i, classes), s.serviceExists()), id, nil
-	case model.SourceIngressRoute:
+	case model.SourceIngressRoute, model.SourceIngressRouteTCP, model.SourceIngressRouteUDP:
 		// traefik.io avant traefik.containo.us (ordre de traefikGroups).
 		for _, g := range traefikGroups {
-			idx := s.dynIndexer(gvrIngressRoute(g))
-			if idx == nil {
-				continue
-			}
-			o, ok, err := idx.GetByKey(ns + "/" + name)
+			u, err := s.dynGet(traefikRouteGVR(g, source), ns+"/"+name)
 			if err != nil {
 				return nil, "", err
 			}
-			if ok {
-				return ConvertIngressRoute(o.(*unstructured.Unstructured), s.serviceExists()), id, nil
+			if u != nil {
+				return ConvertTraefikRoute(u, source, s.serviceExists(), s.traefikLookup()), id, nil
 			}
 		}
 		return nil, "", nil
+	case model.SourceHTTPRoute, model.SourceGRPCRoute:
+		u, err := s.dynGet(gatewayRouteGVR(source), ns+"/"+name)
+		if err != nil || u == nil {
+			return nil, "", err
+		}
+		return ConvertGatewayRoute(u, source, s.serviceExists()), id, nil
 	}
 	return nil, "", fmt.Errorf("route inconnue %q", id)
 }

@@ -8,11 +8,12 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic/dynamicinformer"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/no-inspi/atlas-k8s/internal/model"
 )
 
 // Types optionnels apportés par une CRD (Traefik, Gateway API) : un informer
@@ -37,23 +38,25 @@ type dynKind struct {
 // crd : nom de la CRD qui apporte le type.
 func (k dynKind) crd() string { return k.gvr.Resource + "." + k.gvr.Group }
 
-// dynKinds : registre complet, dans l'ordre de démarrage. Ajouter un type,
-// c'est ajouter une entrée.
+// dynKinds : registre complet, dans l'ordre de démarrage. TraefikService et
+// Gateways passent avant les routes : au premier calcul, les routes trouvent ce
+// qu'elles visent. Ajouter un type, c'est ajouter une entrée.
 var dynKinds = []dynKind{
+	traefikServiceKind("traefik.io"),
+	traefikServiceKind("traefik.containo.us"),
 	ingressRouteKind("traefik.io"),
 	ingressRouteKind("traefik.containo.us"),
+	traefikRouteKind("traefik.io", model.SourceIngressRouteTCP),
+	traefikRouteKind("traefik.containo.us", model.SourceIngressRouteTCP),
+	traefikRouteKind("traefik.io", model.SourceIngressRouteUDP),
+	traefikRouteKind("traefik.containo.us", model.SourceIngressRouteUDP),
+	gatewayKind(),
+	gatewayRouteKind(model.SourceHTTPRoute),
+	gatewayRouteKind(model.SourceGRPCRoute),
 }
 
 func ingressRouteKind(g string) dynKind {
-	return dynKind{gvr: gvrIngressRoute(g), on: (*Source).onIngressRoute, indexers: func(*Source) cache.Indexers {
-		return cache.Indexers{indexByBackend: func(o any) ([]string, error) {
-			u, ok := o.(*unstructured.Unstructured)
-			if !ok {
-				return nil, nil
-			}
-			return routeBackends(ConvertIngressRoute(u, nil)), nil
-		}}
-	}}
+	return dynKind{gvr: gvrIngressRoute(g), on: (*Source).onIngressRoute, indexers: traefikIndexers}
 }
 
 type dynInformer struct {

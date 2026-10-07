@@ -2,6 +2,7 @@ package kube
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,12 +19,46 @@ import (
 var irGVR = gvrIngressRoute("traefik.io")
 
 // fakeDynamic : client dynamique factice qui sait lister les CRD et tous les types du registre.
+// Les objets d'un type du registre sont rangés sous sa ressource : le client
+// factice devinerait sinon le pluriel (« gatewaies » pour Gateway).
 func fakeDynamic(objs ...runtime.Object) *dynamicfake.FakeDynamicClient {
 	kinds := map[schema.GroupVersionResource]string{gvrCRD: "CustomResourceDefinitionList"}
 	for _, k := range dynKinds {
 		kinds[k.gvr] = k.gvr.Resource + "List"
 	}
-	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), kinds, objs...)
+	var rest []runtime.Object
+	type placed struct {
+		gvr schema.GroupVersionResource
+		u   *unstructured.Unstructured
+	}
+	var known []placed
+	for _, o := range objs {
+		if u, ok := o.(*unstructured.Unstructured); ok {
+			if gvr, ok := registryGVR(u); ok {
+				known = append(known, placed{gvr, u})
+				continue
+			}
+		}
+		rest = append(rest, o)
+	}
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), kinds, rest...)
+	for _, p := range known {
+		if err := dyn.Tracker().Create(p.gvr, p.u, p.u.GetNamespace()); err != nil {
+			panic(err)
+		}
+	}
+	return dyn
+}
+
+// registryGVR : type du registre d'un objet (groupe, version, kind en minuscules suivi de « s »).
+func registryGVR(u *unstructured.Unstructured) (schema.GroupVersionResource, bool) {
+	gvk := u.GroupVersionKind()
+	for _, k := range dynKinds {
+		if k.gvr.GroupVersion() == gvk.GroupVersion() && k.gvr.Resource == strings.ToLower(gvk.Kind)+"s" {
+			return k.gvr, true
+		}
+	}
+	return schema.GroupVersionResource{}, false
 }
 
 // servedDyn : client dynamique factice d'un cluster qui sert les types donnés :

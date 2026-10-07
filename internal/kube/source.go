@@ -406,6 +406,8 @@ func (s *Source) build(r ref) (any, string, error) {
 			return nil, "", err
 		}
 		return *w, r.id, nil
+	case stream.KindGateway:
+		return s.buildGateway(r.id)
 	case stream.KindService:
 		return s.buildService(r.id)
 	case stream.KindRoute:
