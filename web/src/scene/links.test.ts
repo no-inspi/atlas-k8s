@@ -130,3 +130,67 @@ describe('pathOf', () => {
     expect(isLit(fam('data')[0], p)).toBe(false)
   })
 })
+
+describe('Gateway API et Traefik complet', () => {
+  const canary = route({ source: 'HTTPRoute', group: 'gateway.networking.k8s.io', name: 'canary',
+    gate: 'infra/public', gates: ['infra/public', 'infra/internal'], rules: [
+      { host: 'shop', path: '/', backend: { namespace: 'production', service: 'api', kind: 'Service', state: 'ok', weight: 900 } },
+      { host: 'shop', path: '/', backend: { namespace: 'production', service: 'db', kind: 'Service', state: 'ok', weight: 0 } },
+    ] })
+  const shadow = route({ source: 'IngressRoute', group: 'traefik.io', name: 'shadow', gate: 'traefik', rules: [
+    { match: 'Host(`s`)', backend: { namespace: 'production', service: 'api', kind: 'Service', state: 'ok', via: 'production/split' } },
+    { match: 'Host(`s`)', backend: { namespace: 'production', service: 'db', kind: 'Service', state: 'ok', mirror: true, percent: 10, via: 'production/split' } },
+  ] })
+  const legacy = route({ source: 'HTTPRoute', group: 'gateway.networking.k8s.io', name: 'legacy', gate: 'infra/public', rules: [
+    { backend: { namespace: 'production', service: 'api', kind: 'Service', state: 'refused' } },
+    { backend: { namespace: 'production', service: 'db', kind: 'Service', state: 'refused' } },
+  ] })
+  const lost = route({ source: 'IngressRoute', group: 'traefik.io', name: 'lost', gate: 'traefik', rules: [
+    { match: 'Host(`l`)', backend: { namespace: 'production', service: 'nowhere', kind: 'TraefikService', state: 'missing' } },
+  ] })
+  const gnet = layoutNetwork(city, [api, db].map((s) => ({ key: serviceKey(s), namespace: s.namespace, name: s.name })),
+    ['infra/internal', 'infra/public', 'traefik'], [])
+  const ls = buildLinks({ city, net: gnet, services: [api, db], routes: [canary, shadow, legacy, lost], volumes: [],
+    pods: new Map(pods.map((p) => [p.uid, p])), targets })
+  const of = (f: Link['family']) => ls.filter((l) => l.family === f)
+  const main = (gate: string, svc: string) => of('main').find((l) => l.keys[0] === `gate:${gate}` && l.keys[1] === `service:${svc}`)
+
+  it('trace une ligne principale depuis chaque porte de la route', () => {
+    expect(of('main').filter((l) => l.keys.includes(`route:${routeKey(canary)}`)).map((l) => l.keys.slice(0, 2)).sort()).toEqual([
+      ['gate:infra/internal', 'service:production/api'], ['gate:infra/internal', 'service:production/db'],
+      ['gate:infra/public', 'service:production/api'], ['gate:infra/public', 'service:production/db'],
+    ])
+  })
+
+  it('porte le poids et éteint les paquets d’une ligne de poids 0', () => {
+    expect([main('infra/public', 'production/api')!.weight, main('infra/public', 'production/api')!.live]).toEqual([900, true])
+    expect([main('infra/public', 'production/db')!.weight, main('infra/public', 'production/db')!.live]).toEqual([0, false])
+    expect(main('traefik', 'production/api')!.weight).toBeUndefined()
+  })
+
+  it('dessine les miroirs à part, sans paquets', () => {
+    expect(of('mirror').map((l) => [l.keys[0], l.keys[1], l.live])).toEqual([['gate:traefik', 'service:production/db', false]])
+    expect(main('traefik', 'production/db')).toBeUndefined()
+  })
+
+  it('signale une route refusée une fois par porte et namespace, avec un panneau', () => {
+    expect(of('refused').map((l) => l.keys)).toEqual([['gate:infra/public', `route:${routeKey(legacy)}`]])
+    expect(of('refused')[0].sign).toBeDefined()
+    expect(of('main').some((l) => l.keys.includes(`route:${routeKey(legacy)}`))).toBe(false)
+  })
+
+  it('signale aussi un TraefikService introuvable', () => {
+    expect(of('broken').map((l) => l.keys)).toEqual([['gate:traefik', `route:${routeKey(lost)}`]])
+  })
+
+  it('chemin d’un Gateway : sa porte, ses routes, ses Services et leurs pods ; d’un PV : lui seul', () => {
+    const p = pathOf('gateway:infra/public', ls)
+    expect([...p]).toEqual(expect.arrayContaining([
+      'gateway:infra/public', 'gate:infra/public', `route:${routeKey(legacy)}`, 'service:production/api', 'service:production/db', 'pod:a', 'pod:db',
+    ]))
+    expect(p.has('gate:traefik')).toBe(false)
+    expect([...pathOf('pv:pv-1', ls)]).toEqual(['pv:pv-1'])
+    expect([...pathOf('service:production/db', ls)]).toEqual(expect.arrayContaining(['gate:traefik', 'gate:infra/public', 'gate:infra/internal']))
+    expect([...pathOf('pod:db', ls)]).toEqual(expect.arrayContaining(['service:production/db', 'gate:traefik']))
+  })
+})

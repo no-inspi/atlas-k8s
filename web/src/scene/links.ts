@@ -1,4 +1,5 @@
 import { routeKey, serviceKey, volumeKey, type Pod, type Route, type Service, type Volume } from '../api/types'
+import { gatesOfRoute } from '../store/net'
 import { ALLEY, type CityLayout } from './layout'
 import { TANK_PITCH, type NetLayout } from './netLayout'
 
@@ -6,7 +7,7 @@ import { TANK_PITCH, type NetLayout } from './netLayout'
 // la rue est (entrepôts) et l'allée à l'est de chaque parcelle : jamais à
 // travers un bâtiment.
 
-export type Family = 'main' | 'broken' | 'data' | 'fibre'
+export type Family = 'main' | 'broken' | 'refused' | 'mirror' | 'data' | 'fibre'
 export type Pt = [number, number]
 
 export interface Link {
@@ -14,12 +15,14 @@ export interface Link {
   points: Pt[]
   /** Objets reliés, « type:clé » : gate:, route:, service:, pod:, volume:. */
   keys: string[]
-  /** Paquets ou gouttes qui circulent (endpoint ready, pod Running). */
+  /** Paquets ou gouttes qui circulent (endpoint ready, pod Running, ligne de poids non nul). */
   live: boolean
   /** Namespace du lien (Service, backend de la route ou PVC) : les chips de namespace l'estompent. */
   ns: string
-  /** Route cassée : position du panneau « ? ». */
+  /** Route cassée ou refusée : position du panneau « ? » ou « ⊘ ». */
   sign?: Pt
+  /** Ligne principale : plus forte part du trafic (pour mille) parmi ses règles ; absent si l'une n'est pas pondérée. */
+  weight?: number
 }
 
 export interface LinkInput {
@@ -47,6 +50,14 @@ function toPod(city: CityLayout, laneZ: number, pod: { x: number; z: number }, p
   return [[alley, laneZ], [alley, pod.z], [pod.x, pod.z]]
 }
 
+/** Poids d'une ligne partagée : un backend non pondéré reçoit tout le trafic de sa règle. */
+const mergeWeight = (a: number | undefined, b: number | undefined) => (a === undefined || b === undefined ? undefined : Math.max(a, b))
+
+/** Familles qui partent d'une porte. */
+const FROM_GATE: Family[] = ['main', 'broken', 'refused', 'mirror']
+/** Familles qui arrivent à un relais depuis une porte. */
+const TO_SERVICE: Family[] = ['main', 'mirror']
+
 export function buildLinks(i: LinkInput): Link[] {
   const { city, net } = i
   const out: Link[] = []
@@ -57,39 +68,54 @@ export function buildLinks(i: LinkInput): Link[] {
     return plot ? { t, p, plot, avenue: nearestAvenue(city, plot.z) } : null
   }
 
-  // Lignes principales : une par couple (porte, Service), toutes routes confondues.
+  // Lignes principales : une par (porte, Service), toutes routes confondues ;
+  // une route à plusieurs portes en trace une depuis chacune. Miroirs à part.
+  // Route cassée (backend introuvable) ou refusée (Gateway) : une ligne vers le
+  // tronçon du namespace visé, avec un panneau, par (porte, route, namespace).
   const mains = new Map<string, Link>()
-  const brokenSeen = new Set<string>() // une route cassée par (porte, route, namespace manquant)
+  const signSeen = new Set<string>()
   for (const r of i.routes) {
-    const gate = net.gates.get(r.gate)
-    if (!gate) continue
     const rk = `route:${routeKey(r)}`
-    for (const rule of r.rules) {
-      const b = rule.backend
-      if (b.kind !== 'Service') continue
-      const sk = `${b.namespace}/${b.service}`
-      if (b.state === 'missing') {
-        const id = `${r.gate}|${rk}|${b.namespace}`
-        if (brokenSeen.has(id)) continue
-        brokenSeen.add(id)
-        const seg = net.segments.find((s) => s.ns === b.namespace)
-        const lane = net.lanes[seg?.avenue ?? 0]
-        const x = seg ? seg.x0 : net.westX + 1.2
-        out.push({ family: 'broken', ns: b.namespace, keys: [`gate:${r.gate}`, rk], live: false, sign: [x, lane.main],
-          points: dedupe([[gate.x + 0.3, gate.z], [net.westX, gate.z], [net.westX, lane.main], [x, lane.main]]) })
-        continue
+    for (const gateName of new Set(gatesOfRoute(r))) {
+      const gate = net.gates.get(gateName)
+      if (!gate) continue
+      const gk = `gate:${gateName}`
+      for (const rule of r.rules) {
+        const b = rule.backend
+        if (b.state === 'missing' || b.state === 'refused') {
+          const family: Family = b.state === 'missing' ? 'broken' : 'refused'
+          const id = `${family}|${gateName}|${rk}|${b.namespace}`
+          if (signSeen.has(id)) continue
+          signSeen.add(id)
+          const seg = net.segments.find((s) => s.ns === b.namespace)
+          const lane = net.lanes[seg?.avenue ?? 0]
+          const x = seg ? seg.x0 : net.westX + 1.2
+          out.push({ family, ns: b.namespace, keys: [gk, rk], live: false, sign: [x, lane.main],
+            points: dedupe([[gate.x + 0.3, gate.z], [net.westX, gate.z], [net.westX, lane.main], [x, lane.main]]) })
+          continue
+        }
+        if (b.kind !== 'Service') continue
+        const sk = `${b.namespace}/${b.service}`
+        const relay = net.relays.get(sk)
+        if (!relay) continue
+        const family: Family = b.mirror ? 'mirror' : 'main'
+        const w = b.mirror ? undefined : b.weight
+        const id = `${family}|${gateName}|${sk}`
+        const prev = mains.get(id)
+        if (prev) {
+          if (!prev.keys.includes(rk)) prev.keys.push(rk)
+          prev.weight = mergeWeight(prev.weight, w)
+          if (prev.weight === undefined) delete prev.weight
+          prev.live = family === 'main' && prev.weight !== 0
+          continue
+        }
+        const lane = net.lanes[relay.avenue]
+        mains.set(id, {
+          family, ns: relay.ns, live: family === 'main' && w !== 0, keys: [gk, `service:${sk}`, rk],
+          ...(w !== undefined ? { weight: w } : {}),
+          points: dedupe([[gate.x + 0.3, gate.z], [net.westX, gate.z], [net.westX, lane.main], [relay.x, lane.main], [relay.x, relay.z]]),
+        })
       }
-      const relay = net.relays.get(sk)
-      if (!relay) continue
-      const id = `${r.gate}|${sk}`
-      const prev = mains.get(id)
-      if (prev) {
-        if (!prev.keys.includes(rk)) prev.keys.push(rk)
-        continue
-      }
-      const lane = net.lanes[relay.avenue]
-      mains.set(id, { family: 'main', ns: relay.ns, live: true, keys: [`gate:${r.gate}`, `service:${sk}`, rk],
-        points: dedupe([[gate.x + 0.3, gate.z], [net.westX, gate.z], [net.westX, lane.main], [relay.x, lane.main], [relay.x, relay.z]]) })
     }
   }
   out.push(...mains.values())
@@ -130,9 +156,10 @@ const typeOf = (k: string) => k.slice(0, k.indexOf(':'))
 
 /**
  * Chemin d'un objet (« type:clé ») : ce qui s'allume quand on le sélectionne.
- * Porte ou route → Services → pods → volumes (une route n'entraîne pas les
- * autres routes de ses lignes) ; Service → portes, pods →
- * volumes ; pod → Services → portes, et volumes ; volume → pods → Services.
+ * Porte, Gateway ou route → Services → pods → volumes (une route n'entraîne
+ * pas les autres routes de ses lignes) ; Service → portes, pods → volumes ;
+ * pod → Services → portes, et volumes ; volume → pods → Services ; PV
+ * orphelin → lui seul. Un Gateway allume sa porte (« gate:ns/name »).
  */
 export function pathOf(sel: string, links: Link[]): Set<string> {
   const out = new Set([sel])
@@ -144,28 +171,38 @@ export function pathOf(sel: string, links: Link[]): Set<string> {
     return added
   }
   const only = (s: Set<string>, type: string) => new Set([...s].filter((k) => typeOf(k) === type))
+  const fromGate = (start: Set<string>, isRoute: boolean) => {
+    // Une ligne principale est partagée par les routes vers un même Service :
+    // d'une route, on ne prend que ses objets, pas les routes sœurs.
+    const first = via(start, FROM_GATE, (k) => !isRoute || typeOf(k) !== 'route')
+    via(only(via(only(first, 'service'), ['fibre']), 'pod'), ['data'])
+  }
   const self = new Set([sel])
   switch (typeOf(sel)) {
     case 'gate':
-    case 'route': {
-      // Une ligne principale est partagée par les routes vers un même Service :
-      // d'une route, on ne prend que ses objets, pas les routes sœurs.
-      const first = via(self, ['main', 'broken'], (k) => typeOf(sel) !== 'route' || typeOf(k) !== 'route')
-      const svcs = only(first, 'service')
-      via(only(via(svcs, ['fibre']), 'pod'), ['data'])
+      fromGate(self, false)
+      break
+    case 'route':
+      fromGate(self, true)
+      break
+    case 'gateway': {
+      const gate = `gate:${sel.slice(sel.indexOf(':') + 1)}`
+      out.add(gate)
+      fromGate(new Set([gate]), false)
       break
     }
     case 'service':
-      via(self, ['main'])
+      via(self, TO_SERVICE)
       via(only(via(self, ['fibre']), 'pod'), ['data'])
       break
     case 'pod':
-      via(only(via(self, ['fibre']), 'service'), ['main'])
+      via(only(via(self, ['fibre']), 'service'), TO_SERVICE)
       via(self, ['data'])
       break
     case 'volume':
       via(only(via(self, ['data']), 'pod'), ['fibre'])
       break
+    // pv : citerne vide, sans lien.
   }
   return out
 }
