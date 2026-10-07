@@ -1,15 +1,15 @@
 import { useEffect, type ReactNode } from 'react'
-import { eventsResource, routeRef, serviceRef, volumeRef, type Ref } from '../api/inspect'
+import { eventsResource, gatewayRef, pvRef, routeRef, serviceRef, volumeRef, type Ref } from '../api/inspect'
 import type { Pod } from '../api/types'
 import { clusterColors } from '../scene/colors'
-import { HEALTH_LABEL, healthSignal, volumeSignal } from '../scene/health'
+import { HEALTH_LABEL, healthSignal, pvSignal, volumeSignal } from '../scene/health'
 import { postureFor } from '../scene/posture'
 import { useCluster, type InspectorTab, type Selection } from '../store/cluster'
-import { gatesOf, readyCount, routeBroken } from '../store/net'
+import { gatesOf, gatesOfRoute, isGatewayGate, readyCount, routeBroken, routeRefused } from '../store/net'
 import { BADGE } from './common'
 import { EventsTab } from './EventsTab'
 import { LogsTab } from './LogsTab'
-import { GateOverview, RouteOverview, ServiceOverview, VolumeOverview } from './NetOverview'
+import { GateOverview, GatewayOverview, PvOverview, RouteOverview, ServiceOverview, VolumeOverview, gatewayBadge } from './NetOverview'
 import { GhostNode, NodeOverview } from './NodeOverview'
 import { PodOverview } from './PodOverview'
 import { RefYamlTab } from './RefYamlTab'
@@ -75,7 +75,7 @@ function NetBody({ target, children }: { target: Ref; children: ReactNode }) {
   return <>{children}</>
 }
 
-/** Panneau d'un Service, d'une route, d'une porte ou d'un PVC. */
+/** Panneau d'un Service, d'une route, d'une porte, d'un Gateway, d'un PVC ou d'un PV. */
 function NetPanel({ selection, onClose }: { selection: NonNullable<Selection>; onClose: () => void }) {
   const st = useCluster.getState()
   const colors = clusterColors(st)
@@ -85,6 +85,20 @@ function NetPanel({ selection, onClose }: { selection: NonNullable<Selection>; o
       <div className="gone">{text}</div>
     </>
   )
+  const gatewayPanel = (key: string) => {
+    const gw = st.gateways.get(key)
+    if (!gw) return gone('Gateway', 'Ce Gateway a été supprimé.')
+    // gatesOf crée une porte par Gateway visible, même sans route.
+    const g = gatesOf(st.routes.values(), st.gateways).find((x) => x.name === key)!
+    const [badge, badgeClass] = gatewayBadge(gw, g)
+    return (
+      <>
+        <Head kind={`Gateway · ${gw.namespace}`} name={gw.name} badge={badge} badgeClass={badgeClass}
+          color={colors.get(gw.namespace)} tabs={NET_TABS} onClose={onClose} />
+        <NetBody target={gatewayRef(gw)}><GatewayOverview gw={gw} g={g} /></NetBody>
+      </>
+    )
+  }
   switch (selection.type) {
     case 'service': {
       const s = st.services.get(selection.key)
@@ -101,11 +115,14 @@ function NetPanel({ selection, onClose }: { selection: NonNullable<Selection>; o
     case 'route': {
       const r = st.routes.get(selection.key)
       if (!r) return gone('Route', 'Cette route a été supprimée.')
-      const broken = routeBroken(r)
+      const gates = gatesOfRoute(r)
+      const [badge, badgeClass] = routeRefused(r) ? ['Refusée', 's-err']
+        : routeBroken(r) ? ['Service introuvable', 's-err']
+        : [gates.length > 1 ? `${gates.length} portes` : `Porte ${gates[0]}`, 's-ok']
       return (
         <>
-          <Head kind={`${r.source} · ${r.namespace}`} name={r.name} badge={broken ? 'Service introuvable' : `Porte ${r.gate}`}
-            badgeClass={broken ? 's-err' : 's-ok'} color={colors.get(r.namespace)} tabs={NET_TABS} onClose={onClose} />
+          <Head kind={`${r.source} · ${r.namespace}`} name={r.name} badge={badge} badgeClass={badgeClass}
+            color={colors.get(r.namespace)} tabs={NET_TABS} onClose={onClose} />
           <NetBody target={routeRef(r)}><RouteOverview r={r} /></NetBody>
         </>
       )
@@ -121,14 +138,31 @@ function NetPanel({ selection, onClose }: { selection: NonNullable<Selection>; o
         </>
       )
     }
+    case 'gateway':
+      return gatewayPanel(selection.key)
     case 'gate': {
-      const g = gatesOf(st.routes.values()).find((x) => x.name === selection.key)
+      // Porte d'un Gateway visible : même panneau que le Gateway lui-même.
+      if (st.gateways.has(selection.key)) return gatewayPanel(selection.key)
+      const g = gatesOf(st.routes.values(), st.gateways).find((x) => x.name === selection.key)
       if (!g) return gone("Porte d'entrée", 'Plus aucune route ne passe par cette porte.')
+      const [badge, badgeClass] = g.refused ? [`${g.refused} route(s) refusée(s)`, 's-err']
+        : g.broken ? [`${g.broken} route(s) cassée(s)`, 's-warn']
+        : [`${g.routes.length} route(s)`, 's-ok']
       return (
         <>
-          <Head kind="Porte d'entrée" name={g.name} badge={g.broken ? `${g.broken} route(s) cassée(s)` : `${g.routes.length} route(s)`}
-            badgeClass={g.broken ? 's-warn' : 's-ok'} tabs={[['overview', 'Aperçu']]} onClose={onClose} />
+          <Head kind={isGatewayGate(g.name) ? 'Gateway (non visible)' : "Porte d'entrée"} name={g.name} badge={badge}
+            badgeClass={badgeClass} tabs={[['overview', 'Aperçu']]} onClose={onClose} />
           <GateOverview g={g} />
+        </>
+      )
+    }
+    case 'pv': {
+      const p = st.persistentVolumes.get(selection.key)
+      if (!p) return gone('PersistentVolume', 'Ce volume a été supprimé ou lié à un PVC.')
+      return (
+        <>
+          <Head kind="PersistentVolume" name={p.name} badge={p.phase} badgeClass={BADGE[pvSignal(p)]} tabs={NET_TABS} onClose={onClose} />
+          <NetBody target={pvRef(p)}><PvOverview p={p} /></NetBody>
         </>
       )
     }
