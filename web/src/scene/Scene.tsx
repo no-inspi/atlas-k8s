@@ -8,6 +8,7 @@ import { useCluster } from '../store/cluster'
 import { Buildings } from './Buildings'
 import { PerfMeter, perfEnabled } from './PerfMeter'
 import { City } from './City'
+import { Links } from './GroundLinks'
 import { Network } from './Network'
 import { pickables } from './pick'
 import { Pods } from './Pods'
@@ -223,6 +224,7 @@ export function Scene() {
       <Lights theme={theme} />
       <City theme={theme} />
       <Buildings theme={theme} />
+      <Links theme={theme} reducedMotion={reducedMotion} />
       <Network theme={theme} reducedMotion={reducedMotion} />
       <Pods theme={theme} reducedMotion={reducedMotion} />
       <Stacks theme={theme} />

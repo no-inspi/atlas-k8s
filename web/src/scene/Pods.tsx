@@ -56,7 +56,7 @@ const GEOMETRY = {
   question: new THREE.PlaneGeometry(0.4, 0.4),
 }
 
-function questionTexture(): THREE.Texture {
+export function questionTexture(): THREE.Texture {
   const c = document.createElement('canvas')
   c.width = c.height = 64
   const g = c.getContext('2d')!
