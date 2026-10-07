@@ -9,3 +9,5 @@ web/e2e/__screenshots__/
 .DS_Store
 deploy.local.mk
 deploy/values.local.yaml
+.superpowers/
+.playwright-mcp/
