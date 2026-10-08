@@ -4,6 +4,7 @@
 # Le contexte kubectl est toujours explicite (kind-atlas par défaut).
 set -eu
 CTX="${1:-kind-atlas}"
+"$(dirname "$0")/../kind-guard.sh" "$CTX"
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 k() { kubectl --context "$CTX" "$@"; }
 
