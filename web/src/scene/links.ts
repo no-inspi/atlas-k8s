@@ -42,6 +42,41 @@ export interface LinkInput {
 const dedupe = (pts: Pt[]): Pt[] =>
   pts.filter((p, i) => i === 0 || Math.abs(p[0] - pts[i - 1][0]) + Math.abs(p[1] - pts[i - 1][1]) > 1e-6)
 
+/** Point (x, z) dans un quartier, bords compris. */
+export function inDistrict(city: CityLayout, x: number, z: number): boolean {
+  return city.districts.some((d) => Math.abs(x - d.x) <= d.width / 2 + 1e-6 && Math.abs(z - d.z) <= d.depth / 2 + 1e-6)
+}
+
+/**
+ * Polyligne coupée aux bords des quartiers qu'elle traverse : chaque segment est
+ * ensuite entièrement sur un socle ou entièrement au sol.
+ */
+export function splitAtDistricts(city: CityLayout, pts: readonly Pt[]): Pt[] {
+  const out: Pt[] = []
+  pts.forEach((p, i) => {
+    if (i > 0) {
+      const q = pts[i - 1]
+      const dx = p[0] - q[0], dz = p[1] - q[1]
+      const cuts: number[] = []
+      const keep = (t: number) => t > 1e-6 && t < 1 - 1e-6
+      for (const d of city.districts) {
+        const x0 = d.x - d.width / 2, x1 = d.x + d.width / 2, z0 = d.z - d.depth / 2, z1 = d.z + d.depth / 2
+        if (dx) for (const ex of [x0, x1]) {
+          const t = (ex - q[0]) / dx, z = q[1] + t * dz
+          if (keep(t) && z >= z0 && z <= z1) cuts.push(t)
+        }
+        if (dz) for (const ez of [z0, z1]) {
+          const t = (ez - q[1]) / dz, x = q[0] + t * dx
+          if (keep(t) && x >= x0 && x <= x1) cuts.push(t)
+        }
+      }
+      for (const t of cuts.sort((a, b) => a - b)) out.push([q[0] + t * dx, q[1] + t * dz])
+    }
+    out.push(p)
+  })
+  return out
+}
+
 function nearestAvenue(city: CityLayout, z: number): number {
   let best = 0
   city.avenues.forEach((a, i) => { if (Math.abs(a.z - z) < Math.abs(city.avenues[best].z - z)) best = i })
