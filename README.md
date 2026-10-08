@@ -117,6 +117,8 @@ Toutes les options sont commentées dans [`values.yaml`](deploy/helm/cluster-atl
 
 **Depuis son poste** : copiez `deploy.local.mk.example` en `deploy.local.mk` (registre, contexte kube, fichier de valeurs ; ignoré par git), puis `make deploy` construit l'image, la pousse et fait le `helm upgrade`. L'arbre de travail doit être commité : le tag de l'image est le commit.
 
+Pour plusieurs clusters, `hack/deploy.sh CIBLE` lit `deploy/CIBLE.env` (modèle : `deploy/cible.env.example`, ignoré par git) : il vérifie que le contexte pointe sur le cluster attendu, l'accès et les imagePullSecrets, demande confirmation, ne reconstruit pas une image déjà poussée et fait un `helm upgrade --atomic`. `--dry-run` s'arrête à un `helm upgrade --dry-run=server`.
+
 Sur kind, `make helm-kind` construit l'image, la charge dans le cluster et installe le chart (sans OIDC jusqu'au jalon 4, donc sans exposition : `kubectl -n cluster-atlas port-forward svc/cluster-atlas 8080`).
 
 ## Tests
