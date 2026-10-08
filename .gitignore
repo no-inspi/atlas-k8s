@@ -12,3 +12,5 @@ deploy/values.local.yaml
 .superpowers/
 .playwright-mcp/
 hack/crds/.cache/
+deploy/*.env
+deploy/values.*.yaml
