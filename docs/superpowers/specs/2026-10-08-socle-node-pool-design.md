@@ -27,9 +27,9 @@ Une fonction pure `poolCaption(members: Node[]): [string, string]` remplace le c
 
 **Ligne 1** : `<pool> · <type>` si tous les nodes ont le même type d'instance non vide, `<pool> · types mixtes` s'ils en ont plusieurs, `<pool>` seul si aucun n'en a.
 
-**Ligne 2** : groupes de taille nominale puis total allouable, par exemple `3 × 2 vCPU / 8 Gi · 5.8 vCPU / 17.7 Gi allouables`.
+**Ligne 2** : groupes de taille nominale puis total allouable, par exemple `3 × 2 vCPU / 8Gi · 5.79 vCPU / 18Gi allouables` (unités collées comme `fmtMem`).
 
-- Un groupe = nodes de même capacité nominale arrondie : CPU en vCPU entiers (arrondi au plus proche, minimum 1), mémoire en Gi entiers (arrondi au plus proche). Une e2-standard-2 (capacité mémoire ≈ 7,8 Gi) s'affiche donc `2 vCPU / 8 Gi`.
+- Un groupe = nodes de même capacité nominale arrondie : CPU en vCPU entiers (arrondi au plus proche, minimum 1), mémoire en Gi entiers (arrondi au plus proche). Une e2-standard-2 (capacité mémoire ≈ 7,8 Gi) s'affiche donc `2 vCPU / 8Gi`.
 - Groupes triés par effectif décroissant puis par taille croissante, joints par ` + ` ; au-delà de 3 groupes : les 2 premiers puis `+ N autres`.
 - Total allouable : somme des `allocatable` du pool, CPU avec `fmtCpu` (en cœurs, suffixe ` vCPU`), mémoire avec `fmtMem`. Les unités suivent le reste de l'interface (Gi, point décimal).
 - Les nodes fantômes ou de capacité nulle sont exclus des groupes ; si aucun node n'a de capacité, la ligne 2 est vide et le socle n'affiche qu'une ligne.
@@ -57,8 +57,8 @@ Constante exportée `SOCLE_H = 0.35` (dans `layout.ts`, à côté des autres dim
 
 - **Go** : `convert` reprend `Status.Capacity` ; la démo produit `capacity ≥ allocatable`.
 - **Vitest** :
-  - `poolCaption` : pool homogène (e2-standard-2 → `2 vCPU / 8 Gi`), pool mixte (deux groupes, `types mixtes`), plus de 3 groupes (`+ N autres`), nodes fantômes seuls (une ligne), type d'instance vide ;
+  - `poolCaption` : pool homogène (e2-standard-2 → `2 vCPU / 8Gi`), pool mixte (deux groupes, `types mixtes`), plus de 3 groupes (`+ N autres`), nodes fantômes seuls (une ligne), type d'instance vide ;
   - `linkHeight` et la coupe des segments au bord d'un quartier ;
   - `layout.test.ts` : nouvelle profondeur de quartier (`LABEL_STRIP`).
-- **Playwright** : captures de la ville régénérées et relues.
+- **Playwright** : `make e2e` reste vert (pas de capture de référence versionnée).
 - **Vérification visuelle** : `make demo`, `--demo-scale 100x30` (perf et lisibilité), puis kind (`make run-kind`) en clair et en sombre.
