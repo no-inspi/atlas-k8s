@@ -5,6 +5,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic/dynamicinformer"
 	"k8s.io/client-go/tools/cache"
@@ -37,21 +38,8 @@ func (s *Source) startDynamic(ctx context.Context) {
 			s.wantDyn(ctx, k)
 		}
 	} else {
-		inf := dynamicinformer.NewFilteredDynamicInformer(dyn, gvrCRD, metav1.NamespaceAll, 0, cache.Indexers{}, nil).Informer()
-		_ = inf.SetTransform(slimCRD)
-		reg, _ := inf.AddEventHandler(cache.ResourceEventHandlerFuncs{
-			AddFunc:    func(o any) { s.syncCRD(ctx, o) },
-			UpdateFunc: func(_, cur any) { s.syncCRD(ctx, cur) },
-			DeleteFunc: func(o any) {
-				if d, ok := o.(cache.DeletedFinalStateUnknown); ok {
-					o = d.Obj
-				}
-				s.dropCRD(o)
-			},
-		})
-		go inf.Run(ctx.Done())
-		// reg.HasSynced : le handler a vu les CRD déjà installées, les types servis sont déclarés.
-		if !cache.WaitForCacheSync(wait.Done(), reg.HasSynced) {
+		synced := s.watchCRDs(ctx)
+		if !cache.WaitForCacheSync(wait.Done(), synced...) {
 			if ctx.Err() == nil {
 				s.opts.Log.Warn("CRD non synchronisées à temps : types dynamiques démarrés plus tard")
 			}
@@ -68,6 +56,55 @@ func (s *Source) startDynamic(ctx context.Context) {
 			return
 		}
 	}
+}
+
+// watchCRDs lance un informer par CRD du registre, restreint à son nom
+// (fieldSelector metadata.name) : les autres CRD du cluster, au schéma parfois
+// lourd, ne sont ni listées ni décodées. Rend les HasSynced des handlers (vrais
+// quand ils ont vu les CRD déjà installées, donc déclaré les types servis).
+func (s *Source) watchCRDs(ctx context.Context) []cache.InformerSynced {
+	var synced []cache.InformerSynced
+	seen := map[string]bool{}
+	for _, k := range dynKinds {
+		name := k.crd()
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		sel := fields.OneTermEqualSelector("metadata.name", name).String()
+		inf := dynamicinformer.NewFilteredDynamicInformer(s.opts.Dynamic, gvrCRD, metav1.NamespaceAll, 0, cache.Indexers{},
+			func(o *metav1.ListOptions) { o.FieldSelector = sel }).Informer()
+		_ = inf.SetTransform(slimCRD)
+		// mine : le serveur filtre déjà par nom ; ce contrôle garde le handler juste
+		// face à un client qui ignorerait le sélecteur.
+		mine := func(o any) (*unstructured.Unstructured, bool) {
+			if d, ok := o.(cache.DeletedFinalStateUnknown); ok {
+				o = d.Obj
+			}
+			u, ok := o.(*unstructured.Unstructured)
+			return u, ok && u.GetName() == name
+		}
+		reg, _ := inf.AddEventHandler(cache.ResourceEventHandlerFuncs{
+			AddFunc: func(o any) {
+				if u, ok := mine(o); ok {
+					s.syncCRD(ctx, u)
+				}
+			},
+			UpdateFunc: func(_, cur any) {
+				if u, ok := mine(cur); ok {
+					s.syncCRD(ctx, u)
+				}
+			},
+			DeleteFunc: func(o any) {
+				if u, ok := mine(o); ok {
+					s.dropCRD(u)
+				}
+			},
+		})
+		go inf.Run(ctx.Done())
+		synced = append(synced, reg.HasSynced)
+	}
+	return synced
 }
 
 // syncCRD déclare servis ou non les types qu'apporte une CRD selon qu'elle

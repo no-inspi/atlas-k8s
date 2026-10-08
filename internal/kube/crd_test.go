@@ -300,3 +300,45 @@ func TestCRDEventsAfterTransientFailureAreThrottled(t *testing.T) {
 		t.Fatalf("%d list en %v : au plus un essai par %v attendu", got, flood, again)
 	}
 }
+
+// Les CRD sont suivies une à une, par nom (fieldSelector) : celles hors du
+// registre ne sont ni listées ni décodées.
+func TestCRDsWatchedByNameOnly(t *testing.T) {
+	client := fake.NewClientset(netFixtures()...)
+	dyn := servedDyn(client, kindsOf(irGVR), adminRoute("traefik.io", "api"))
+	_, sk := startSourceWith(t, client, Options{Dynamic: dyn})
+	if _, ok := sk.get(stream.KindRoute, adminID); !ok {
+		t.Fatal("IngressRoute absente")
+	}
+	want := map[string]bool{}
+	for _, k := range dynKinds {
+		want["metadata.name="+k.crd()] = false
+	}
+	for _, a := range dyn.Actions() {
+		if a.GetResource() != gvrCRD {
+			continue
+		}
+		var fields string
+		switch x := a.(type) {
+		case k8stesting.ListAction:
+			fields = x.GetListRestrictions().Fields.String()
+		case k8stesting.WatchAction:
+			fields = x.GetWatchRestrictions().Fields.String()
+		default:
+			continue
+		}
+		if fields == "" && a.GetVerb() == "list" {
+			continue // sonde de droits (limit=1)
+		}
+		if _, ok := want[fields]; !ok {
+			t.Errorf("%s des CRD sans sélection par nom du registre : %q", a.GetVerb(), fields)
+			continue
+		}
+		want[fields] = true
+	}
+	for f, seen := range want {
+		if !seen {
+			t.Errorf("CRD non suivie : %s", f)
+		}
+	}
+}
