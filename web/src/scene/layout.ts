@@ -55,7 +55,7 @@ export interface CityLayout {
 const CELL = 0.95 // pas entre deux blocs de pods
 const BUILDING_DEPTH = 1.6 // fond de parcelle occupé par le bâtiment
 export const ALLEY = 1.9 // allée entre deux parcelles
-const DISTRICT_PAD = 1.2 // marge intérieure d'un quartier
+const DISTRICT_PAD = 1.35 // marge intérieure d'un quartier
 const LABEL_STRIP = 1.7 // bande à l'avant du quartier pour sa légende sur une ou deux lignes (jamais masquée par un bâtiment)
 const LABEL_STRIP_3 = 2.4 // idem sur trois lignes
 const NARROW = 9 // en dessous de cette largeur de quartier, la ligne de capacité est coupée en deux

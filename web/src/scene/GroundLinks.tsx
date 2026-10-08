@@ -54,20 +54,24 @@ export function ribbon(items: readonly RibbonItem[], w: number, y: number, lift?
   for (const it of items) {
     const a = it.alpha, on = it.live ? 1 : 0
     let d = 0
+    const heightOf = (i: number) => y + (lift ? lift((it.points[i][0] + it.points[i + 1][0]) / 2, (it.points[i][1] + it.points[i + 1][1]) / 2) : 0)
     for (let i = 0; i + 1 < it.points.length; i++) {
       const p0 = it.points[i], p1 = it.points[i + 1]
       const x0 = p0[0], z0 = p0[1], x1 = p1[0], z1 = p1[1]
       const len = Math.hypot(x1 - x0, z1 - z0) || 1e-6
       const ux = (x1 - x0) / len, uz = (z1 - z0) / len
       const nx = -uz * h, nz = ux * h
-      // Chaque segment déborde d'une demi-largeur : les coudes restent fermés.
-      const ex = ux * h, ez = uz * h
-      const sy = y + (lift ? lift((x0 + x1) / 2, (z0 + z1) / 2) : 0)
+      // Chaque segment déborde d'une demi-largeur : les coudes restent fermés, sauf
+      // là où la hauteur change (bord de socle) : le ruban ne dépasse pas le bord.
+      const sy = heightOf(i)
+      const f0 = i > 0 && heightOf(i - 1) !== sy ? 0 : h
+      const f1 = i + 2 < it.points.length && heightOf(i + 1) !== sy ? 0 : h
+      const sx0 = ux * f0, sz0 = uz * f0, sx1 = ux * f1, sz1 = uz * f1
       let o = v * 3
-      position[o++] = x0 - ex + nx; position[o++] = sy; position[o++] = z0 - ez + nz
-      position[o++] = x0 - ex - nx; position[o++] = sy; position[o++] = z0 - ez - nz
-      position[o++] = x1 + ex + nx; position[o++] = sy; position[o++] = z1 + ez + nz
-      position[o++] = x1 + ex - nx; position[o++] = sy; position[o] = z1 + ez - nz
+      position[o++] = x0 - sx0 + nx; position[o++] = sy; position[o++] = z0 - sz0 + nz
+      position[o++] = x0 - sx0 - nx; position[o++] = sy; position[o++] = z0 - sz0 - nz
+      position[o++] = x1 + sx1 + nx; position[o++] = sy; position[o++] = z1 + sz1 + nz
+      position[o++] = x1 + sx1 - nx; position[o++] = sy; position[o] = z1 + sz1 - nz
       dist[v] = dist[v + 1] = d
       dist[v + 2] = dist[v + 3] = d + len
       alpha.fill(a, v, v + 4)
