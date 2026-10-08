@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AVENUE, GATE_ZONE, layoutCity, plotGeometry, slotCapacity, queuePosition } from './layout'
+import { AVENUE, GATE_ZONE, layoutCity, plotGeometry, poolCaption, slotCapacity, queuePosition } from './layout'
 import { node } from '../store/fixtures'
 
 const n = (name: string, pool: string, extra = {}) => node({ name, pool, ...extra })
@@ -125,5 +125,49 @@ describe('queuePosition', () => {
     expect(b.x - a.x).toBeCloseTo(1.05)
     expect(a.z).toBe(b.z)
     expect(far.z).toBeGreaterThan(a.z)
+  })
+})
+
+describe('poolCaption', () => {
+  const GI = 1 << 30
+  // e2-standard-2 : capacité 2 vCPU / 7,77 Gi, allouable 1,93 vCPU / 6 Gi.
+  const e2s2 = (name: string) => node({
+    name, pool: 'p', instanceType: 'e2-standard-2',
+    capacity: { cpu: 2000, memory: 8145248 * 1024 }, allocatable: { cpu: 1930, memory: 6 * GI },
+  })
+  const e2s4 = (name: string) => node({
+    name, pool: 'p', instanceType: 'e2-standard-4',
+    capacity: { cpu: 4000, memory: 16 * GI }, allocatable: { cpu: 3920, memory: 13000 * (1 << 20) },
+  })
+
+  it('pool homogène : type, taille nominale arrondie et total allouable', () => {
+    expect(poolCaption('p', [e2s2('a'), e2s2('b'), e2s2('c')])).toEqual([
+      'p · e2-standard-2', '3 × 2 vCPU / 8Gi · 5.79 vCPU / 18Gi allouables',
+    ])
+  })
+
+  it('pool mixte : groupes par taille, du plus nombreux au moins nombreux', () => {
+    expect(poolCaption('p', [e2s4('c'), e2s2('a'), e2s2('b')])).toEqual([
+      'p · types mixtes', '2 × 2 vCPU / 8Gi + 1 × 4 vCPU / 16Gi · 7.78 vCPU / 24.7Gi allouables',
+    ])
+  })
+
+  it('au-delà de 3 tailles : les 2 premières puis le reste compté', () => {
+    const sized = [1, 2, 3, 4].map((c) => node({ name: `n${c}`, pool: 'p', capacity: { cpu: c * 1000, memory: 4 * GI } }))
+    expect(poolCaption('p', sized)[1]).toMatch(/^1 × 1 vCPU \/ 4Gi \+ 1 × 2 vCPU \/ 4Gi \+ 2 autres · /)
+  })
+
+  it('nodes fantômes ou sans capacité : une seule ligne', () => {
+    const ghost = node({ name: 'g', pool: 'nodes non visibles', instanceType: '', capacity: { cpu: 0, memory: 0 }, ghost: true })
+    expect(poolCaption('nodes non visibles', [ghost])).toEqual(['nodes non visibles', ''])
+  })
+
+  it('type d’instance inconnu : le nom du pool seul', () => {
+    expect(poolCaption('p', [node({ instanceType: '' })])[0]).toBe('p')
+  })
+
+  it('layoutCity reporte la légende sur le quartier', () => {
+    const c = layoutCity([e2s2('a')], plotGeometry(12))
+    expect(c.districts[0].caption[0]).toBe('p · e2-standard-2')
   })
 })

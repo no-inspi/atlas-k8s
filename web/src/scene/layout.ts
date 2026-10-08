@@ -3,6 +3,7 @@
 // Unité : la même que la scène du prototype (une parcelle de 12 places = 4,1).
 
 import type { Node } from '../api/types'
+import { fmtCpu, fmtMem } from '../ui/format'
 
 export type DistrictStyle = 'std' | 'spot' | 'gpu'
 
@@ -19,7 +20,8 @@ export interface PlotGeometry {
 export interface District {
   pool: string
   style: DistrictStyle
-  label: string
+  /** Nom et type d'instance ; capacité nominale et total allouable (vide si inconnue). */
+  caption: [string, string]
   x: number // centre
   z: number
   width: number
@@ -54,7 +56,9 @@ const CELL = 0.95 // pas entre deux blocs de pods
 const BUILDING_DEPTH = 1.6 // fond de parcelle occupé par le bâtiment
 export const ALLEY = 1.9 // allée entre deux parcelles
 const DISTRICT_PAD = 1.2 // marge intérieure d'un quartier
-const LABEL_STRIP = 1.0 // bande à l'avant du quartier pour son nom (jamais masquée par un bâtiment)
+const LABEL_STRIP = 1.7 // bande à l'avant du quartier pour sa légende sur deux lignes (jamais masquée par un bâtiment)
+/** Hauteur du socle d'un quartier : bâtiments, pods et liens des quartiers sont posés dessus. */
+export const SOCLE_H = 0.35
 const DISTRICT_GAP = 2.4 // rue entre deux quartiers
 const MIN_PLOT = 4.1
 /** Largeur d'une avenue : une rangée de relais, trois voies de liens et les noms des tronçons. */
@@ -94,6 +98,34 @@ function styleOf(nodes: Node[]): DistrictStyle {
   return 'std'
 }
 
+const GI = 1 << 30
+
+/**
+ * Légende d'un quartier. Ligne 1 : pool et type d'instance (« types mixtes » s'il
+ * y en a plusieurs). Ligne 2 : nodes groupés par taille nominale arrondie (vCPU
+ * et Gi entiers), puis total allouable ; vide si aucun node n'a de capacité.
+ */
+export function poolCaption(pool: string, members: Node[]): [string, string] {
+  const types = new Set(members.map((n) => n.instanceType).filter(Boolean))
+  const head = types.size === 1 ? `${pool} · ${[...types][0]}` : types.size > 1 ? `${pool} · types mixtes` : pool
+  const sized = members.filter((n) => !n.ghost && n.capacity.cpu > 0)
+  if (!sized.length) return [head, '']
+  const groups = new Map<string, { cpu: number; mem: number; count: number }>()
+  for (const n of sized) {
+    const cpu = Math.max(1, Math.round(n.capacity.cpu / 1000)), mem = Math.round(n.capacity.memory / GI)
+    const g = groups.get(`${cpu}/${mem}`) ?? { cpu, mem, count: 0 }
+    g.count++
+    groups.set(`${cpu}/${mem}`, g)
+  }
+  const sorted = [...groups.values()].sort((a, b) => b.count - a.count || a.cpu - b.cpu || a.mem - b.mem)
+  const fmt = (g: { cpu: number; mem: number; count: number }) => `${g.count} × ${g.cpu} vCPU / ${g.mem}Gi`
+  const sizes = sorted.length > 3 ? [...sorted.slice(0, 2).map(fmt), `${sorted.length - 2} autres`] : sorted.map(fmt)
+  const cpu = sized.reduce((s, n) => s + n.allocatable.cpu, 0)
+  const mem = sized.reduce((s, n) => s + n.allocatable.memory, 0)
+  return [head, `${sizes.join(' + ')} · ${fmtCpu(cpu)} vCPU / ${fmtMem(mem)} allouables`]
+}
+
+
 /**
  * Quartiers triés par nom de pool, nodes triés par nom en grille dans leur
  * quartier, quartiers rangés en rangées (algorithme d'étagères), le tout centré
@@ -111,11 +143,10 @@ export function layoutCity(nodes: Node[], geo: PlotGeometry): CityLayout {
     const members = byPool.get(pool)!.sort((a, b) => a.name.localeCompare(b.name))
     const cols = Math.min(members.length, Math.max(3, Math.ceil(Math.sqrt(members.length))))
     const rows = Math.ceil(members.length / cols)
-    const sample = members[0]
     return {
       pool, members, cols, rows,
       style: styleOf(members),
-      label: sample.instanceType ? `${pool} · ${sample.instanceType}` : pool,
+      caption: poolCaption(pool, members),
       width: cols * pitchX - ALLEY + 2 * DISTRICT_PAD,
       depth: rows * pitchZ - ALLEY + 2 * DISTRICT_PAD + LABEL_STRIP,
     }
@@ -154,7 +185,7 @@ export function layoutCity(nodes: Node[], geo: PlotGeometry): CityLayout {
   const plots = new Map<string, { x: number; z: number }>()
   for (const p of placed) {
     const dx = ox + p.x0, dz = oz + p.z0
-    districts.push({ pool: p.pool, style: p.style, label: p.label, x: dx + p.width / 2, z: dz + p.depth / 2, width: p.width, depth: p.depth })
+    districts.push({ pool: p.pool, style: p.style, caption: p.caption, x: dx + p.width / 2, z: dz + p.depth / 2, width: p.width, depth: p.depth })
     p.members.forEach((n, i) => {
       plots.set(n.name, {
         x: dx + DISTRICT_PAD + (i % p.cols) * pitchX + geo.width / 2,
