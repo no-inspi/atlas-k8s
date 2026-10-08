@@ -47,6 +47,7 @@ OIDC_DEV_FLAGS = --auth-mode=oidc --context $(KIND_CTX) --cluster-name kind-atla
 	--oidc-client-secret dev-secret-not-for-production --oidc-scopes openid,email,profile,groups
 
 dex-up:
+	$(KIND_GUARD)
 	kubectl --context $(KIND_CTX) apply -f hack/dev-rbac.yaml
 	docker rm -f atlas-dex >/dev/null 2>&1 || true
 	docker run -d --name atlas-dex -p 5556:5556 -v $(CURDIR)/hack/dex/config.yaml:/etc/dex/config.yaml:ro \
@@ -82,9 +83,13 @@ KIND_CTX := kind-atlas
 ifeq ($(strip $(KIND_CTX)),)
 $(error KIND_CTX est vide : les cibles kind exigent un contexte explicite)
 endif
+# Première ligne de toute recette qui écrit dans $(KIND_CTX) : échoue si le
+# contexte n'est pas kind-* ou si son serveur n'est pas en boucle locale.
+KIND_GUARD = @hack/kind-guard.sh '$(KIND_CTX)'
 
 kind-up:
 	kind create cluster --config hack/kind.yaml
+	$(KIND_GUARD)
 	kubectl --context $(KIND_CTX) taint nodes atlas-worker4 nvidia.com/gpu=present:NoSchedule --overwrite
 	hack/metrics-server.sh $(KIND_CTX)
 
@@ -120,6 +125,7 @@ $(TRAEFIK_CRDS):
 crds: $(GATEWAY_API_CRDS) $(TRAEFIK_CRDS)
 
 scenarios: crds
+	$(KIND_GUARD)
 	kubectl --context $(KIND_CTX) apply -f hack/scenarios/
 	$(RESTORE_SCENARIOS)
 
@@ -137,10 +143,12 @@ RESTORE_SCENARIOS = kubectl --context $(KIND_CTX) apply --server-side -f $(TRAEF
 	&& hack/scenarios-gateway/status.sh $(KIND_CTX)
 
 scenarios-restore: crds
+	$(KIND_GUARD)
 	$(RESTORE_SCENARIOS)
 
 # Atlas contre le cluster kind, sans authentification (jalon 4 : OIDC via Dex).
 run-kind: build
+	$(KIND_GUARD)
 	$(BIN) --auth-mode=none --context $(KIND_CTX) --cluster-name kind-atlas
 
 # Contexte forcé sur kind : les tests suppriment et réinstallent des CRD. Quoi
@@ -148,6 +156,7 @@ run-kind: build
 # retirés et les CRD et scénarios réappliqués ; le code de sortie est celui de go test (1 si la remise en état
 # échoue après des tests verts).
 test-integration: embed-dir crds
+	$(KIND_GUARD)
 	@status=0; trap 'status=130' INT TERM; \
 	ATLAS_CONTEXT=$(KIND_CTX) GATEWAY_API_CRDS=$(abspath $(GATEWAY_API_CRDS)) TRAEFIK_CRDS=$(abspath $(TRAEFIK_CRDS)) \
 		go test -tags integration -count=1 -timeout 5m -v ./internal/kube -run Live || status=$$?; \
@@ -172,6 +181,7 @@ scan: image
 
 # Installe le chart sur le cluster kind avec l'image locale (sans OIDC : pas d'exposition).
 helm-kind: image
+	$(KIND_GUARD)
 	kind load docker-image $(IMAGE):$(VERSION) --name atlas
 	helm upgrade --install cluster-atlas deploy/helm/cluster-atlas --kube-context $(KIND_CTX) \
 	  -n cluster-atlas --create-namespace --wait --timeout 3m \
@@ -181,9 +191,11 @@ helm-kind: image
 # Parcours OIDC complet dans le cluster : http://atlas.localtest.me
 # (make kind-down kind-up scenarios kind-oidc helm-kind-oidc).
 kind-oidc:
-	hack/oidc/setup.sh
+	$(KIND_GUARD)
+	CTX='$(KIND_CTX)' hack/oidc/setup.sh
 
 helm-kind-oidc: image
+	$(KIND_GUARD)
 	kind load docker-image $(IMAGE):$(VERSION) --name atlas
 	helm upgrade --install cluster-atlas deploy/helm/cluster-atlas --kube-context $(KIND_CTX) \
 	  -n cluster-atlas --create-namespace --wait --timeout 3m \
@@ -191,10 +203,10 @@ helm-kind-oidc: image
 
 # Test de charge : 100 nodes kwok et 3 000 pods (NODES=…, PODS=… pour changer).
 load-up:
-	hack/load/kwok-up.sh
+	CTX='$(KIND_CTX)' hack/load/kwok-up.sh
 
 load-down:
-	hack/load/kwok-down.sh
+	CTX='$(KIND_CTX)' hack/load/kwok-down.sh
 
 # Déploiement depuis le poste : image construite pour PLATFORM, poussée sur IMAGE,
 # puis helm upgrade sur KUBE_CONTEXT avec VALUES (voir deploy.local.mk.example).

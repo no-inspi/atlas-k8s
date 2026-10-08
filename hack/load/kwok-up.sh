@@ -3,6 +3,7 @@
 # gérés par kwok et PODS pods « pause » qui y tournent, sans consommer de CPU.
 set -eu
 CTX="${CTX:-kind-atlas}"
+"$(dirname "$0")/../kind-guard.sh" "$CTX"
 NODES="${NODES:-100}"
 PODS="${PODS:-3000}"
 KWOK="${KWOK:-v0.8.0}"
