@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AVENUE, GATE_ZONE, captionStrip, layoutCity, plotGeometry, poolCaption, slotCapacity, queuePosition } from './layout'
+import { AVENUE, GATE_ZONE, captionStrip, drawnY, layoutCity, plotGeometry, poolCaption, slotCapacity, queuePosition, SOCLE_H } from './layout'
 import { node } from '../store/fixtures'
 
 const n = (name: string, pool: string, extra = {}) => node({ name, pool, ...extra })
@@ -204,5 +204,19 @@ describe('poolCaption', () => {
     const wide = layoutCity([e2s2('a'), e2s2('b'), e2s2('c')], geo).districts[0]
     expect(captionStrip(3)).toBeGreaterThan(captionStrip(2))
     expect(narrow.depth - wide.depth).toBeCloseTo(captionStrip(3) - captionStrip(2))
+  })
+})
+
+describe('drawnY', () => {
+  const c = layoutCity([node({ name: 'a', pool: 'p' })], plotGeometry(12))
+  const d = c.districts[0]
+
+  it('dans un quartier, un pod ne descend pas sous le dessus du socle', () => {
+    expect(drawnY(c, d.x, d.z, 0.02)).toBe(SOCLE_H)
+    expect(drawnY(c, d.x, d.z, SOCLE_H + 0.1)).toBeCloseTo(SOCLE_H + 0.1)
+  })
+
+  it('hors quartier, la hauteur est inchangée', () => {
+    expect(drawnY(c, d.x + d.width, d.z, 0.02)).toBe(0.02)
   })
 })

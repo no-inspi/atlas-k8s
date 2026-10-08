@@ -213,6 +213,16 @@ export function layoutCity(nodes: Node[], geo: PlotGeometry): CityLayout {
   }
 }
 
+/** Point (x, z) dans un quartier, bords compris. */
+export function inDistrict(city: CityLayout, x: number, z: number): boolean {
+  return city.districts.some((d) => Math.abs(x - d.x) <= d.width / 2 + 1e-6 && Math.abs(z - d.z) <= d.depth / 2 + 1e-6)
+}
+
+/** Hauteur de dessin d'un pod en (x, z) : jamais sous le dessus du socle dans un quartier (pas de traversée du flanc). */
+export function drawnY(city: CityLayout, x: number, z: number, y: number): number {
+  return inDistrict(city, x, z) ? Math.max(y, SOCLE_H) : y
+}
+
 /** Position du i-ème pod en attente dans la file. */
 export function queuePosition(q: Rect, i: number): { x: number; z: number } {
   const perRow = Math.max(1, Math.floor((q.width - 0.6) / 1.05))

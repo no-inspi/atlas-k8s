@@ -6,7 +6,7 @@ import { Part, opacityBasicMaterial, opacityMaterial, roundCapacity } from './in
 import { perfStats } from './PerfMeter'
 import { pickables } from './pick'
 import { kindOf } from './podView'
-import { SOCLE_H } from './layout'
+import { SOCLE_H, drawnY } from './layout'
 import { poseAt, postureFor, type Antenna } from './posture'
 import type { Theme } from './theme'
 import { BLOCK_SIDE, phaseOf, podPositions, world } from './world'
@@ -209,9 +209,11 @@ export function Pods({ theme, reducedMotion }: { theme: Theme; reducedMotion: bo
       a.scale += (pose.scale - a.scale) * k
       a.yaw = posture.kind === 'spin' ? yaw : a.yaw + (yaw - a.yaw) * k
       const s = Math.max(0.02, a.scale)
-      const y = a.y + pose.hop
+      // En montée ou descente, le pod reste au-dessus du socle tant qu'il est dans un quartier.
+      const dy = world.layout && Math.abs(ty - a.y) > 1e-3 ? drawnY(world.layout, a.x, a.z, a.y) : a.y
+      const y = dy + pose.hop
       const side = BLOCK_SIDE * s, h = a.h * s
-      podPositions.set(p.uid, { x: a.x, y: a.y, z: a.z, h })
+      podPositions.set(p.uid, { x: a.x, y: dy, z: a.z, h })
 
       const dim = (st.nsFilter !== null && p.namespace !== st.nsFilter) || (focus.podUids !== null && !focus.podUids.has(p.uid))
       const opacity = dim ? 0.1 : posture.kind === 'stomp' ? 0.75 : posture.kind === 'fade' ? 0.55 : 1

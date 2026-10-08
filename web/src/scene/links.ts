@@ -1,6 +1,6 @@
 import { routeKey, serviceKey, volumeKey, type Pod, type Route, type Service, type Volume } from '../api/types'
 import { gatesOfRoute } from '../store/net'
-import { ALLEY, type CityLayout } from './layout'
+import { ALLEY, inDistrict, type CityLayout } from './layout'
 import { TANK_PITCH, type NetLayout } from './netLayout'
 
 // Liens au sol, tracés en angles droits par les avenues, la rue ouest (portes),
@@ -42,10 +42,7 @@ export interface LinkInput {
 const dedupe = (pts: Pt[]): Pt[] =>
   pts.filter((p, i) => i === 0 || Math.abs(p[0] - pts[i - 1][0]) + Math.abs(p[1] - pts[i - 1][1]) > 1e-6)
 
-/** Point (x, z) dans un quartier, bords compris. */
-export function inDistrict(city: CityLayout, x: number, z: number): boolean {
-  return city.districts.some((d) => Math.abs(x - d.x) <= d.width / 2 + 1e-6 && Math.abs(z - d.z) <= d.depth / 2 + 1e-6)
-}
+export { inDistrict }
 
 /**
  * Polyligne coupée aux bords des quartiers qu'elle traverse : chaque segment est
