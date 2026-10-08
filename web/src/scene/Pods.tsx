@@ -6,6 +6,7 @@ import { Part, opacityBasicMaterial, opacityMaterial, roundCapacity } from './in
 import { perfStats } from './PerfMeter'
 import { pickables } from './pick'
 import { kindOf } from './podView'
+import { SOCLE_H } from './layout'
 import { poseAt, postureFor, type Antenna } from './posture'
 import type { Theme } from './theme'
 import { BLOCK_SIDE, phaseOf, podPositions, world } from './world'
@@ -190,7 +191,7 @@ export function Pods({ theme, reducedMotion }: { theme: Theme; reducedMotion: bo
       if (!target || target.hidden) continue // pod représenté par une pile
       const posture = postureFor(p)
       const pose = poseAt(posture.kind, t, phaseOf(p.uid), still)
-      const ty = target.onNode ? PLATFORM_TOP : 0.02
+      const ty = target.onNode ? SOCLE_H + PLATFORM_TOP : 0.02
       // Seuls l'attente (saut) et le démarrage (rotation) bougent ; un bloc sain est immobile.
       const yaw = posture.kind === 'spin' ? pose.yaw : 0
       if (!still && (posture.kind === 'stomp' || posture.kind === 'spin' || posture.kind === 'fallen' || posture.blink || posture.question)) animated = true

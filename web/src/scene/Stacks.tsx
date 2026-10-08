@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import * as THREE from 'three'
 import { useCluster } from '../store/cluster'
+import { SOCLE_H } from './layout'
 import type { Theme } from './theme'
 import { world } from './world'
 
@@ -54,7 +55,7 @@ export function Stacks({ theme }: { theme: Theme }) {
   return (
     <group>
       {items.map((st) => (
-        <sprite key={st.uid} position={[st.x, 0.5 + st.top + 0.55, st.z]} scale={[0.7, 0.35, 1]} raycast={() => null} renderOrder={10}>
+        <sprite key={st.uid} position={[st.x, SOCLE_H + 0.5 + st.top + 0.55, st.z]} scale={[0.7, 0.35, 1]} raycast={() => null} renderOrder={10}>
           <spriteMaterial map={st.tex} depthTest={false} transparent />
         </sprite>
       ))}
