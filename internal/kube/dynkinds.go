@@ -38,9 +38,10 @@ type dynKind struct {
 // crd : nom de la CRD qui apporte le type.
 func (k dynKind) crd() string { return k.gvr.Resource + "." + k.gvr.Group }
 
-// dynKinds : registre complet, dans l'ordre de démarrage. TraefikService et
-// Gateways passent avant les routes : au premier calcul, les routes trouvent ce
-// qu'elles visent. Ajouter un type, c'est ajouter une entrée.
+// dynKinds : registre complet. Les types démarrent en parallèle, dans un ordre
+// quelconque : quand un TraefikService ou un Gateway démarre (ou change), ses
+// objets remarquent les routes qui les visent (index), qui convergent donc
+// quel que soit l'ordre. Ajouter un type, c'est ajouter une entrée.
 var dynKinds = []dynKind{
 	traefikServiceKind("traefik.io"),
 	traefikServiceKind("traefik.containo.us"),
