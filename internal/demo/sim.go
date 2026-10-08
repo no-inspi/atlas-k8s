@@ -156,6 +156,7 @@ func (s *Sim) buildNodes() {
 				Zone:         zones[s.rng.IntN(len(zones))],
 				Spot:         p.Spot,
 				GPU:          p.GPU,
+				Capacity:     model.Resources{CPU: p.CapCPU, Memory: p.CapMem, Pods: 110},
 				Allocatable:  model.Resources{CPU: p.CPU, Memory: p.Mem, Pods: 110},
 				Conditions: []model.Condition{
 					{Type: "Ready", Status: "True", Reason: "KubeletReady", Message: "kubelet is posting ready status"},

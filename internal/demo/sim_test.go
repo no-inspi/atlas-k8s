@@ -287,6 +287,15 @@ func TestJobCompletesThenDisappears(t *testing.T) {
 	}
 }
 
+func TestNodeCapacityCoversAllocatable(t *testing.T) {
+	_, sink := start(10)
+	for name, n := range sink.nodes {
+		if n.Capacity.CPU < n.Allocatable.CPU || n.Capacity.Memory < n.Allocatable.Memory || n.Capacity.CPU == 0 {
+			t.Errorf("%s : capacity %+v, allocatable %+v", name, n.Capacity, n.Allocatable)
+		}
+	}
+}
+
 func TestNodeRequestedTracksPods(t *testing.T) {
 	_, sink := start(10)
 	for name, n := range sink.nodes {
