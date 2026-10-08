@@ -14,7 +14,8 @@ export function pod(over: Partial<Pod> = {}): Pod {
 export function node(over: Partial<Node> = {}): Node {
   return {
     name: 'gke-prod-default-pool-aaaa-n1', pool: 'default-pool', instanceType: 'e2-standard-4', zone: 'europe-west1-b',
-    spot: false, gpu: 0, allocatable: { cpu: 3920, memory: 13000 << 20, pods: 110 }, requested: { cpu: 1000, memory: 1 << 30 },
+    spot: false, gpu: 0, capacity: { cpu: 4000, memory: 16 * 2 ** 30, pods: 110 },
+    allocatable: { cpu: 3920, memory: 13000 << 20, pods: 110 }, requested: { cpu: 1000, memory: 1 << 30 },
     conditions: [{ type: 'Ready', status: 'True' }], taints: [], unschedulable: false,
     kubeletVersion: 'v1.31.4', createdAt: '2026-10-01T00:00:00Z',
     ...over,

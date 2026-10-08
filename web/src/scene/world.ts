@@ -273,7 +273,7 @@ export function ghostNodes(known: ReadonlyMap<string, Node>, pods: Pod[]): Node[
   const names = new Set(pods.map((p) => p.nodeName).filter((n) => n && !known.has(n)))
   return [...names].map((name) => ({
     name, pool: 'nodes non visibles', instanceType: '', zone: '', spot: false, gpu: 0,
-    allocatable: { cpu: 0, memory: 0 }, requested: { cpu: 0, memory: 0 }, conditions: [], taints: [],
+    capacity: { cpu: 0, memory: 0 }, allocatable: { cpu: 0, memory: 0 }, requested: { cpu: 0, memory: 0 }, conditions: [], taints: [],
     unschedulable: false, kubeletVersion: '', createdAt: '', ghost: true,
   }))
 }
