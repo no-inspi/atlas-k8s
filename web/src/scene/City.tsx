@@ -27,6 +27,8 @@ function labelTexture(lines: readonly string[], w: number, h: number, align: Can
     // Première ligne en gras, les suivantes plus petites ; police réduite si le texte déborde.
     const weight = i === 0 ? 600 : 500
     let px = i === 0 ? size : Math.round(size * 0.72)
+    // Plusieurs lignes : chaque ligne doit tenir dans sa rangée du canvas.
+    if (rows.length > 1) px = Math.min(px, Math.floor((c.height / rows.length) * 0.85))
     g.font = `${weight} ${px}px ${theme.font}`
     while (px > 12 && g.measureText(text).width > c.width - 16) g.font = `${weight} ${(px -= 2)}px ${theme.font}`
     g.fillText(text, align === 'left' ? 8 : c.width / 2, (c.height * (i + 0.5)) / rows.length)
@@ -34,7 +36,11 @@ function labelTexture(lines: readonly string[], w: number, h: number, align: Can
   tex = new THREE.CanvasTexture(c)
   tex.colorSpace = THREE.SRGBColorSpace
   tex.anisotropy = 4
-  if (textures.size > 400) textures.clear()
+  if (textures.size > 400) {
+    // Libère la mémoire GPU ; three.js ré-envoie une texture disposée si un matériau l'utilise encore.
+    textures.forEach((t) => t.dispose())
+    textures.clear()
+  }
   textures.set(key, tex)
   return tex
 }

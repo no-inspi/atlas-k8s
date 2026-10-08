@@ -158,8 +158,21 @@ describe('poolCaption', () => {
   })
 
   it('nodes fantômes ou sans capacité : une seule ligne', () => {
-    const ghost = node({ name: 'g', pool: 'nodes non visibles', instanceType: '', capacity: { cpu: 0, memory: 0 }, ghost: true })
+    const ghost = node({ name: 'g', pool: 'nodes non visibles', instanceType: '', capacity: { cpu: 2000, memory: 8 * GI }, ghost: true })
     expect(poolCaption('nodes non visibles', [ghost])).toEqual(['nodes non visibles', ''])
+  })
+
+  it('fantôme et vrai node dans le même pool : seul le vrai node compte', () => {
+    const ghost = node({ name: 'g', pool: 'p', capacity: { cpu: 2000, memory: 8 * GI }, allocatable: { cpu: 1930, memory: 6 * GI }, ghost: true })
+    const [, l2] = poolCaption('p', [ghost, e2s2('a')])
+    expect(l2).toMatch(/^1 × 2 vCPU \/ 8Gi · /)
+  })
+
+  it('petits totaux : vCPU toujours en cœurs, mémoire nominale jamais 0Gi', () => {
+    const small = node({ name: 's', pool: 'p', capacity: { cpu: 1000, memory: 2 * GI }, allocatable: { cpu: 940, memory: 1.5 * GI } })
+    expect(poolCaption('p', [small])[1]).toBe('1 × 1 vCPU / 2Gi · 0.94 vCPU / 1.5Gi allouables')
+    const tiny = node({ name: 't', pool: 'p', capacity: { cpu: 1000, memory: 256 * (1 << 20) }, allocatable: { cpu: 900, memory: 200 * (1 << 20) } })
+    expect(poolCaption('p', [tiny])[1]).toMatch(/^1 × 1 vCPU \/ 1Gi · /)
   })
 
   it('type d’instance inconnu : le nom du pool seul', () => {

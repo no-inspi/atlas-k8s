@@ -3,7 +3,7 @@
 // Unité : la même que la scène du prototype (une parcelle de 12 places = 4,1).
 
 import type { Node } from '../api/types'
-import { fmtCpu, fmtMem } from '../ui/format'
+import { fmtMem } from '../ui/format'
 
 export type DistrictStyle = 'std' | 'spot' | 'gpu'
 
@@ -112,7 +112,7 @@ export function poolCaption(pool: string, members: Node[]): [string, string] {
   if (!sized.length) return [head, '']
   const groups = new Map<string, { cpu: number; mem: number; count: number }>()
   for (const n of sized) {
-    const cpu = Math.max(1, Math.round(n.capacity.cpu / 1000)), mem = Math.round(n.capacity.memory / GI)
+    const cpu = Math.max(1, Math.round(n.capacity.cpu / 1000)), mem = Math.max(1, Math.round(n.capacity.memory / GI))
     const g = groups.get(`${cpu}/${mem}`) ?? { cpu, mem, count: 0 }
     g.count++
     groups.set(`${cpu}/${mem}`, g)
@@ -122,7 +122,7 @@ export function poolCaption(pool: string, members: Node[]): [string, string] {
   const sizes = sorted.length > 3 ? [...sorted.slice(0, 2).map(fmt), `${sorted.length - 2} autres`] : sorted.map(fmt)
   const cpu = sized.reduce((s, n) => s + n.allocatable.cpu, 0)
   const mem = sized.reduce((s, n) => s + n.allocatable.memory, 0)
-  return [head, `${sizes.join(' + ')} · ${fmtCpu(cpu)} vCPU / ${fmtMem(mem)} allouables`]
+  return [head, `${sizes.join(' + ')} · ${Number((cpu / 1000).toFixed(2))} vCPU / ${fmtMem(mem)} allouables`]
 }
 
 
