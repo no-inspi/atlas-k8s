@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import * as THREE from 'three'
 import { useCluster } from '../store/cluster'
 import { shortNode } from '../store/feed'
-import { SOCLE_H, type CityLayout, type District, type DistrictStyle } from './layout'
+import { SOCLE_H, captionStrip, type CityLayout, type District, type DistrictStyle } from './layout'
 import type { Theme } from './theme'
 import { world } from './world'
 
@@ -118,10 +118,11 @@ export function City({ theme }: { theme: Theme }) {
       <Plane w={bounds.width + 5} d={bounds.depth + 4} x={bounds.x} z={bounds.z} y={0.005} color={theme.road} />
       {layout.districts.map((d) => {
         const w = Math.min(d.width - 0.4, 14)
+        const strip = captionStrip(d.caption.length)
         return (
           <group key={d.pool}>
             <Socle d={d} color={zone[d.style]} />
-            <GroundLabel text={d.caption} w={w} h={1.5} x={d.x - d.width / 2 + 0.2 + w / 2} z={d.z + d.depth / 2 - 0.85} y={SOCLE_H + 0.02} theme={theme} />
+            <GroundLabel text={d.caption} w={w} h={strip - 0.2} x={d.x - d.width / 2 + 0.2 + w / 2} z={d.z + d.depth / 2 - strip / 2} y={SOCLE_H + 0.02} theme={theme} />
           </group>
         )
       })}
