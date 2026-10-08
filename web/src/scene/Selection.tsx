@@ -67,7 +67,8 @@ export function Selection({ theme, reducedMotion }: { theme: Theme; reducedMotio
       const at = world.positionOf(sel.type, sel.key)
       if (at) {
         marker.visible = true
-        const h = sel.type === 'gate' || sel.type === 'route' ? 3.4 : sel.type === 'volume' ? 2.3 : 1.3
+        const h = sel.type === 'gate' || sel.type === 'gateway' || sel.type === 'route' ? 3.4
+          : sel.type === 'volume' || sel.type === 'pv' ? 2.3 : 1.3
         marker.position.set(at.x, h + bob, at.z)
       }
     }

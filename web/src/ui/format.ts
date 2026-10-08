@@ -27,3 +27,13 @@ export function pct(value: number, total: number): number {
   if (!total) return 0
   return Math.min(100, Math.max(0, (value / total) * 100))
 }
+
+/** Part du trafic, en pour mille → « 90 % », « 33.3 % ». */
+export function fmtShare(permille: number): string {
+  return `${Math.round(permille) / 10} %`
+}
+
+/** Miroir : « miroir 10 % » ; sans pourcentage publié, 0 % (le serveur omet percent = 0). */
+export function mirrorLabel(b: { percent?: number }, service?: string): string {
+  return `miroir ${service ? `${service} ` : ''}${b.percent ?? 0} %`
+}

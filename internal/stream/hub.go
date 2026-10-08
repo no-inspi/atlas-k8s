@@ -23,22 +23,27 @@ const (
 	KindService   Kind = "service"
 	KindRoute     Kind = "route"
 	KindVolume    Kind = "volume"
+	KindGateway   Kind = "gateway"
+	// KindPersistentVolume : PV sans PVC existant (jalon 9).
+	KindPersistentVolume Kind = "persistentVolume"
 )
 
 // Message est le format JSON de /api/stream.
 type Message struct {
-	Type       string            `json:"type"` // snapshot | upsert | delete | metrics
-	Rev        uint64            `json:"rev,omitempty"`
-	Kind       Kind              `json:"kind,omitempty"`
-	Obj        any               `json:"obj,omitempty"`
-	Nodes      []model.Node      `json:"nodes,omitempty"`
-	Pods       []model.Pod       `json:"pods,omitempty"`
-	Workloads  []model.Workload  `json:"workloads,omitempty"`
-	Namespaces []model.Namespace `json:"namespaces,omitempty"`
-	Services   []model.Service   `json:"services,omitempty"`
-	Routes     []model.Route     `json:"routes,omitempty"`
-	Volumes    []model.Volume    `json:"volumes,omitempty"`
-	Metrics    *model.Metrics    `json:"metrics,omitempty"`
+	Type              string                   `json:"type"` // snapshot | upsert | delete | metrics
+	Rev               uint64                   `json:"rev,omitempty"`
+	Kind              Kind                     `json:"kind,omitempty"`
+	Obj               any                      `json:"obj,omitempty"`
+	Nodes             []model.Node             `json:"nodes,omitempty"`
+	Pods              []model.Pod              `json:"pods,omitempty"`
+	Workloads         []model.Workload         `json:"workloads,omitempty"`
+	Namespaces        []model.Namespace        `json:"namespaces,omitempty"`
+	Services          []model.Service          `json:"services,omitempty"`
+	Routes            []model.Route            `json:"routes,omitempty"`
+	Volumes           []model.Volume           `json:"volumes,omitempty"`
+	Gateways          []model.Gateway          `json:"gateways,omitempty"`
+	PersistentVolumes []model.PersistentVolume `json:"persistentVolumes,omitempty"`
+	Metrics           *model.Metrics           `json:"metrics,omitempty"`
 }
 
 type Options struct {
@@ -273,7 +278,8 @@ func (h *Hub) replayLocked(lastRev uint64) ([]Message, bool) {
 func (h *Hub) snapshotLocked() Message {
 	m := Message{Type: "snapshot", Rev: h.rev,
 		Nodes: []model.Node{}, Pods: []model.Pod{}, Workloads: []model.Workload{}, Namespaces: []model.Namespace{},
-		Services: []model.Service{}, Routes: []model.Route{}, Volumes: []model.Volume{}}
+		Services: []model.Service{}, Routes: []model.Route{}, Volumes: []model.Volume{},
+		Gateways: []model.Gateway{}, PersistentVolumes: []model.PersistentVolume{}}
 	for _, obj := range h.state {
 		switch o := obj.(type) {
 		case model.Node:
@@ -290,6 +296,10 @@ func (h *Hub) snapshotLocked() Message {
 			m.Routes = append(m.Routes, o)
 		case model.Volume:
 			m.Volumes = append(m.Volumes, o)
+		case model.Gateway:
+			m.Gateways = append(m.Gateways, o)
+		case model.PersistentVolume:
+			m.PersistentVolumes = append(m.PersistentVolumes, o)
 		}
 	}
 	sort.Slice(m.Nodes, func(i, j int) bool { return m.Nodes[i].Name < m.Nodes[j].Name })
@@ -301,5 +311,7 @@ func (h *Hub) snapshotLocked() Message {
 	sort.Slice(m.Services, func(i, j int) bool { return model.ServiceKey(m.Services[i]) < model.ServiceKey(m.Services[j]) })
 	sort.Slice(m.Routes, func(i, j int) bool { return model.RouteKey(m.Routes[i]) < model.RouteKey(m.Routes[j]) })
 	sort.Slice(m.Volumes, func(i, j int) bool { return model.VolumeKey(m.Volumes[i]) < model.VolumeKey(m.Volumes[j]) })
+	sort.Slice(m.Gateways, func(i, j int) bool { return model.GatewayKey(m.Gateways[i]) < model.GatewayKey(m.Gateways[j]) })
+	sort.Slice(m.PersistentVolumes, func(i, j int) bool { return m.PersistentVolumes[i].Name < m.PersistentVolumes[j].Name })
 	return m
 }

@@ -25,6 +25,8 @@ type sink struct {
 	objs    map[stream.Kind]map[string]any
 	deleted []string
 	ready   bool
+	// atReady : copie de l'état publié au moment de MarkReady (premier snapshot).
+	atReady map[stream.Kind]map[string]any
 }
 
 func newSink() *sink { return &sink{objs: map[stream.Kind]map[string]any{}} }
@@ -45,7 +47,18 @@ func (s *sink) Delete(k stream.Kind, key string, _ any) {
 	s.deleted = append(s.deleted, string(k)+"/"+key)
 }
 
-func (s *sink) MarkReady() { s.mu.Lock(); s.ready = true; s.mu.Unlock() }
+func (s *sink) MarkReady() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ready = true
+	s.atReady = map[stream.Kind]map[string]any{}
+	for k, objs := range s.objs {
+		s.atReady[k] = map[string]any{}
+		for key, o := range objs {
+			s.atReady[k][key] = o
+		}
+	}
+}
 
 func (s *sink) get(k stream.Kind, key string) (any, bool) {
 	s.mu.Lock()

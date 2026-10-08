@@ -1,0 +1,25 @@
+# PersistentVolumes sans PVC (jalon 9) : un disponible, un libéré. Le second
+# réclame un PVC qui n'existe pas (claimRef avec un UID) : le contrôleur de PV
+# le passe en Released et, avec Retain, le garde. Classe « manual » : le
+# provisionneur de kind ne s'en occupe pas. atlas-it-released est attendu par
+# web/e2e/auth.spec.ts.
+apiVersion: v1
+kind: PersistentVolume
+metadata: { name: pv-spare-01 }
+spec:
+  capacity: { storage: 2Gi }
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: manual
+  hostPath: { path: /tmp/atlas-pv-spare-01 }
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata: { name: atlas-it-released }
+spec:
+  capacity: { storage: 5Gi }
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: manual
+  claimRef: { namespace: staging, name: old-uploads, uid: 00000000-0000-0000-0000-000000000001 }
+  hostPath: { path: /tmp/atlas-pv-old-uploads }

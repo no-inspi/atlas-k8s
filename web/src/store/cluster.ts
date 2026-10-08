@@ -1,8 +1,9 @@
 import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
 import {
-  routeKey, serviceKey, volumeKey, workloadKey,
-  type Me, type Message, type Metrics, type Namespace, type Node, type Pod, type Route, type Service, type Volume, type Workload,
+  gatewayKey, pvKey, routeKey, serviceKey, volumeKey, workloadKey,
+  type Gateway, type Me, type Message, type Metrics, type Namespace, type Node, type PersistentVolume, type Pod, type Route,
+  type Service, type Volume, type Workload,
 } from '../api/types'
 import { loadView, saveView, type PodView } from '../scene/podView'
 import { feedForNode, feedForPod, type FeedDraft, type FeedItem, type FeedLevel } from './feed'
@@ -13,7 +14,7 @@ export interface Toast {
   level: FeedLevel
 }
 
-export type SelectionType = 'pod' | 'node' | 'service' | 'route' | 'volume' | 'gate'
+export type SelectionType = 'pod' | 'node' | 'service' | 'route' | 'volume' | 'gate' | 'gateway' | 'pv'
 export type Selection = { type: SelectionType; key: string; name: string } | null
 export type InspectorTab = 'overview' | 'logs' | 'terminal' | 'yaml' | 'events'
 /** Objet affiché par l'onglet YAML (null : workload racine du pod). */
@@ -38,6 +39,9 @@ export interface ClusterState {
   services: Map<string, Service>
   routes: Map<string, Route>
   volumes: Map<string, Volume>
+  gateways: Map<string, Gateway>
+  /** PV sans PVC existant, par nom. */
+  persistentVolumes: Map<string, PersistentVolume>
   metrics: Metrics
   me: Me | null
   selection: Selection
@@ -90,6 +94,8 @@ const initial = () => ({
   services: new Map<string, Service>(),
   routes: new Map<string, Route>(),
   volumes: new Map<string, Volume>(),
+  gateways: new Map<string, Gateway>(),
+  persistentVolumes: new Map<string, PersistentVolume>(),
   metrics: { pods: {}, nodes: {} } as Metrics,
   me: null,
   selection: null as Selection,
@@ -111,7 +117,7 @@ export const useCluster = create<ClusterState>()(
 
     applyMessages(msgs) {
       const st = get()
-      let { rev, metrics, nodes, pods, workloads, namespaces, services, routes, volumes } = st
+      let { rev, metrics, nodes, pods, workloads, namespaces, services, routes, volumes, gateways, persistentVolumes } = st
       let changed = false
       const drafts: FeedDraft[] = []
 
@@ -125,6 +131,8 @@ export const useCluster = create<ClusterState>()(
             services = new Map((m.services ?? []).map((x) => [serviceKey(x), x]))
             routes = new Map((m.routes ?? []).map((x) => [routeKey(x), x]))
             volumes = new Map((m.volumes ?? []).map((x) => [volumeKey(x), x]))
+            gateways = new Map((m.gateways ?? []).map((x) => [gatewayKey(x), x]))
+            persistentVolumes = new Map((m.persistentVolumes ?? []).map((x) => [pvKey(x), x]))
             rev = m.rev
             changed = true
             break
@@ -157,6 +165,12 @@ export const useCluster = create<ClusterState>()(
             } else if (m.kind === 'volume') {
               if (del) volumes.delete(volumeKey(m.obj))
               else volumes.set(volumeKey(m.obj), m.obj)
+            } else if (m.kind === 'gateway') {
+              if (del) gateways.delete(gatewayKey(m.obj))
+              else gateways.set(gatewayKey(m.obj), m.obj)
+            } else if (m.kind === 'persistentVolume') {
+              if (del) persistentVolumes.delete(pvKey(m.obj))
+              else persistentVolumes.set(pvKey(m.obj), m.obj)
             } else {
               const k = workloadKey(m.obj)
               if (del) workloads.delete(k)
@@ -174,7 +188,7 @@ export const useCluster = create<ClusterState>()(
         : st.feed
 
       set({
-        rev, metrics, nodes, pods, workloads, namespaces, services, routes, volumes, feed,
+        rev, metrics, nodes, pods, workloads, namespaces, services, routes, volumes, gateways, persistentVolumes, feed,
         version: changed ? st.version + 1 : st.version,
         connection: 'live',
       })
@@ -194,6 +208,8 @@ export const useCluster = create<ClusterState>()(
         route: () => st.routes.get(sel.key)?.name,
         volume: () => st.volumes.get(sel.key)?.name,
         gate: () => sel.key,
+        gateway: () => st.gateways.get(sel.key)?.name,
+        pv: () => st.persistentVolumes.get(sel.key)?.name,
       }[sel.type]()
       // Le YAML choisi via la chaîne de propriétaires ne survit pas au changement de pod.
       set({ selection: { ...sel, name: name ?? sel.key }, yamlTarget: null })

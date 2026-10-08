@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { eventsResource, logsURL, openLogs, routeRef, serviceRef, volumeRef, type LogMessage } from './inspect'
-import { route, service, volume } from '../store/fixtures'
+import { eventsResource, gatewayRef, logsURL, nsSeg, openLogs, pvRef, routeRef, serviceRef, volumeRef, type LogMessage } from './inspect'
+import { gateway, pv, route, service, volume } from '../store/fixtures'
 
 class FakeWS {
   static last: FakeWS
@@ -52,5 +52,27 @@ describe('références', () => {
       .toEqual(expect.objectContaining({ group: 'traefik.containo.us', version: 'v1alpha1', kind: 'IngressRoute' }))
     expect(['Pod', 'Service', 'PersistentVolumeClaim', 'Ingress', 'IngressRoute'].map(eventsResource))
       .toEqual(['pods', 'services', 'persistentvolumeclaims', 'ingresses', 'ingressroutes'])
+  })
+})
+
+describe('références du jalon 9', () => {
+  it('désigne les routes Gateway API et Traefik TCP/UDP, les Gateways et les PV', () => {
+    expect(routeRef(route({ source: 'HTTPRoute', group: 'gateway.networking.k8s.io' })))
+      .toEqual({ group: 'gateway.networking.k8s.io', version: 'v1', kind: 'HTTPRoute', namespace: 'production', name: 'storefront' })
+    expect(routeRef(route({ source: 'GRPCRoute', group: 'gateway.networking.k8s.io' })).kind).toBe('GRPCRoute')
+    expect(routeRef(route({ source: 'IngressRouteTCP', group: 'traefik.containo.us' })))
+      .toEqual(expect.objectContaining({ group: 'traefik.containo.us', version: 'v1alpha1', kind: 'IngressRouteTCP' }))
+    expect(routeRef(route({ source: 'IngressRouteUDP', group: 'traefik.io' })).kind).toBe('IngressRouteUDP')
+    expect(gatewayRef(gateway({ namespace: 'infra', name: 'public' })))
+      .toEqual({ group: 'gateway.networking.k8s.io', version: 'v1', kind: 'Gateway', namespace: 'infra', name: 'public' })
+    expect(pvRef(pv({ name: 'pv-1' }))).toEqual({ group: '', version: 'v1', kind: 'PersistentVolume', namespace: '', name: 'pv-1' })
+    expect(['Gateway', 'HTTPRoute', 'GRPCRoute', 'IngressRouteTCP', 'IngressRouteUDP', 'PersistentVolume'].map(eventsResource))
+      .toEqual(['gateways', 'httproutes', 'grpcroutes', 'ingressroutetcps', 'ingressrouteudps', 'persistentvolumes'])
+  })
+
+  it('remplace un namespace vide par « _ » dans les URL (objet cluster-scoped)', () => {
+    expect(nsSeg('')).toBe('_')
+    expect(nsSeg('production')).toBe('production')
+    expect(nsSeg('a b')).toBe('a%20b')
   })
 })

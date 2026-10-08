@@ -6,23 +6,28 @@ import { isLit, type Family, type Link, type Pt } from './links'
 import { LOD_PX, questionTexture } from './Pods'
 import type { Theme } from './theme'
 import { tick } from './tick'
-import { world } from './world'
+import { world, type Focus } from './world'
 
 // Liens au sol : rubans plats (deux triangles par segment) sur lesquels un
 // shader fait défiler des paquets (réseau) ou des gouttes (data). Une
 // géométrie par famille : positions reconstruites quand les liens changent,
 // opacité seule réécrite quand la sélection, le survol ou le filtre changent.
 
-const WIDTH: Record<Family, number> = { main: 0.12, broken: 0.1, fibre: 0.08, data: 0.16 }
-const Y: Record<Family, number> = { main: 0.03, broken: 0.031, fibre: 0.032, data: 0.033 }
+const WIDTH: Record<Family, number> = { main: 0.12, broken: 0.1, refused: 0.1, mirror: 0.07, fibre: 0.08, data: 0.16 }
+const Y: Record<Family, number> = { main: 0.03, broken: 0.031, refused: 0.031, mirror: 0.0305, fibre: 0.032, data: 0.033 }
 /** Motif : période (unités monde), part allumée, intensité entre deux paquets, vitesse. */
 const DASH: Record<Family, { period: number; duty: number; base: number; speed: number }> = {
   main: { period: 1.2, duty: 0.3, base: 0.45, speed: 1.6 },
   fibre: { period: 0.9, duty: 0.35, base: 0.5, speed: 1.4 },
   data: { period: 0.7, duty: 0.25, base: 0.2, speed: 0.8 },
   broken: { period: 0.5, duty: 0.55, base: 0, speed: 0 },
+  refused: { period: 0.5, duty: 0.55, base: 0, speed: 0 },
+  // Miroir : pointillé fin et immobile, jamais de paquets.
+  mirror: { period: 0.35, duty: 0.5, base: 0, speed: 0 },
 }
-const FAMILIES: Family[] = ['main', 'broken', 'fibre', 'data']
+const FAMILIES: Family[] = ['main', 'mirror', 'broken', 'refused', 'fibre', 'data']
+/** Familles toujours dessinées en motif plein (pointillés), sans dépendre de live. */
+const DASHED: ReadonlySet<Family> = new Set(['broken', 'refused', 'mirror'])
 
 export interface Ribbon {
   position: Float32Array
@@ -92,6 +97,36 @@ export function writeAlpha(alpha: Float32Array, items: readonly { points: readon
   return changed
 }
 
+/**
+ * Opacité d'un lien : 10 % hors du namespace filtré, 20 % hors du chemin d'une
+ * sélection réseau ; un miroir est discret (60 %), une ligne de poids 0 pâle (35 %).
+ */
+export function linkAlpha(l: Link, nsFilter: string | null, focus: Focus): number {
+  const base = nsFilter && l.ns !== nsFilter ? 0.1 : focus.dim && focus.path && !isLit(l, focus.path) ? 0.2 : 1
+  return base * (l.family === 'mirror' ? 0.6 : l.weight === 0 ? 0.35 : 1)
+}
+
+/** Panneau « ⊘ » d'une route refusée par son Gateway. */
+function refusedTexture(): THREE.Texture {
+  const c = document.createElement('canvas')
+  c.width = c.height = 64
+  const g = c.getContext('2d')!
+  g.fillStyle = '#C23E28'
+  g.beginPath()
+  g.arc(32, 32, 30, 0, Math.PI * 2)
+  g.fill()
+  g.strokeStyle = '#fff'
+  g.lineWidth = 6
+  g.beginPath()
+  g.arc(32, 32, 16, 0, Math.PI * 2)
+  g.moveTo(20.7, 43.3)
+  g.lineTo(43.3, 20.7)
+  g.stroke()
+  const t = new THREE.CanvasTexture(c)
+  t.colorSpace = THREE.SRGBColorSpace
+  return t
+}
+
 const vertexShader = /* glsl */ `
 attribute float aDist;
 attribute float aAlpha;
@@ -134,7 +169,9 @@ function geometryOf(r: Ribbon): THREE.BufferGeometry {
 
 export function Links({ theme, reducedMotion }: { theme: Theme; reducedMotion: boolean }) {
   const meshes = useMemo(() => {
-    const color: Record<Family, string> = { main: theme.fibre, fibre: theme.fibre, data: theme.data, broken: theme.err }
+    const color: Record<Family, string> = {
+      main: theme.fibre, mirror: theme.fibre, fibre: theme.fibre, data: theme.data, broken: theme.err, refused: theme.err,
+    }
     return new Map(FAMILIES.map((f) => {
       const material = new THREE.ShaderMaterial({
         vertexShader, fragmentShader, transparent: true, depthWrite: false, side: THREE.DoubleSide,
@@ -161,7 +198,8 @@ export function Links({ theme, reducedMotion }: { theme: Theme; reducedMotion: b
     links: null, meshes: null, fibreKey: '', alphaKey: '', drawn: new Map(), fibres: [],
   })
   const question = useMemo(questionTexture, [])
-  useEffect(() => () => question.dispose(), [question])
+  const refused = useMemo(refusedTexture, [])
+  useEffect(() => () => { question.dispose(); refused.dispose() }, [question, refused])
 
   useFrame(({ clock, camera, invalidate }) => {
     const st = useCluster.getState()
@@ -172,12 +210,11 @@ export function Links({ theme, reducedMotion }: { theme: Theme; reducedMotion: b
     const focusKey = `${st.selection?.type}:${st.selection?.key}|${st.hoverNet}|${st.hover?.uid}`
     const fibreKey = `${focusKey}|${far}`
     const alphaKey = `${focusKey}|${nsFilter}`
-    const alphaOf = (l: Link) =>
-      nsFilter && l.ns !== nsFilter ? 0.1 : focus.dim && focus.path && !isLit(l, focus.path) ? 0.2 : 1
+    const alphaOf = (l: Link) => linkAlpha(l, nsFilter, focus)
     const setGeometry = (f: Family, ls: Link[]) => {
       const mesh = meshes.get(f)!
       mesh.geometry.dispose()
-      mesh.geometry = geometryOf(ribbon(ls.map((l) => ({ points: l.points, alpha: alphaOf(l), live: l.family === 'broken' || l.live })), WIDTH[f], Y[f]))
+      mesh.geometry = geometryOf(ribbon(ls.map((l) => ({ points: l.points, alpha: alphaOf(l), live: DASHED.has(l.family) || l.live })), WIDTH[f], Y[f]))
     }
     const b = built.current
     const topology = world.links !== b.links || meshes !== b.meshes
@@ -223,7 +260,7 @@ export function Links({ theme, reducedMotion }: { theme: Theme; reducedMotion: b
       {[...meshes.values()].map((m, i) => <primitive key={i} object={m} />)}
       {signs.map((l, i) => (
         <sprite key={`sign-${i}`} position={[l.sign![0], 0.6, l.sign![1]]} scale={[0.45, 0.45, 1]} raycast={() => null} renderOrder={10}>
-          <spriteMaterial map={question} depthTest={false} transparent opacity={nsFilter && l.ns !== nsFilter ? 0.1 : 1} />
+          <spriteMaterial map={l.family === 'refused' ? refused : question} depthTest={false} transparent opacity={nsFilter && l.ns !== nsFilter ? 0.1 : 1} />
         </sprite>
       ))}
     </>

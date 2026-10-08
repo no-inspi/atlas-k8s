@@ -212,7 +212,7 @@ export function Pods({ theme, reducedMotion }: { theme: Theme; reducedMotion: bo
       const side = BLOCK_SIDE * s, h = a.h * s
       podPositions.set(p.uid, { x: a.x, y: a.y, z: a.z, h })
 
-      const dim = (st.nsFilter !== null && p.namespace !== st.nsFilter) || (focus.dim && !!focus.path && !focus.path.has(`pod:${p.uid}`))
+      const dim = (st.nsFilter !== null && p.namespace !== st.nsFilter) || (focus.podUids !== null && !focus.podUids.has(p.uid))
       const opacity = dim ? 0.1 : posture.kind === 'stomp' ? 0.75 : posture.kind === 'fade' ? 0.55 : 1
       quat.setFromAxisAngle(Y, a.yaw)
 

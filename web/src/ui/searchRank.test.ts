@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { node, pod, route, service, volume, workload } from '../store/fixtures'
+import { gateway, node, pod, pv, route, service, volume, workload } from '../store/fixtures'
 import { search } from './searchRank'
 
 const st = {
@@ -41,5 +41,24 @@ describe('réseau et stockage', () => {
     expect(search('shop.example', st).map((r) => r.key)).toEqual(['Ingress/production/storefront'])
     expect(search('data', st)[0]).toEqual(expect.objectContaining({ type: 'volume', key: 'production/data-0' }))
     expect(search('ngi', st)[0]).toEqual(expect.objectContaining({ type: 'gate', key: 'nginx' }))
+  })
+})
+
+describe('Gateway API et PV', () => {
+  const gw = {
+    pods: new Map(), nodes: new Map(), workloads: new Map(),
+    routes: new Map([['HTTPRoute/production/storefront', route({
+      source: 'HTTPRoute', group: 'gateway.networking.k8s.io', gate: 'infra/public', gates: ['infra/public'],
+    })]]),
+    gateways: new Map([['infra/public', gateway({ namespace: 'infra', name: 'public', class: 'gke-l7-global-external-managed' })]]),
+    persistentVolumes: new Map([['pv-old-uploads', pv({ name: 'pv-old-uploads', phase: 'Released', storageClass: 'standard-rwo' })]]),
+  }
+
+  it('trouve un Gateway par son nom court, un PV, et nomme les portes d’une route', () => {
+    expect(search('public', gw)[0]).toEqual(expect.objectContaining({
+      type: 'gateway', key: 'infra/public', detail: 'Gateway · gke-l7-global-external-managed · 1 route',
+    }))
+    expect(search('pv-old', gw)[0]).toEqual(expect.objectContaining({ type: 'pv', key: 'pv-old-uploads', detail: 'PV · Released · standard-rwo' }))
+    expect(search('storefront', gw)[0].detail).toBe('HTTPRoute · production · porte infra/public')
   })
 })

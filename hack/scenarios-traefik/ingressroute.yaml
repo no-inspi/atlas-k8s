@@ -1,6 +1,6 @@
-# IngressRoute Traefik (CRD installée par make scenarios, sans contrôleur) :
-# sa porte « traefik » apparaît, et sa route vers grafana est cassée (pas de
-# Service grafana dans les scénarios).
+# IngressRoute, IngressRouteTCP/UDP et TraefikService (CRD installées par make
+# scenarios, sans contrôleur) : la porte « traefik » apparaît ; la route vers
+# grafana est cassée (pas de Service grafana dans les scénarios).
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata: { name: grafana, namespace: monitoring }
@@ -10,3 +10,53 @@ spec:
     - match: Host(`grafana.localtest.me`)
       kind: Rule
       services: [{ name: grafana, port: 3000 }]
+---
+# TraefikService pondéré (3:1) dont une branche est un miroir : la route
+# checkout se résout en api-gateway 75 %, payment-worker 25 % et un miroir
+# de 10 % vers postgres-payments.
+apiVersion: traefik.io/v1alpha1
+kind: TraefikService
+metadata: { name: checkout-split, namespace: production }
+spec:
+  weighted:
+    services:
+      - { name: api-gateway, port: 80, weight: 3 }
+      - { name: checkout-mirror, kind: TraefikService, weight: 1 }
+---
+apiVersion: traefik.io/v1alpha1
+kind: TraefikService
+metadata: { name: checkout-mirror, namespace: production }
+spec:
+  mirroring:
+    name: payment-worker
+    port: 8080
+    mirrors:
+      - { name: postgres-payments, port: 5432, percent: 10 }
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata: { name: checkout, namespace: production }
+spec:
+  entryPoints: [web]
+  routes:
+    - match: Host(`checkout.localtest.me`)
+      kind: Rule
+      services: [{ name: checkout-split, kind: TraefikService }]
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRouteTCP
+metadata: { name: postgres, namespace: production }
+spec:
+  entryPoints: [postgres]
+  routes:
+    - match: HostSNI(`*`)
+      services: [{ name: postgres-payments, port: 5432 }]
+---
+# Dans kube-system : bob ne doit pas la recevoir.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRouteUDP
+metadata: { name: dns, namespace: kube-system }
+spec:
+  entryPoints: [dns]
+  routes:
+    - services: [{ name: kube-dns, port: 53 }]

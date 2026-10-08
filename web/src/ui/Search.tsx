@@ -58,8 +58,8 @@ export function Search() {
         aria-expanded={results.length > 0}
         aria-controls="search-results"
         aria-activedescendant={results[active] ? `search-r${active}` : undefined}
-        aria-label="Rechercher un pod, un node, un workload, un Service, une route ou un PVC"
-        placeholder="Pod, node, Service, route, PVC…"
+        aria-label="Rechercher un pod, un node, un workload, un Service, une route, un Gateway, un PVC ou un PV"
+        placeholder="Pod, node, Service, route, Gateway, PV…"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}

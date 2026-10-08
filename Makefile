@@ -1,4 +1,4 @@
-.PHONY: deploy load-up load-down kind-oidc helm-kind-oidc dev-demo dex-up dex-down run-dev e2e-auth helm-kind image image-push scan web build test test-go test-web demo dev e2e embed-dir clean kind-up kind-down scenarios run-kind test-integration
+.PHONY: deploy load-up load-down kind-oidc helm-kind-oidc dev-demo dex-up dex-down run-dev e2e-auth helm-kind image image-push scan web build test test-go test-web demo dev e2e embed-dir clean kind-up kind-down scenarios run-kind test-integration crds scenarios-restore
 
 BIN := bin/atlas
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -47,6 +47,7 @@ OIDC_DEV_FLAGS = --auth-mode=oidc --context $(KIND_CTX) --cluster-name kind-atla
 	--oidc-client-secret dev-secret-not-for-production --oidc-scopes openid,email,profile,groups
 
 dex-up:
+	$(KIND_GUARD)
 	kubectl --context $(KIND_CTX) apply -f hack/dev-rbac.yaml
 	docker rm -f atlas-dex >/dev/null 2>&1 || true
 	docker run -d --name atlas-dex -p 5556:5556 -v $(CURDIR)/hack/dex/config.yaml:/etc/dex/config.yaml:ro \
@@ -78,30 +79,93 @@ clean:
 # --- Cluster kind de développement -----------------------------------------
 
 KIND_CTX := kind-atlas
+# Garde : sans contexte explicite, kubectl viserait le contexte courant.
+ifeq ($(strip $(KIND_CTX)),)
+$(error KIND_CTX est vide : les cibles kind exigent un contexte explicite)
+endif
+# Première ligne de toute recette qui écrit dans $(KIND_CTX) : échoue si le
+# contexte n'est pas kind-* ou si son serveur n'est pas en boucle locale.
+KIND_GUARD = @hack/kind-guard.sh '$(KIND_CTX)'
 
 kind-up:
 	kind create cluster --config hack/kind.yaml
+	$(KIND_GUARD)
 	kubectl --context $(KIND_CTX) taint nodes atlas-worker4 nvidia.com/gpu=present:NoSchedule --overwrite
 	hack/metrics-server.sh $(KIND_CTX)
 
 kind-down:
 	kind delete cluster --name atlas
 
-# CRD Traefik (IngressRoute) : https://doc.traefik.io/traefik/reference/install-configuration/providers/kubernetes/kubernetes-crd/
-TRAEFIK_CRD ?= https://raw.githubusercontent.com/traefik/traefik/v3.5/docs/content/reference/dynamic-configuration/kubernetes-crd-definition-v1.yml
+# CRD tierces des scénarios, téléchargées une fois à une version épinglée
+# (hack/crds/.cache/, ignoré par git) et vérifiées par sha256 ; le test
+# d'intégration les réapplique. Changer une version impose de changer son hash.
+GATEWAY_API_VERSION ?= v1.3.0
+GATEWAY_API_SHA256 ?= 78796d5c51450fc55d8dc8092ba8137f8c807982d7508d7875d5c537a24082b9
+TRAEFIK_CRD_VERSION ?= v3.5.6
+TRAEFIK_CRD_SHA256 ?= 1f0a915765915aac3293274db2344145fa41b28c1162d7c1a0ce833b0efb890b
+GATEWAY_API_CRDS := hack/crds/.cache/gateway-api-$(GATEWAY_API_VERSION)-standard.yaml
+TRAEFIK_CRDS := hack/crds/.cache/traefik-$(TRAEFIK_CRD_VERSION)-crds.yaml
+SHA256 := $(shell command -v sha256sum >/dev/null 2>&1 && echo sha256sum || echo shasum -a 256)
 
-scenarios:
+# fetch URL SHA256 : télécharge dans $@.tmp, vérifie le hash, puis renomme.
+define fetch
+	mkdir -p $(dir $@)
+	curl -fsSL -o $@.tmp $(1) && test "$$($(SHA256) $@.tmp | cut -d' ' -f1)" = "$(2)" \
+		|| { rm -f $@.tmp; echo "échec du téléchargement ou hash inattendu : $(1)"; exit 1; }
+	mv $@.tmp $@
+endef
+
+$(GATEWAY_API_CRDS):
+	$(call fetch,https://github.com/kubernetes-sigs/gateway-api/releases/download/$(GATEWAY_API_VERSION)/standard-install.yaml,$(GATEWAY_API_SHA256))
+
+# https://doc.traefik.io/traefik/reference/install-configuration/providers/kubernetes/kubernetes-crd/
+$(TRAEFIK_CRDS):
+	$(call fetch,https://raw.githubusercontent.com/traefik/traefik/$(TRAEFIK_CRD_VERSION)/docs/content/reference/dynamic-configuration/kubernetes-crd-definition-v1.yml,$(TRAEFIK_CRD_SHA256))
+
+crds: $(GATEWAY_API_CRDS) $(TRAEFIK_CRDS)
+
+scenarios: crds
+	$(KIND_GUARD)
 	kubectl --context $(KIND_CTX) apply -f hack/scenarios/
-	kubectl --context $(KIND_CTX) apply --server-side -f $(TRAEFIK_CRD)
-	kubectl --context $(KIND_CTX) wait --for condition=established crd/ingressroutes.traefik.io --timeout=60s
-	kubectl --context $(KIND_CTX) apply -f hack/scenarios-traefik/
+	$(RESTORE_SCENARIOS)
+
+# CRD tierces et scénarios qui en dépendent : ce que test-integration retire.
+# Une seule ligne shell, réutilisée telle quelle par test-integration (sans
+# make imbriqué, qui ferait exécuter la recette même sous make -n).
+RESTORE_SCENARIOS = kubectl --context $(KIND_CTX) apply --server-side -f $(TRAEFIK_CRDS) \
+	&& kubectl --context $(KIND_CTX) apply --server-side -f $(GATEWAY_API_CRDS) \
+	&& kubectl --context $(KIND_CTX) wait --for condition=established --timeout=60s \
+		crd/ingressroutes.traefik.io crd/ingressroutetcps.traefik.io crd/ingressrouteudps.traefik.io crd/traefikservices.traefik.io \
+		crd/gatewayclasses.gateway.networking.k8s.io crd/gateways.gateway.networking.k8s.io \
+		crd/httproutes.gateway.networking.k8s.io crd/grpcroutes.gateway.networking.k8s.io \
+	&& kubectl --context $(KIND_CTX) apply -f hack/scenarios-traefik/ \
+	&& kubectl --context $(KIND_CTX) apply -f hack/scenarios-gateway/gateways.yaml \
+	&& hack/scenarios-gateway/status.sh $(KIND_CTX)
+
+scenarios-restore: crds
+	$(KIND_GUARD)
+	$(RESTORE_SCENARIOS)
 
 # Atlas contre le cluster kind, sans authentification (jalon 4 : OIDC via Dex).
 run-kind: build
+	$(KIND_GUARD)
 	$(BIN) --auth-mode=none --context $(KIND_CTX) --cluster-name kind-atlas
 
-test-integration: embed-dir
-	go test -tags integration -count=1 -v ./internal/kube -run Live
+# Contexte forcé sur kind : les tests suppriment et réinstallent des CRD. Quoi
+# qu'il arrive (échec, délai de 5 min, Ctrl+C), les objets des tests sont
+# retirés et les CRD et scénarios réappliqués ; le code de sortie est celui de go test (1 si la remise en état
+# échoue après des tests verts).
+test-integration: embed-dir crds
+	$(KIND_GUARD)
+	@status=0; trap 'status=130' INT TERM; \
+	ATLAS_CONTEXT=$(KIND_CTX) GATEWAY_API_CRDS=$(abspath $(GATEWAY_API_CRDS)) TRAEFIK_CRDS=$(abspath $(TRAEFIK_CRDS)) \
+		go test -tags integration -count=1 -timeout 5m -v ./internal/kube -run Live || status=$$?; \
+	trap - INT TERM; \
+	echo "remise en état du cluster $(KIND_CTX)"; \
+	kubectl --context $(KIND_CTX) delete namespace atlas-it atlas-it-svc atlas-it-gw atlas-it-traefik --ignore-not-found --wait=false; \
+	kubectl --context $(KIND_CTX) delete pv atlas-it-orphan --ignore-not-found --wait=false; \
+	{ $(RESTORE_SCENARIOS); } || { echo "remise en état incomplète"; [ $$status -ne 0 ] || status=1; }; \
+	exit $$status
 
 # --- Image et chart --------------------------------------------------------
 
@@ -117,6 +181,7 @@ scan: image
 
 # Installe le chart sur le cluster kind avec l'image locale (sans OIDC : pas d'exposition).
 helm-kind: image
+	$(KIND_GUARD)
 	kind load docker-image $(IMAGE):$(VERSION) --name atlas
 	helm upgrade --install cluster-atlas deploy/helm/cluster-atlas --kube-context $(KIND_CTX) \
 	  -n cluster-atlas --create-namespace --wait --timeout 3m \
@@ -126,9 +191,11 @@ helm-kind: image
 # Parcours OIDC complet dans le cluster : http://atlas.localtest.me
 # (make kind-down kind-up scenarios kind-oidc helm-kind-oidc).
 kind-oidc:
-	hack/oidc/setup.sh
+	$(KIND_GUARD)
+	CTX='$(KIND_CTX)' hack/oidc/setup.sh
 
 helm-kind-oidc: image
+	$(KIND_GUARD)
 	kind load docker-image $(IMAGE):$(VERSION) --name atlas
 	helm upgrade --install cluster-atlas deploy/helm/cluster-atlas --kube-context $(KIND_CTX) \
 	  -n cluster-atlas --create-namespace --wait --timeout 3m \
@@ -136,10 +203,10 @@ helm-kind-oidc: image
 
 # Test de charge : 100 nodes kwok et 3 000 pods (NODES=…, PODS=… pour changer).
 load-up:
-	hack/load/kwok-up.sh
+	CTX='$(KIND_CTX)' hack/load/kwok-up.sh
 
 load-down:
-	hack/load/kwok-down.sh
+	CTX='$(KIND_CTX)' hack/load/kwok-down.sh
 
 # Déploiement depuis le poste : image construite pour PLATFORM, poussée sur IMAGE,
 # puis helm upgrade sur KUBE_CONTEXT avec VALUES (voir deploy.local.mk.example).

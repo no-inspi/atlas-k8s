@@ -5,10 +5,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/no-inspi/atlas-k8s/internal/demo"
 	"github.com/no-inspi/atlas-k8s/internal/model"
 	"github.com/no-inspi/atlas-k8s/internal/stream"
@@ -77,5 +79,33 @@ func TestInspectorRoutes(t *testing.T) {
 	}
 	if rec := get(h, "/api/yaml/traefik.io/v1alpha1/IngressRoute/monitoring/grafana"); rec.Code != 200 || !strings.Contains(rec.Body.String(), "IngressRoute") {
 		t.Errorf("yaml d'une IngressRoute = %d", rec.Code)
+	}
+}
+
+func TestNsParam(t *testing.T) {
+	for url, want := range map[string]string{"/x/_/y": "", "/x/production/y": "production"} {
+		r := chi.NewRouter()
+		var got string
+		r.Get("/x/{ns}/y", func(w http.ResponseWriter, req *http.Request) { got = nsParam(req) })
+		r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", url, nil))
+		if got != want {
+			t.Errorf("nsParam(%s) = %q, attendu %q", url, got, want)
+		}
+	}
+}
+
+func TestInspectorClusterScopedAndGatewayObjects(t *testing.T) {
+	h, _ := demoServer(t)
+	if rec := get(h, "/api/yaml/core/v1/PersistentVolume/_/pv-old-uploads"); rec.Code != 200 || !strings.Contains(rec.Body.String(), "kind: PersistentVolume") {
+		t.Errorf("yaml du PV = %d %s", rec.Code, rec.Body)
+	}
+	if rec := get(h, "/api/namespaces/_/persistentvolumes/pv-old-uploads/events"); rec.Code != 200 {
+		t.Errorf("événements du PV = %d", rec.Code)
+	}
+	if rec := get(h, "/api/yaml/gateway.networking.k8s.io/v1/Gateway/infra/public"); rec.Code != 200 || !strings.Contains(rec.Body.String(), "kind: Gateway") {
+		t.Errorf("yaml du Gateway = %d", rec.Code)
+	}
+	if rec := get(h, "/api/namespaces/infra/gateways/internal/events"); rec.Code != 200 || !strings.Contains(rec.Body.String(), "AddressNotAssigned") {
+		t.Errorf("événements du Gateway = %d %s", rec.Code, rec.Body)
 	}
 }

@@ -1,7 +1,10 @@
-import { routeKey, serviceKey, volumeKey, type Node, type Pod, type Route, type Service, type Volume } from '../api/types'
+import {
+  gatewayKey, pvKey, routeKey, serviceKey, volumeKey,
+  type Gateway, type Node, type PersistentVolume, type Pod, type Route, type Service, type Volume,
+} from '../api/types'
 import type { ClusterState, Selection, SelectionType } from '../store/cluster'
 import { gatesOf, type Gate } from '../store/net'
-import { buildLinks, pathOf, type Link } from './links'
+import { buildLinks, PathMemo, podUidsOf, type Link } from './links'
 import { layoutNetwork, type NetLayout } from './netLayout'
 import { clusterColors } from './colors'
 import { postureFor } from './posture'
@@ -40,7 +43,7 @@ const severity = (p: Pod) => ({ err: 3, warn: 2, mute: 1, done: 1, ok: 0 })[post
 const ownerKey = (p: Pod) => (p.owner.kind ? `${p.owner.kind}/${p.owner.name}` : `Pod/${p.name}`)
 
 type WorldInput = Pick<ClusterState, 'version' | 'nodes' | 'pods' | 'namespaces'>
-  & Partial<Pick<ClusterState, 'services' | 'routes' | 'volumes'>>
+  & Partial<Pick<ClusterState, 'services' | 'routes' | 'volumes' | 'gateways' | 'persistentVolumes'>>
   & { podView?: PodView; nsFilter?: string | null }
 
 export interface Focus {
@@ -50,10 +53,12 @@ export interface Focus {
   hover: Set<string> | null
   /** Estomper ce qui n'est pas sur le chemin : sélection d'une porte, d'une route, d'un Service ou d'un PVC. */
   dim: boolean
+  /** Uids des pods du chemin quand il estompe (`dim`), sinon null : lu par pod et par frame, sans allocation. */
+  podUids: ReadonlySet<string> | null
 }
 
-const NO_FOCUS: Focus = { path: null, hover: null, dim: false }
-const NET_SELECTIONS: ReadonlySet<SelectionType> = new Set(['service', 'route', 'volume', 'gate'])
+const NO_FOCUS: Focus = { path: null, hover: null, dim: false, podUids: null }
+const NET_SELECTIONS: ReadonlySet<SelectionType> = new Set(['service', 'route', 'volume', 'gate', 'gateway', 'pv'])
 
 /** Occupant d'une place : un pod, ou une pile (représentant et membres). */
 interface Occupant {
@@ -82,15 +87,16 @@ export class World {
   services: Service[] = []
   routes: Route[] = []
   volumes: Volume[] = []
+  /** PV sans PVC (cluster-scoped : jamais filtrés par namespace). */
+  persistentVolumes: PersistentVolume[] = []
   gates: Gate[] = []
   net: NetLayout | null = null
   links: Link[] = []
   private city: CityLayout | null = null
   private netKey = ''
-  private focusKey = ''
   private focusVal: Focus = NO_FOCUS
-  private pathKey = ''
-  private pathVal = new Set<string>()
+  /** Chemins mémorisés : recalculés seulement si la sélection ou la topologie des liens change. */
+  private paths = new PathMemo()
   private viewKey = ''
   private layoutKey = ''
   private capacity = 0
@@ -133,7 +139,10 @@ export class World {
     this.services = [...(st.services?.values() ?? [])].filter((s) => shown(s.namespace))
     this.routes = [...(st.routes?.values() ?? [])].filter((r) => shown(r.namespace))
     this.volumes = [...(st.volumes?.values() ?? [])].filter((v) => shown(v.namespace))
-    this.gates = gatesOf(this.routes)
+    this.persistentVolumes = [...(st.persistentVolumes?.values() ?? [])]
+    const gateways = new Map<string, Gateway>()
+    for (const g of st.gateways?.values() ?? []) if (shown(g.namespace)) gateways.set(gatewayKey(g), g)
+    this.gates = gatesOf(this.routes, gateways)
     const city = this.city
     if (!city) {
       this.net = null
@@ -144,42 +153,42 @@ export class World {
       this.services.map(serviceKey).sort().join(','),
       this.gates.map((g) => g.name).join(','),
       this.volumes.map((v) => `${volumeKey(v)}@${v.storageClass}@${v.requested}`).sort().join(','),
+      this.persistentVolumes.map((p) => `${pvKey(p)}@${p.storageClass}@${p.capacity}`).sort().join(','),
     ].join('|')
     if (key !== this.netKey) {
       this.netKey = key
       this.net = layoutNetwork(city,
         this.services.map((s) => ({ key: serviceKey(s), namespace: s.namespace, name: s.name })),
         this.gates.map((g) => g.name),
-        this.volumes.map((v) => ({ key: volumeKey(v), namespace: v.namespace, name: v.name, storageClass: v.storageClass, requested: v.requested })))
+        this.volumes.map((v) => ({ key: volumeKey(v), namespace: v.namespace, name: v.name, storageClass: v.storageClass, requested: v.requested })),
+        this.persistentVolumes.map((p) => ({ key: pvKey(p), name: p.name, storageClass: p.storageClass, capacity: p.capacity })))
       // La ville s'agrandit des entrepôts (cadrage de la caméra, sol, arbres).
       this.layout = { ...city, bounds: this.net.bounds }
     }
     this.links = buildLinks({ city, net: this.net!, services: this.services, routes: this.routes, volumes: this.volumes, pods: st.pods, targets: this.targets })
   }
 
-  /** Chemin à allumer pour la sélection et le survol courants (mis en cache). */
+  /**
+   * Chemin à allumer pour la sélection et le survol courants. Même objet tant
+   * que la sélection, le survol et la topologie des liens ne changent pas, même
+   * si la version du flux avance.
+   */
   focusFor(sel: Selection, hoverNet: string | null, hoverPod: string | null): Focus {
     const selKey = sel && sel.type !== 'node' ? `${sel.type}:${sel.key}` : null
     const hoverKey = hoverNet ?? (hoverPod ? `pod:${hoverPod}` : null)
-    const key = `${this.version}|${this.viewKey}|${selKey}|${hoverKey}`
-    if (key === this.focusKey) return this.focusVal
-    this.focusKey = key
-    this.focusVal = !selKey && !hoverKey ? NO_FOCUS : {
-      path: selKey ? pathOf(selKey, this.links) : null,
-      hover: hoverKey ? pathOf(hoverKey, this.links) : null,
-      dim: !!sel && NET_SELECTIONS.has(sel.type),
-    }
-    return this.focusVal
+    if (!selKey && !hoverKey) return (this.focusVal = NO_FOCUS)
+    const path = selKey ? this.paths.get(selKey, this.links) : null
+    const hover = hoverKey ? this.paths.get(hoverKey, this.links) : null
+    const dim = !!sel && NET_SELECTIONS.has(sel.type)
+    const f = this.focusVal
+    if (f.path === path && f.hover === hover && f.dim === dim) return f
+    const podUids = !dim || !path ? null : f.path === path && f.podUids ? f.podUids : podUidsOf(path)
+    return (this.focusVal = { path, hover, dim, podUids })
   }
 
-  /** Chemin d'un objet (« type:clé »), mis en cache à part : n'évince pas le focus de la scène. */
+  /** Chemin d'un objet (« type:clé »), mémorisé comme celui du focus. */
   pathFor(selKey: string): Set<string> {
-    const key = `${this.version}|${this.viewKey}|${selKey}`
-    if (key !== this.pathKey) {
-      this.pathKey = key
-      this.pathVal = pathOf(selKey, this.links)
-    }
-    return this.pathVal
+    return this.paths.get(selKey, this.links)
   }
 
   /** Point de la ville où se trouve un objet (recherche, marqueur de sélection). */
@@ -194,6 +203,8 @@ export class World {
         const r = this.routes.find((x) => routeKey(x) === key)
         return r ? at(net?.gates.get(r.gate)) : null
       }
+      case 'gateway': return at(net?.gates.get(key))
+      case 'pv': return at(net?.orphans.find((o) => o.key === key))
       case 'node': return at(this.layout?.plots.get(key))
       case 'pod': return at(podPositions.get(key) ?? this.targets.get(key))
     }

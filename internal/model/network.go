@@ -53,8 +53,32 @@ func ServiceHealth(typ string, total, ready int) string {
 const (
 	BackendOK       = "ok"
 	BackendMissing  = "missing"  // Service introuvable
-	BackendIndirect = "indirect" // TraefikService, non résolu
+	BackendRefused  = "refused"  // route refusée par toutes ses Gateways (Accepted=False)
+	BackendIndirect = "indirect" // référence Traefik à un autre provider (api@internal, foo@file…), hors du cluster
 )
+
+// Sources d'une route.
+const (
+	SourceIngress         = "Ingress"
+	SourceIngressRoute    = "IngressRoute"
+	SourceIngressRouteTCP = "IngressRouteTCP"
+	SourceIngressRouteUDP = "IngressRouteUDP"
+	SourceHTTPRoute       = "HTTPRoute"
+	SourceGRPCRoute       = "GRPCRoute"
+)
+
+// Tri-état d'une condition Kubernetes ; unknown : condition absente (pas de contrôleur).
+const (
+	CondTrue    = "true"
+	CondFalse   = "false"
+	CondUnknown = "unknown"
+)
+
+// NoGateway : porte d'une route Gateway API sans parentRef de kind Gateway.
+const NoGateway = "(sans gateway)"
+
+// Weight : poids d'un backend (un poids nul doit rester publié, d'où le pointeur).
+func Weight(n int) *int { return &n }
 
 type Backend struct {
 	Namespace string `json:"namespace"`
@@ -62,6 +86,10 @@ type Backend struct {
 	Port      string `json:"port,omitempty"`
 	Kind      string `json:"kind"` // Service | TraefikService
 	State     string `json:"state"`
+	Weight    *int   `json:"weight,omitempty"`  // part du trafic de la règle source, pour mille ; nil : règle à un seul backend
+	Mirror    bool   `json:"mirror,omitempty"`  // copie du trafic (miroir Traefik)
+	Percent   int    `json:"percent,omitempty"` // part du trafic copiée vers le miroir
+	Via       string `json:"via,omitempty"`     // « ns/name » du TraefikService racine
 }
 
 type Rule struct {
@@ -71,16 +99,26 @@ type Rule struct {
 	Backend Backend `json:"backend"`
 }
 
-// Route : une Ingress ou une IngressRoute Traefik, rattachée à sa porte
-// (le contrôleur d'entrée qui la sert).
+// RouteParent : état d'une route Gateway API vis-à-vis d'un de ses Gateways.
+type RouteParent struct {
+	Gateway      string `json:"gateway"` // « ns/name »
+	Accepted     string `json:"accepted"`
+	ResolvedRefs string `json:"resolvedRefs"`
+	Reason       string `json:"reason,omitempty"`
+}
+
+// Route : une Ingress, une IngressRoute Traefik (HTTP, TCP, UDP) ou une route
+// Gateway API, rattachée à ses portes (contrôleurs d'entrée ou Gateways).
 type Route struct {
-	Source    string   `json:"source"` // Ingress | IngressRoute
-	Group     string   `json:"group"`  // networking.k8s.io | traefik.io | traefik.containo.us
-	Namespace string   `json:"namespace"`
-	Name      string   `json:"name"`
-	Gate      string   `json:"gate"`
-	Rules     []Rule   `json:"rules"`
-	Addresses []string `json:"addresses,omitempty"`
+	Source    string        `json:"source"` // une des constantes Source*
+	Group     string        `json:"group"`  // networking.k8s.io | traefik.io | traefik.containo.us | gateway.networking.k8s.io
+	Namespace string        `json:"namespace"`
+	Name      string        `json:"name"`
+	Gate      string        `json:"gate"`  // Gates[0], pour la compatibilité
+	Gates     []string      `json:"gates"` // jamais vide
+	Rules     []Rule        `json:"rules"`
+	Addresses []string      `json:"addresses,omitempty"`
+	Parents   []RouteParent `json:"parents,omitempty"`
 }
 
 // Volume : un PersistentVolumeClaim et les pods qui le montent. Tailles en octets.
@@ -96,6 +134,41 @@ type Volume struct {
 	Pods         []string `json:"pods"`
 }
 
-func ServiceKey(s Service) string { return s.Namespace + "/" + s.Name }
-func RouteKey(r Route) string     { return r.Source + "/" + r.Namespace + "/" + r.Name }
-func VolumeKey(v Volume) string   { return v.Namespace + "/" + v.Name }
+type Listener struct {
+	Name           string `json:"name"`
+	Protocol       string `json:"protocol"`
+	Port           int32  `json:"port"`
+	Hostname       string `json:"hostname,omitempty"`
+	AttachedRoutes int32  `json:"attachedRoutes"`
+	Ready          string `json:"ready"`
+}
+
+// Gateway : un Gateway de la Gateway API, dessiné en porte.
+type Gateway struct {
+	Namespace  string     `json:"namespace"`
+	Name       string     `json:"name"`
+	Class      string     `json:"class"`
+	Accepted   string     `json:"accepted"`
+	Programmed string     `json:"programmed"`
+	Reason     string     `json:"reason,omitempty"`
+	Message    string     `json:"message,omitempty"`
+	Addresses  []string   `json:"addresses,omitempty"`
+	Listeners  []Listener `json:"listeners"`
+}
+
+// PersistentVolume : un PV sans PVC existant (citerne vide). Capacité en octets.
+type PersistentVolume struct {
+	Name          string   `json:"name"`
+	StorageClass  string   `json:"storageClass"`
+	Capacity      int64    `json:"capacity"`
+	AccessModes   []string `json:"accessModes"`
+	ReclaimPolicy string   `json:"reclaimPolicy"`
+	Phase         string   `json:"phase"`              // Available | Released | Failed | Bound
+	ClaimRef      string   `json:"claimRef,omitempty"` // « ns/name »
+}
+
+func ServiceKey(s Service) string                   { return s.Namespace + "/" + s.Name }
+func RouteKey(r Route) string                       { return r.Source + "/" + r.Namespace + "/" + r.Name }
+func VolumeKey(v Volume) string                     { return v.Namespace + "/" + v.Name }
+func GatewayKey(g Gateway) string                   { return g.Namespace + "/" + g.Name }
+func PersistentVolumeKey(p PersistentVolume) string { return p.Name }

@@ -1,79 +1,116 @@
 package kube
 
 import (
-	"context"
-	"log/slog"
-
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/discovery"
-	"k8s.io/client-go/dynamic/dynamicinformer"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/no-inspi/atlas-k8s/internal/model"
 )
 
-// Groupes des IngressRoute Traefik : v3 (traefik.io), puis l'ancien groupe v2.
-var traefikGroups = []string{"traefik.io", "traefik.containo.us"}
+// Traefik dans la source : IngressRoute (dynkinds.go), IngressRouteTCP et
+// IngressRouteUDP, TraefikService résolus jusqu'aux Services.
 
-// traefikInformer : cache des IngressRoute d'un groupe Traefik.
-type traefikInformer struct {
-	group  string
-	lister cache.GenericLister
-	index  cache.Indexer
+func gvrIngressRouteTCP(g string) schema.GroupVersionResource {
+	return schema.GroupVersionResource{Group: g, Version: "v1alpha1", Resource: "ingressroutetcps"}
 }
 
-// traefikGroupsServed : groupes dont l'API server sert les IngressRoute.
-// La découverte a lieu au démarrage : une CRD installée ensuite est prise en
-// compte au prochain redémarrage.
-func traefikGroupsServed(d discovery.DiscoveryInterface, log *slog.Logger) []string {
-	var out []string
-	for _, g := range traefikGroups {
-		rl, err := d.ServerResourcesForGroupVersion(g + "/v1alpha1")
-		if err != nil {
-			if !apierrors.IsNotFound(err) {
-				log.Warn("découverte Traefik impossible", "group", g, "err", err)
-			}
-			continue
-		}
-		for _, r := range rl.APIResources {
-			if r.Name == "ingressroutes" {
-				out = append(out, g)
-				break
-			}
-		}
-	}
-	if len(out) > 0 {
-		log.Info("IngressRoute Traefik servies", "groups", out)
-	}
-	return out
+func gvrIngressRouteUDP(g string) schema.GroupVersionResource {
+	return schema.GroupVersionResource{Group: g, Version: "v1alpha1", Resource: "ingressrouteudps"}
 }
 
-func (s *Source) startTraefik(ctx context.Context) {
-	dyn := s.opts.Dynamic
-	if dyn == nil {
-		return
+func gvrTraefikService(g string) schema.GroupVersionResource {
+	return schema.GroupVersionResource{Group: g, Version: "v1alpha1", Resource: "traefikservices"}
+}
+
+const indexByTraefikService = "traefikservice" // routes et TraefikService par TraefikService visé : « ns/name »
+
+var traefikRouteSources = []string{model.SourceIngressRoute, model.SourceIngressRouteTCP, model.SourceIngressRouteUDP}
+
+func traefikRouteGVR(g, source string) schema.GroupVersionResource {
+	switch source {
+	case model.SourceIngressRouteTCP:
+		return gvrIngressRouteTCP(g)
+	case model.SourceIngressRouteUDP:
+		return gvrIngressRouteUDP(g)
 	}
-	for _, g := range traefikGroupsServed(s.client.Discovery(), s.opts.Log) {
-		gvr := schema.GroupVersionResource{Group: g, Version: "v1alpha1", Resource: "ingressroutes"}
-		if !s.probe(ctx, "ingressroutes."+g, func(ctx context.Context) error {
-			_, err := dyn.Resource(gvr).List(ctx, probeOpts)
-			return err
-		}) {
-			continue
-		}
-		if s.dynFactory == nil {
-			s.dynFactory = dynamicinformer.NewDynamicSharedInformerFactory(dyn, 0)
-		}
-		inf := s.dynFactory.ForResource(gvr)
-		_ = inf.Informer().SetTransform(transform)
-		_ = inf.Informer().AddIndexers(cache.Indexers{indexByBackend: func(o any) ([]string, error) {
+	return gvrIngressRoute(g)
+}
+
+// traefikIndexers : Services et TraefikService visés directement, pour les
+// routes Traefik comme pour les TraefikService.
+func traefikIndexers(*Source) cache.Indexers {
+	return cache.Indexers{
+		indexByBackend: func(o any) ([]string, error) {
 			u, ok := o.(*unstructured.Unstructured)
 			if !ok {
 				return nil, nil
 			}
-			return routeBackends(ConvertIngressRoute(u, nil)), nil
-		}})
-		s.traefik = append(s.traefik, traefikInformer{group: g, lister: inf.Lister(), index: inf.Informer().GetIndexer()})
-		s.watch(inf.Informer(), s.onIngressRoute)
+			svcs, _ := traefikRefs(u)
+			return svcs, nil
+		},
+		indexByTraefikService: func(o any) ([]string, error) {
+			u, ok := o.(*unstructured.Unstructured)
+			if !ok {
+				return nil, nil
+			}
+			_, ts := traefikRefs(u)
+			return ts, nil
+		},
+	}
+}
+
+func traefikRouteKind(g, source string) dynKind {
+	return dynKind{gvr: traefikRouteGVR(g, source), on: markRoute(source), indexers: traefikIndexers}
+}
+
+func traefikServiceKind(g string) dynKind {
+	return dynKind{gvr: gvrTraefikService(g), on: (*Source).onTraefikService, indexers: traefikIndexers}
+}
+
+// onTraefikService : routes qui atteignent ce TraefikService (sa résolution a changé).
+func (s *Source) onTraefikService(o any) {
+	if u, ok := o.(*unstructured.Unstructured); ok {
+		s.markTraefikUsers(u.GetNamespace() + "/" + u.GetName())
+	}
+}
+
+// markTraefikUsers marque les routes qui visent le TraefikService key,
+// directement ou par d'autres TraefikService, sur traefikMaxDepth niveaux au
+// plus. Parcours en largeur, chaque TraefikService visité une fois : un
+// diamant ou un cycle ne coûte pas plus qu'une chaîne.
+func (s *Source) markTraefikUsers(key string) {
+	seen := map[string]bool{key: true}
+	level := []string{key}
+	for depth := 1; depth <= traefikMaxDepth && len(level) > 0; depth++ {
+		var next []string
+		for _, k := range level {
+			for _, g := range traefikGroups {
+				for _, source := range traefikRouteSources {
+					s.markIndexed(traefikRouteGVR(g, source), indexByTraefikService, k, markRoute(source))
+				}
+				s.markIndexed(gvrTraefikService(g), indexByTraefikService, k, func(_ *Source, o any) {
+					if u, ok := o.(*unstructured.Unstructured); ok {
+						if p := u.GetNamespace() + "/" + u.GetName(); !seen[p] {
+							seen[p] = true
+							next = append(next, p)
+						}
+					}
+				})
+			}
+		}
+		level = next
+	}
+}
+
+// traefikLookup : TraefikService du cache, traefik.io d'abord.
+func (s *Source) traefikLookup() TraefikLookup {
+	return func(ns, name string) (*unstructured.Unstructured, bool) {
+		for _, g := range traefikGroups {
+			if u, _ := s.dynGet(gvrTraefikService(g), ns+"/"+name); u != nil {
+				return u, true
+			}
+		}
+		return nil, false
 	}
 }

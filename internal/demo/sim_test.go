@@ -43,13 +43,14 @@ func (f *fakeSink) Upsert(kind stream.Kind, key string, obj any) {
 		f.workloads[key] = o
 	case model.Namespace:
 		f.namespaces = append(f.namespaces, o.Name)
-	case model.Service, model.Route, model.Volume:
+	case model.Service, model.Route, model.Volume, model.Gateway, model.PersistentVolume:
 		f.net[string(kind)+"|"+key] = o
 	}
 }
 
 func (f *fakeSink) Delete(kind stream.Kind, key string, obj any) {
-	if kind == stream.KindService || kind == stream.KindRoute || kind == stream.KindVolume {
+	if kind == stream.KindService || kind == stream.KindRoute || kind == stream.KindVolume ||
+		kind == stream.KindGateway || kind == stream.KindPersistentVolume {
 		delete(f.net, string(kind)+"|"+key)
 		return
 	}
@@ -370,6 +371,11 @@ func TestDemoNetworkAndStorage(t *testing.T) {
 		t.Errorf("uploads-preview = %+v", v)
 	}
 
+	for k, o := range sink.net {
+		if r, ok := o.(model.Route); ok && (len(r.Gates) == 0 || r.Gates[0] != r.Gate) {
+			t.Errorf("%s : gates %v, gate %q", k, r.Gates, r.Gate)
+		}
+	}
 	// Les endpoints suivent les pods.
 	_ = s.Scale(context.Background(), anyone, "production", "Deployment", "api-gateway", 1)
 	advance(s, t0, 5*time.Second)
@@ -383,13 +389,92 @@ func TestScaledCatalogHasNetwork(t *testing.T) {
 	if len(c.services) != len(services)+40 || len(c.volumes) != len(volumes)+20 {
 		t.Errorf("services = %d, volumes = %d", len(c.services), len(c.volumes))
 	}
-	traefik := 0
+	bySource := map[string]int{}
 	for _, r := range c.routes {
-		if r.Source == "IngressRoute" {
-			traefik++
+		bySource[r.Source]++
+	}
+	if bySource[model.SourceIngressRoute] != 4+3 { // grafana, admin, argocd, checkout, puis les équipes 3, 6 et 9
+		t.Errorf("IngressRoute = %d", bySource[model.SourceIngressRoute])
+	}
+	if bySource[model.SourceHTTPRoute] != 2+4 { // storefront, preview, puis les équipes 1, 4, 7 et 10
+		t.Errorf("HTTPRoute = %d", bySource[model.SourceHTTPRoute])
+	}
+	if len(c.gateways) != 2+1 || c.gateways[2].Namespace != "team-001" || len(c.pvs) != 3+2 { // PV : équipes 5 et 10
+		t.Errorf("gateways = %d, pvs = %d", len(c.gateways), len(c.pvs))
+	}
+	for _, r := range c.routes {
+		if r.Source == model.SourceHTTPRoute && r.Namespace == "team-007" && r.Gate != "team-001/edge" {
+			t.Errorf("team-007/web-http : porte %q", r.Gate)
 		}
 	}
-	if traefik != 3+3 { // grafana, admin, argocd, puis les équipes 3, 6 et 9
-		t.Errorf("IngressRoute = %d", traefik)
+}
+
+// w : poids publié d'un backend, -1 s'il n'en a pas.
+func w(b model.Backend) int {
+	if b.Weight == nil {
+		return -1
+	}
+	return *b.Weight
+}
+
+func TestDemoGatewayAPITraefikAndPV(t *testing.T) {
+	_, sink := start(5)
+	pub := sink.net["gateway|infra/public"].(model.Gateway)
+	if pub.Programmed != model.CondTrue || pub.Class != "eg" || pub.Addresses[0] != "34.120.5.10" || len(pub.Listeners) != 2 || pub.Listeners[0].AttachedRoutes != 1 {
+		t.Errorf("infra/public = %+v", pub)
+	}
+	if in := sink.net["gateway|infra/internal"].(model.Gateway); in.Programmed != model.CondFalse || in.Reason != "AddressNotAssigned" || in.Listeners[0].Name != "https" || in.Listeners[0].Ready != model.CondFalse || in.Listeners[0].AttachedRoutes != 1 {
+		t.Errorf("infra/internal = %+v", in)
+	}
+	shop := sink.net["route|HTTPRoute/production/storefront"].(model.Route)
+	if shop.Gate != "infra/public" || len(shop.Gates) != 1 || len(shop.Rules) != 2 || w(shop.Rules[0].Backend) != 900 ||
+		w(shop.Rules[1].Backend) != 100 || shop.Rules[1].Backend.Service != "frontend-canary" || shop.Rules[1].Backend.State != model.BackendOK {
+		t.Errorf("storefront = %+v", shop)
+	}
+	if r := sink.net["route|HTTPRoute/staging/preview"].(model.Route); r.Rules[0].Backend.Service != "checkout-preview" ||
+		r.Rules[0].Backend.State != model.BackendRefused || r.Parents[0].Reason != "NotAllowedByListeners" {
+		t.Errorf("preview = %+v", r)
+	}
+	if r := sink.net["route|GRPCRoute/production/orders-grpc"].(model.Route); r.Gate != "infra/internal" || r.Rules[0].Match != "orders.v1.Orders/PlaceOrder" || r.Rules[0].Backend.State != model.BackendOK {
+		t.Errorf("orders-grpc = %+v", r)
+	}
+	co := sink.net["route|IngressRoute/production/checkout"].(model.Route)
+	if len(co.Rules) != 3 || w(co.Rules[0].Backend) != 750 || w(co.Rules[1].Backend) != 250 || co.Rules[2].Backend.Weight != nil || co.Rules[0].Backend.Via != "production/checkout-split" ||
+		!co.Rules[2].Backend.Mirror || co.Rules[2].Backend.Percent != 10 || co.Rules[2].Backend.State != model.BackendOK {
+		t.Errorf("checkout = %+v", co.Rules)
+	}
+	if r := sink.net["route|IngressRouteTCP/production/postgres"].(model.Route); r.Gate != "traefik" || r.Rules[0].Backend.Port != "5432" || r.Rules[0].Backend.State != model.BackendOK {
+		t.Errorf("postgres = %+v", r)
+	}
+	if r := sink.net["route|IngressRouteUDP/monitoring/statsd"].(model.Route); r.Rules[0].Backend.Service != "prometheus" || r.Rules[0].Backend.Port != "9125" || r.Rules[0].Backend.State != model.BackendOK {
+		t.Errorf("statsd = %+v", r)
+	}
+	if pv := sink.net["persistentVolume|pv-old-uploads"].(model.PersistentVolume); pv.Phase != "Released" || pv.ClaimRef != "staging/old-uploads" || pv.Capacity != 5*gi || pv.ReclaimPolicy != "Retain" {
+		t.Errorf("pv-old-uploads = %+v", pv)
+	}
+	if pv := sink.net["persistentVolume|pv-archive-2025"].(model.PersistentVolume); pv.Phase != "Released" || pv.ClaimRef != "production/archive-2025" || pv.Capacity != 100*gi {
+		t.Errorf("pv-archive-2025 = %+v", pv)
+	}
+	for k, o := range sink.net {
+		r, ok := o.(model.Route)
+		if !ok {
+			continue
+		}
+		if r.Group == "" {
+			t.Errorf("%s : Group vide (refusée par le filtre d'accès)", k)
+		}
+		sum, weighted := 0, false
+		for _, rule := range r.Rules {
+			if b := rule.Backend; b.Weight != nil && !b.Mirror {
+				sum += *b.Weight
+				weighted = true
+			}
+		}
+		if weighted && sum != 1000 {
+			t.Errorf("%s : poids non miroirs = %d ‰, attendu 1000", k, sum)
+		}
+	}
+	if pv, ok := sink.net["persistentVolume|pv-spare-01"].(model.PersistentVolume); !ok || pv.Phase != "Available" || pv.StorageClass != "premium-rwo" || pv.Capacity != 50*gi {
+		t.Errorf("pv-spare-01 = %v %+v", ok, pv)
 	}
 }

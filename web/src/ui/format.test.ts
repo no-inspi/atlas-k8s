@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { age, fmtCpu, fmtMem, pct } from './format'
+import { age, fmtCpu, fmtMem, fmtShare, pct } from './format'
 
 describe('format', () => {
   it('formate le CPU comme kubectl', () => {
@@ -27,5 +27,12 @@ describe('format', () => {
     expect(pct(50, 200)).toBe(25)
     expect(pct(5, 0)).toBe(0)
     expect(pct(300, 200)).toBe(100)
+  })
+
+  it('formate une part du trafic en pour mille', () => {
+    expect(fmtShare(900)).toBe('90 %')
+    expect(fmtShare(1000)).toBe('100 %')
+    expect(fmtShare(333)).toBe('33.3 %')
+    expect(fmtShare(0)).toBe('0 %')
   })
 })

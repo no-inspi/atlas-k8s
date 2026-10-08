@@ -1,13 +1,15 @@
 // Arbre de la vue Liste : namespaces → workloads → pods, nodes → pods, puis
-// entrées → routes, Services par namespace et PVC par classe de stockage.
+// entrées (portes et Gateways) → routes, Services par namespace, PVC et PV
+// orphelins par classe de stockage.
 // Fonctions pures : construction, aplatissement selon les nœuds dépliés,
 // navigation au clavier (motif « tree » de WAI-ARIA).
 
 import {
-  routeKey, serviceKey, volumeKey, workloadKey, type Node, type Pod, type Route, type Service, type Volume, type Workload,
+  routeKey, serviceKey, volumeKey, workloadKey, type Gateway, type Node, type PersistentVolume, type Pod, type Route, type Service, type Volume,
+  type Workload,
 } from '../api/types'
 import type { SelectionType } from '../store/cluster'
-import { gatesOf, readyCount, routeBroken } from '../store/net'
+import { gatesOf, readyCount, routeBroken, routeRefused } from '../store/net'
 import { fmtMem } from './format'
 
 export interface TreeNode {
@@ -40,6 +42,7 @@ const podItem = (p: Pod): TreeNode => ({ id: `pod:${p.uid}`, label: p.name, stat
 export function buildTree(st: {
   pods: ReadonlyMap<string, Pod>; nodes: ReadonlyMap<string, Node>; workloads: ReadonlyMap<string, Workload>
   services?: ReadonlyMap<string, Service>; routes?: ReadonlyMap<string, Route>; volumes?: ReadonlyMap<string, Volume>
+  gateways?: ReadonlyMap<string, Gateway>; persistentVolumes?: ReadonlyMap<string, PersistentVolume>
 }): TreeNode[] {
   const pods = [...st.pods.values()]
   const byNs = new Map<string, Map<string, Pod[]>>()
@@ -79,15 +82,23 @@ export function buildTree(st: {
     { id: 'group:nodes', label: 'Nodes', detail: `${nodes.length}`, children: nodes },
   ]
 
-  const gates = gatesOf(st.routes?.values() ?? [])
+  const gates = gatesOf(st.routes?.values() ?? [], st.gateways)
   if (gates.length) roots.push({
     id: 'group:gates', label: 'Entrées', detail: `${gates.length}`,
     children: gates.map((g) => ({
-      id: `gate:${g.name}`, label: g.name, detail: `${g.routes.length} routes`, status: g.broken ? 'route cassée' : undefined,
-      select: { type: 'gate', key: g.name },
+      id: `gate:${g.name}`, label: g.name,
+      detail: g.gateway ? `Gateway · ${g.gateway.class} · ${g.routes.length} routes` : `${g.routes.length} routes`,
+      // Même hiérarchie de gravité que gateSignal (couleur de la scène et de l'inspecteur).
+      status: g.gateway?.programmed === 'false' ? 'non programmé'
+        : g.refused ? 'route refusée'
+        : g.broken ? 'route cassée'
+        : g.gateway?.listeners.some((l) => l.ready === 'false') ? 'listener non prêt' : undefined,
+      select: g.gateway ? { type: 'gateway' as const, key: g.name } : { type: 'gate' as const, key: g.name },
+      // Une route à plusieurs portes apparaît sous chacune : l'id porte la porte.
       children: g.routes.map((r) => ({
-        id: `route:${routeKey(r)}`, label: r.name, detail: `${r.source} · ${r.namespace}`,
-        status: routeBroken(r) ? 'Service introuvable' : undefined, select: { type: 'route', key: routeKey(r) },
+        id: `route:${routeKey(r)}@${g.name}`, label: r.name, detail: `${r.source} · ${r.namespace}`,
+        status: routeRefused(r) ? 'route refusée' : routeBroken(r) ? 'Service introuvable' : undefined,
+        select: { type: 'route' as const, key: routeKey(r) },
       })),
     })),
   })
@@ -111,18 +122,27 @@ export function buildTree(st: {
   }
 
   const volumes = [...(st.volumes?.values() ?? [])]
-  if (volumes.length) {
-    const byClass = new Map<string, Volume[]>()
-    for (const v of volumes) pushTo(byClass, v.storageClass || '(aucune)', v)
+  const pvs = [...(st.persistentVolumes?.values() ?? [])]
+  if (volumes.length || pvs.length) {
+    const byClass = new Map<string, TreeNode[]>()
+    for (const v of volumes) pushTo(byClass, v.storageClass || '(aucune)', {
+      id: `volume:${volumeKey(v)}`, label: v.name, detail: `${v.namespace} · ${fmtMem(v.requested)}`,
+      status: v.phase !== 'Bound' ? v.phase : undefined, select: { type: 'volume' as const, key: volumeKey(v) },
+    })
+    for (const p of pvs) pushTo(byClass, p.storageClass || '(aucune)', {
+      id: `pv:${p.name}`, label: p.name, detail: `PV · ${fmtMem(p.capacity)}${p.claimRef ? ` · ex-${p.claimRef}` : ''}`,
+      status: p.phase, select: { type: 'pv' as const, key: p.name },
+    })
     roots.push({
-      id: 'group:storage', label: 'Stockage', detail: `${volumes.length}`,
-      children: [...byClass].map(([c, vs]) => ({
-        id: `class:${c}`, label: c, detail: `${vs.length} PVC`,
-        children: vs.map((v) => ({
-          id: `volume:${volumeKey(v)}`, label: v.name, detail: `${v.namespace} · ${fmtMem(v.requested)}`,
-          status: v.phase !== 'Bound' ? v.phase : undefined, select: { type: 'volume' as const, key: volumeKey(v) },
-        })).sort(byLabel),
-      })).sort(byLabel),
+      id: 'group:storage', label: 'Stockage', detail: `${volumes.length + pvs.length}`,
+      children: [...byClass].map(([c, items]) => {
+        const nPv = items.filter((n) => n.select?.type === 'pv').length
+        const nPvc = items.length - nPv
+        return {
+          id: `class:${c}`, label: c, detail: [nPvc && `${nPvc} PVC`, nPv && `${nPv} PV`].filter(Boolean).join(' · '),
+          children: items.sort(byLabel),
+        }
+      }).sort(byLabel),
     })
   }
   return roots

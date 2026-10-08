@@ -14,16 +14,18 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/cache"
 
+	"github.com/no-inspi/atlas-k8s/internal/model"
 	"github.com/no-inspi/atlas-k8s/internal/stream"
 )
 
 // Réseau et stockage (jalon 8) : Services et EndpointSlices, Ingress et
-// IngressClass, PVC, IngressRoute Traefik (traefik.go).
+// IngressClass, PVC ; types apportés par une CRD (dynkinds.go).
 
 const (
-	indexByClaim   = "claim"   // pods par PVC monté : « ns/claim »
+	indexByClaim   = "claim"   // pods par PVC monté, PV par claim réclamé : « ns/claim »
 	indexByService = "service" // EndpointSlices par Service : « ns/name »
 	indexByBackend = "backend" // routes par Service visé : « ns/name »
 )
@@ -35,7 +37,9 @@ const probeTimeout = 10 * time.Second
 
 // probe : list d'essai. Refusé (403) ou absent (404) : le type est désactivé
 // plutôt que de bloquer la synchronisation des caches. Une autre erreur
-// (API server momentanément injoignable) laisse l'informer réessayer.
+// (API server momentanément injoignable) rend vrai : l'informer réessaie de
+// lui-même ; pour un type dynamique, dont la synchronisation est bornée
+// (opts.dynSync), un échec est ensuite réessayé en arrière-plan (wantDyn).
 func (s *Source) probe(ctx context.Context, what string, list func(context.Context) error) bool {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
@@ -82,6 +86,20 @@ func (s *Source) startNetwork(ctx context.Context) {
 		s.pvcs = inf.Lister()
 		s.watch(inf.Informer(), s.onPVC)
 	}
+	if s.probe(ctx, "persistentvolumes", func(ctx context.Context) error {
+		_, err := c.CoreV1().PersistentVolumes().List(ctx, probeOpts)
+		return err
+	}) {
+		inf := f.Core().V1().PersistentVolumes()
+		_ = inf.Informer().AddIndexers(cache.Indexers{indexByClaim: func(o any) ([]string, error) {
+			if r := o.(*corev1.PersistentVolume).Spec.ClaimRef; r != nil && r.Name != "" {
+				return []string{r.Namespace + "/" + r.Name}, nil
+			}
+			return nil, nil
+		}})
+		s.pvs, s.pvIdx = inf.Lister(), inf.Informer().GetIndexer()
+		s.watch(inf.Informer(), s.onPV)
+	}
 	if s.probe(ctx, "ingressclasses", func(ctx context.Context) error {
 		_, err := c.NetworkingV1().IngressClasses().List(ctx, probeOpts)
 		return err
@@ -101,7 +119,6 @@ func (s *Source) startNetwork(ctx context.Context) {
 		s.ingresses, s.ingressIdx = inf.Lister(), inf.Informer().GetIndexer()
 		s.watch(inf.Informer(), s.onIngress)
 	}
-	s.startTraefik(ctx)
 }
 
 /* ---------- événements ---------- */
@@ -124,10 +141,13 @@ func (s *Source) markRoutesTo(svc string) {
 			s.onIngress(o)
 		}
 	}
-	for _, t := range s.traefik {
-		objs, _ := t.index.ByIndex(indexByBackend, svc)
+	for _, d := range s.dynRunning() {
+		objs, err := d.inf.GetIndexer().ByIndex(indexByBackend, svc)
+		if err != nil {
+			continue // type sans index par Service
+		}
 		for _, o := range objs {
-			s.onIngressRoute(o)
+			d.kind.on(s, o)
 		}
 	}
 }
@@ -142,9 +162,29 @@ func (s *Source) onEndpointSlice(o any) {
 	}
 }
 
+// onPVC : le volume, et les PV qu'il réclame (ils deviennent orphelins ou non).
 func (s *Source) onPVC(o any) {
-	if p, ok := o.(*corev1.PersistentVolumeClaim); ok {
-		s.mark(ref{stream.KindVolume, p.Namespace + "/" + p.Name})
+	p, ok := o.(*corev1.PersistentVolumeClaim)
+	if !ok {
+		return
+	}
+	id := p.Namespace + "/" + p.Name
+	s.mark(ref{stream.KindVolume, id})
+	if s.pvIdx == nil {
+		return
+	}
+	pvs, _ := s.pvIdx.ByIndex(indexByClaim, id)
+	for _, pv := range pvs {
+		s.onPV(pv)
+	}
+	if p.Spec.VolumeName != "" {
+		s.mark(ref{stream.KindPersistentVolume, p.Spec.VolumeName})
+	}
+}
+
+func (s *Source) onPV(o any) {
+	if pv, ok := o.(*corev1.PersistentVolume); ok {
+		s.mark(ref{stream.KindPersistentVolume, pv.Name})
 	}
 }
 
@@ -185,18 +225,19 @@ func (s *Source) markNetwork() {
 			s.onPVC(o)
 		}
 	}
+	if s.pvs != nil {
+		all, _ := s.pvs.List(sel)
+		for _, o := range all {
+			s.onPV(o)
+		}
+	}
 	if s.ingresses != nil {
 		all, _ := s.ingresses.List(sel)
 		for _, o := range all {
 			s.onIngress(o)
 		}
 	}
-	for _, t := range s.traefik {
-		all, _ := t.lister.List(sel)
-		for _, o := range all {
-			s.onIngressRoute(o)
-		}
-	}
+	s.markDynamic()
 }
 
 /* ---------- construction ---------- */
@@ -238,7 +279,7 @@ func (s *Source) buildRoute(id string) (any, string, error) {
 	source, rest, _ := strings.Cut(id, "/")
 	ns, name, _ := cache.SplitMetaNamespaceKey(rest)
 	switch source {
-	case "Ingress":
+	case model.SourceIngress:
 		if s.ingresses == nil {
 			return nil, "", nil
 		}
@@ -251,19 +292,24 @@ func (s *Source) buildRoute(id string) (any, string, error) {
 			classes, _ = s.classes.List(labels.Everything())
 		}
 		return ConvertIngress(i, IngressGate(i, classes), s.serviceExists()), id, nil
-	case "IngressRoute":
+	case model.SourceIngressRoute, model.SourceIngressRouteTCP, model.SourceIngressRouteUDP:
 		// traefik.io avant traefik.containo.us (ordre de traefikGroups).
-		for _, t := range s.traefik {
-			o, err := t.lister.ByNamespace(ns).Get(name)
-			if apierrors.IsNotFound(err) {
-				continue
-			}
+		for _, g := range traefikGroups {
+			u, err := s.dynGet(traefikRouteGVR(g, source), ns+"/"+name)
 			if err != nil {
 				return nil, "", err
 			}
-			return ConvertIngressRoute(o.(*unstructured.Unstructured), s.serviceExists()), id, nil
+			if u != nil {
+				return ConvertTraefikRoute(u, source, s.serviceExists(), s.traefikLookup()), id, nil
+			}
 		}
 		return nil, "", nil
+	case model.SourceHTTPRoute, model.SourceGRPCRoute:
+		u, err := s.dynGet(gatewayRouteGVR(source), ns+"/"+name)
+		if err != nil || u == nil {
+			return nil, "", err
+		}
+		return ConvertGatewayRoute(u, source, s.serviceExists()), id, nil
 	}
 	return nil, "", fmt.Errorf("route inconnue %q", id)
 }
@@ -288,4 +334,25 @@ func (s *Source) buildVolume(id string) (any, string, error) {
 	}
 	sort.Strings(uids)
 	return ConvertPVC(p, uids), id, nil
+}
+
+func (s *Source) buildPersistentVolume(name string) (any, string, error) {
+	if s.pvs == nil {
+		return nil, "", nil
+	}
+	pv, err := s.pvs.Get(name)
+	if err != nil {
+		return nil, "", err
+	}
+	var exists ClaimExists
+	if s.pvcs != nil {
+		exists = func(ns, claim string, uid types.UID) bool {
+			p, err := s.pvcs.PersistentVolumeClaims(ns).Get(claim)
+			return err == nil && (uid == "" || p.UID == uid)
+		}
+	}
+	if !PublishPV(pv, exists) {
+		return nil, "", nil
+	}
+	return ConvertPV(pv), name, nil
 }

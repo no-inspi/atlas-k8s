@@ -3,6 +3,7 @@
 # ingress-nginx sur le port 80, Dex dans le cluster, réécriture CoreDNS.
 set -eu
 CTX="${CTX:-kind-atlas}"
+"$(dirname "$0")/../kind-guard.sh" "$CTX"
 k() { kubectl --context "$CTX" "$@"; }
 HERE="$(cd "$(dirname "$0")" && pwd)"
 

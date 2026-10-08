@@ -41,8 +41,24 @@ rules:
     resources: [ingressclasses]
     verbs: [list, watch]
   - apiGroups: [traefik.io, traefik.containo.us]
-    resources: [ingressroutes]
+    resources: [ingressroutes, ingressroutetcps, ingressrouteudps, traefikservices]
     verbs: [get, list, watch]
+  # Jalon 9 : Gateway API, PV sans PVC, CRD (lecture seule ; un type refusé est désactivé).
+  # GatewayClass : lue par l'onglet YAML seulement (ni informer ni sonde), donc get seul.
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [gatewayclasses]
+    verbs: [get]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [gateways, httproutes, grpcroutes]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [persistentvolumes]
+    verbs: [get, list, watch]
+  - apiGroups: [apiextensions.k8s.io]
+    resources: [customresourcedefinitions]
+    # list/watch sur les CRD : prise en compte à chaud ; sans ce droit,
+    # découverte au démarrage seulement.
+    verbs: [list, watch]
   - apiGroups: [apps]
     resources: [deployments, replicasets, statefulsets, daemonsets]
     verbs: [get, list, watch]

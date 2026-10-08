@@ -334,7 +334,8 @@ func (s *Sim) YAML(_ context.Context, _ access.User, ref inspect.Ref) (inspect.D
 				obj, argo = s.replicaSetObject(w), w.def.Argo
 			}
 		}
-	case "Service", "PersistentVolumeClaim", "Ingress", "IngressRoute":
+	case "Service", "PersistentVolumeClaim", "Ingress", "IngressRoute", "IngressRouteTCP", "IngressRouteUDP",
+		"HTTPRoute", "GRPCRoute", "Gateway", "GatewayClass", "TraefikService", "PersistentVolume":
 		obj = s.netObject(ref)
 	default:
 		for _, w := range s.workloads {

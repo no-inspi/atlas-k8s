@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { World } from './world'
 import { BLOCK_MIN, DEFAULT_VIEW, type PodView } from './podView'
-import { node, pod, route, service, volume } from '../store/fixtures'
+import { gateway, node, pod, pv, route, service, volume } from '../store/fixtures'
 
 const state = (version: number, nodes = [node()], pods = [pod()]) => ({
   version,
@@ -167,7 +167,63 @@ describe('réseau et stockage', () => {
     expect(f.path!.has('pod:u1')).toBe(true)
     expect(w.focusFor({ type: 'pod', key: 'u1', name: 'x' }, null, null).dim).toBe(false)
     expect(w.focusFor(null, 'gate:nginx', null).hover!.has('service:production/api')).toBe(true)
-    expect(w.focusFor(null, null, null)).toEqual({ path: null, hover: null, dim: false })
+    expect(w.focusFor(null, null, null)).toEqual({ path: null, hover: null, dim: false, podUids: null })
+  })
+
+  it('précalcule les uids des pods du chemin estompant', () => {
+    const w = new World()
+    w.update(st(1))
+    expect([...w.focusFor({ type: 'service', key: 'production/api', name: 'api' }, null, null).podUids!]).toEqual(['u1'])
+    expect(w.focusFor({ type: 'pod', key: 'u1', name: 'x' }, null, null).podUids).toBeNull()
+  })
+
+  it('nouveau chemin quand le masquage ou le filtre retire le Service sélectionné', () => {
+    const dns = service({ namespace: 'kube-system', name: 'kube-dns', endpoints: [{ podUID: 'k1', ready: true }] })
+    const sys = (version: number, hideSystem: boolean, nsFilter: string | null = null) => ({
+      ...state(version, [node()], [pod({ uid: 'u1' }), pod({ uid: 'k1', name: 'coredns-1', namespace: 'kube-system' })]),
+      services: new Map([['production/api', service()], ['kube-system/kube-dns', dns]]),
+      podView: { ...DEFAULT_VIEW, hideSystem }, nsFilter,
+    })
+    const sel = { type: 'service' as const, key: 'kube-system/kube-dns', name: 'kube-dns' }
+    const w = new World()
+    w.update(sys(1, false))
+    const f = w.focusFor(sel, null, null)
+    expect([...f.podUids!]).toEqual(['k1'])
+    w.update(sys(2, true)) // namespaces système masqués
+    const g = w.focusFor(sel, null, null)
+    expect(g).not.toBe(f)
+    expect(g.podUids!.size).toBe(0)
+    w.update(sys(3, true, 'kube-system')) // filtre sur kube-system : le Service revient
+    const h = w.focusFor(sel, null, null)
+    expect([...h.podUids!]).toEqual(['k1'])
+    w.update(sys(4, true, null)) // filtre retiré : le Service disparaît de nouveau
+    expect(w.focusFor(sel, null, null).podUids!.size).toBe(0)
+  })
+
+  it('survol seul : hover change, podUids identique', () => {
+    const w = new World()
+    w.update(st(1))
+    const sel = { type: 'service' as const, key: 'production/api', name: 'api' }
+    const f = w.focusFor(sel, null, null)
+    const g = w.focusFor(sel, 'gate:nginx', null)
+    expect(g.hover).not.toBe(f.hover)
+    expect(g.hover!.has('gate:nginx')).toBe(true)
+    expect(g.path).toBe(f.path)
+    expect(g.podUids).toBe(f.podUids)
+    expect(w.focusFor(sel, null, 'u1').podUids).toBe(f.podUids)
+  })
+
+  it('garde le focus quand une nouvelle version ne change pas les liens', () => {
+    const w = new World()
+    const sel = { type: 'service' as const, key: 'production/api', name: 'api' }
+    w.update(st(1))
+    const f = w.focusFor(sel, null, null)
+    w.update(st(2))
+    expect(w.focusFor(sel, null, null)).toBe(f)
+    w.update({ ...st(3), services: new Map([['production/api', service({ endpoints: [] })]]) })
+    const g = w.focusFor(sel, null, null)
+    expect(g).not.toBe(f)
+    expect(g.podUids!.size).toBe(0)
   })
 
   it('situe un objet réseau', () => {
@@ -176,5 +232,33 @@ describe('réseau et stockage', () => {
     expect(w.positionOf('service', 'production/api')).toEqual(expect.objectContaining({ x: expect.any(Number) }))
     expect(w.positionOf('route', 'Ingress/production/storefront')).toEqual(w.positionOf('gate', 'nginx'))
     expect(w.positionOf('volume', 'absent')).toBeNull()
+  })
+
+  it('ajoute les portes Gateway et les citernes vides', () => {
+    const w = new World()
+    w.update({
+      ...st(1),
+      gateways: new Map([['infra/public', gateway()], ['kube-system/sys', gateway({ namespace: 'kube-system', name: 'sys' })]]),
+      persistentVolumes: new Map([['pv-1', pv()]]),
+    })
+    expect([...w.net!.gates.keys()]).toEqual(['infra/public', 'nginx']) // kube-system masqué
+    expect(w.gates.find((g) => g.name === 'infra/public')!.gateway?.class).toBe('eg')
+    expect(w.net!.orphans.map((o) => o.key)).toEqual(['pv-1'])
+    expect(w.positionOf('gateway', 'infra/public')).toEqual(w.positionOf('gate', 'infra/public'))
+    expect(w.positionOf('pv', 'pv-1')).toEqual(expect.objectContaining({ x: expect.any(Number) }))
+    expect(w.positionOf('pv', 'absent')).toBeNull()
+    const f = w.focusFor({ type: 'gateway', key: 'infra/public', name: 'public' }, null, null)
+    expect(f.dim).toBe(true)
+    expect(f.path!.has('gate:infra/public')).toBe(true)
+    expect(w.focusFor({ type: 'pv', key: 'pv-1', name: 'pv-1' }, null, null).dim).toBe(true)
+  })
+
+  it('redispose quand un PV orphelin apparaît', () => {
+    const w = new World()
+    w.update(st(1))
+    const before = w.net
+    w.update({ ...st(2), persistentVolumes: new Map([['pv-1', pv()]]) })
+    expect(w.net).not.toBe(before)
+    expect(w.net!.orphans).toHaveLength(1)
   })
 })

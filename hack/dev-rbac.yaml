@@ -1,3 +1,4 @@
+# Réservé au cluster kind de développement : ne jamais appliquer ailleurs.
 # Droits des utilisateurs Dex de dev (groupes préfixés « oidc: » par atlas).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -25,15 +26,16 @@ subjects:
   - { kind: Group, name: "oidc:dev", apiGroup: rbac.authorization.k8s.io }
 roleRef: { kind: ClusterRole, name: edit, apiGroup: rbac.authorization.k8s.io }
 ---
-# « view » ne couvre pas les nodes (ressource cluster-scoped) : alice reçoit en
-# plus leur lecture ; bob, sans ce droit, voit des bâtiments anonymes.
+# « view » ne couvre ni les nodes ni les PV (ressources cluster-scoped) : alice
+# reçoit en plus leur lecture ; bob, sans ce droit, voit des bâtiments anonymes
+# et aucun PV.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: atlas-dev-node-reader
 rules:
   - apiGroups: [""]
-    resources: [nodes]
+    resources: [nodes, persistentvolumes]
     verbs: [get, list, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -52,3 +54,20 @@ metadata:
 subjects:
   - { kind: Group, name: "oidc:ops", apiGroup: rbac.authorization.k8s.io }
 roleRef: { kind: ClusterRole, name: cluster-admin, apiGroup: rbac.authorization.k8s.io }
+---
+# view et edit ignorent la Gateway API et Traefik (CRD sans rôles agrégés) :
+# ce rôle les y agrège, pour qu'alice et bob les lisent dans leurs namespaces.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: atlas-dev-gateway-view
+  labels:
+    rbac.authorization.k8s.io/aggregate-to-view: "true"
+    rbac.authorization.k8s.io/aggregate-to-edit: "true"
+rules:
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [gateways, httproutes, grpcroutes]
+    verbs: [get, list, watch]
+  - apiGroups: [traefik.io, traefik.containo.us]
+    resources: [ingressroutes, ingressroutetcps, ingressrouteudps, traefikservices]
+    verbs: [get, list, watch]

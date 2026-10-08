@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { node } from '../store/fixtures'
 import { GATE_ZONE, layoutCity, plotGeometry } from './layout'
-import { layoutNetwork, RELAY_PITCH, RELAY_PITCH_MIN, tankRadius, type RelayInput, type TankInput } from './netLayout'
+import { layoutNetwork, RELAY_PITCH, RELAY_PITCH_MIN, tankRadius, type OrphanInput, type RelayInput, type TankInput } from './netLayout'
 
 const city = layoutCity([node({ name: 'a-1', pool: 'p' }), node({ name: 'a-2', pool: 'p' }), node({ name: 'a-3', pool: 'p' })], plotGeometry(12))
 const relay = (ns: string, name: string): RelayInput => ({ key: `${ns}/${name}`, namespace: ns, name })
@@ -174,5 +174,54 @@ describe('entrepôts', () => {
     expect(tankRadius(1 * GiB)).toBeCloseTo(0.35)
     expect(tankRadius(8 * GiB)).toBeGreaterThan(tankRadius(1 * GiB))
     expect(tankRadius(10_000 * GiB)).toBe(0.8)
+  })
+})
+
+describe('citernes vides (PV sans PVC)', () => {
+  const orphan = (name: string, storageClass: string, gib = 5): OrphanInput => ({ key: name, name, storageClass, capacity: gib * GiB })
+  const tanks = [tank('production', 'data-0', 'fast'), tank('production', 'data-1', 'fast')]
+  const orphans = [orphan('pv-b', 'fast'), orphan('pv-a', 'slow', 50), orphan('pv-c', 'fast')]
+
+  it('range les PV orphelins après les PVC, dans l’îlot de leur classe', () => {
+    const net = layoutNetwork(city, [], [], tanks, orphans)
+    expect(net.islands.map((i) => i.storageClass)).toEqual(['fast', 'slow'])
+    expect(net.orphans.map((o) => o.key)).toEqual(['pv-b', 'pv-c', 'pv-a'])
+    const fast = net.islands[0]
+    for (const o of net.orphans.slice(0, 2)) {
+      expect(Math.abs(o.x - fast.x)).toBeLessThan(fast.width / 2)
+      expect(Math.abs(o.z - fast.z)).toBeLessThan(fast.depth / 2)
+    }
+    expect(net.orphans[2].r).toBeCloseTo(tankRadius(50 * GiB))
+    const all = [...net.tanks.values(), ...net.orphans].map((t) => `${t.x.toFixed(3)},${t.z.toFixed(3)}`)
+    expect(new Set(all).size).toBe(all.length)
+  })
+
+  it('ne dépend pas de l’ordre d’arrivée', () => {
+    const a = layoutNetwork(city, [], [], tanks, orphans)
+    const b = layoutNetwork(city, [], [], [...tanks].reverse(), [...orphans].reverse())
+    expect(a.orphans).toEqual(b.orphans)
+    expect([...a.tanks.entries()].sort()).toEqual([...b.tanks.entries()].sort())
+  })
+
+  it('sans PV orphelin, la disposition des PVC est inchangée', () => {
+    const a = layoutNetwork(city, [], [], tanks)
+    const b = layoutNetwork(city, [], [], tanks, [])
+    expect(a.orphans).toEqual([])
+    expect([...a.tanks.entries()]).toEqual([...b.tanks.entries()])
+  })
+
+  it('un îlot de seuls PV orphelins existe, sans chevaucher l’îlot voisin ni la file', () => {
+    const net = layoutNetwork(city, [], [], [], [orphan('pv-1', 'slow'), orphan('pv-2', 'slow')])
+    expect(net.islands.map((i) => i.storageClass)).toEqual(['slow'])
+    expect(net.tanks.size).toBe(0)
+    expect(net.warehouse).not.toBeNull()
+    const q = city.queue
+    expect(net.islands[0].x - net.islands[0].width / 2).toBeGreaterThan(q.x + q.width / 2)
+    const many = Array.from({ length: 40 }, (_, i) => orphan(`pv-${i}`, i % 2 ? 'a' : 'b'))
+    const n2 = layoutNetwork(city, [], [], [], many)
+    const [i0, i1] = n2.islands
+    expect(i0.z + i0.depth / 2).toBeLessThan(i1.z - i1.depth / 2)
+    const all = n2.orphans.map((t) => `${t.x.toFixed(3)},${t.z.toFixed(3)}`)
+    expect(new Set(all).size).toBe(40)
   })
 })

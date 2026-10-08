@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useCluster } from '../store/cluster'
-import { node, pod, service } from '../store/fixtures'
+import { gateway, node, pod, pv, route, service } from '../store/fixtures'
 import { parseRoute, pathFor, syncRoute } from './route'
 
 describe('parseRoute / pathFor', () => {
@@ -13,7 +13,14 @@ describe('parseRoute / pathFor', () => {
     ['/volumes/production/data-0', { type: 'volume', namespace: 'production', name: 'data-0' }],
     ['/routes/ingressroute/monitoring/grafana', { type: 'route', source: 'IngressRoute', namespace: 'monitoring', name: 'grafana' }],
     ['/gates/traefik', { type: 'gate', name: 'traefik' }],
-    ['/routes/httproute/a/b', null],
+    ['/routes/httproute/production/storefront', { type: 'route', source: 'HTTPRoute', namespace: 'production', name: 'storefront' }],
+    ['/routes/grpcroute/production/orders-grpc', { type: 'route', source: 'GRPCRoute', namespace: 'production', name: 'orders-grpc' }],
+    ['/routes/ingressroutetcp/production/postgres', { type: 'route', source: 'IngressRouteTCP', namespace: 'production', name: 'postgres' }],
+    ['/routes/ingressrouteudp/monitoring/statsd', { type: 'route', source: 'IngressRouteUDP', namespace: 'monitoring', name: 'statsd' }],
+    ['/routes/tlsroute/a/b', null],
+    ['/gateways/infra/public', { type: 'gateway', namespace: 'infra', name: 'public' }],
+    ['/persistentvolumes/pv-old-uploads', { type: 'pv', name: 'pv-old-uploads' }],
+    ['/gates/infra%2Fpublic', { type: 'gate', name: 'infra/public' }],
     ['/pods/%E0%A4%A/x', null],
   ])('%s', (path, route) => {
     expect(parseRoute(path)).toEqual(route)
@@ -69,6 +76,28 @@ describe('syncRoute', () => {
     useCluster.getState().applyMessages([{ type: 'snapshot', rev: 2, nodes: [node()], pods: [pod()], services: [service()] }])
     expect(useCluster.getState().selection).toMatchObject({ type: 'node', key: 'gke-prod-default-pool-aaaa-n1' })
     expect(w.location.pathname).toBe('/nodes/gke-prod-default-pool-aaaa-n1')
+    stop()
+  })
+
+  it('un lien /gates/<ns>%2F<nom> vers un Gateway visible ouvre le Gateway et réécrit l’URL', () => {
+    const w = fakeWindow('/gates/infra%2Fpublic')
+    const stop = syncRoute(w)
+    useCluster.getState().applyMessages([{
+      type: 'snapshot', rev: 1, gateways: [gateway({ namespace: 'infra', name: 'public' })],
+      routes: [route({ source: 'HTTPRoute', group: 'gateway.networking.k8s.io', gate: 'infra/public', gates: ['infra/public'] })],
+    }])
+    expect(useCluster.getState().selection).toMatchObject({ type: 'gateway', key: 'infra/public' })
+    expect(w.location.pathname).toBe('/gateways/infra/public')
+    stop()
+  })
+
+  it('rétablit un PV partagé par lien', () => {
+    const w = fakeWindow('/persistentvolumes/pv-old-uploads')
+    const stop = syncRoute(w)
+    useCluster.getState().applyMessages([{ type: 'snapshot', rev: 1, persistentVolumes: [pv({ name: 'pv-old-uploads' })] }])
+    expect(useCluster.getState().selection).toMatchObject({ type: 'pv', key: 'pv-old-uploads' })
+    useCluster.getState().select({ type: 'gate', key: 'traefik' })
+    expect(w.location.pathname).toBe('/gates/traefik')
     stop()
   })
 })

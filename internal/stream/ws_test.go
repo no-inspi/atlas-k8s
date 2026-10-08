@@ -205,6 +205,10 @@ func (o nsOnly) Allow(_ context.Context, _ Kind, obj any) bool {
 		return x.Namespace == string(o)
 	case model.Volume:
 		return x.Namespace == string(o)
+	case model.Gateway:
+		return x.Namespace == string(o)
+	case model.PersistentVolume:
+		return false // cluster-scoped : jamais visible avec un droit de namespace
 	}
 	return true
 }
@@ -224,5 +228,21 @@ func TestViewFiltersNetworkAndStorage(t *testing.T) {
 	d := v.apply(context.Background(), []Message{{Type: "upsert", Kind: KindService, Obj: model.Service{Namespace: "kube-system", Name: "kube-dns"}}})
 	if len(d) != 0 {
 		t.Errorf("delta d'un namespace interdit transmis : %+v", d)
+	}
+}
+
+func TestViewFiltersGatewaysAndPersistentVolumes(t *testing.T) {
+	v := newView(nsOnly("prod"))
+	out := v.apply(context.Background(), []Message{{Type: "snapshot",
+		Gateways:          []model.Gateway{{Namespace: "prod", Name: "public"}, {Namespace: "kube-system", Name: "sys"}},
+		PersistentVolumes: []model.PersistentVolume{{Name: "pv-1"}},
+	}})
+	s := out[0]
+	if len(s.Gateways) != 1 || s.Gateways[0].Name != "public" || len(s.PersistentVolumes) != 0 {
+		t.Fatalf("snapshot filtré = %+v", s)
+	}
+	d := v.apply(context.Background(), []Message{{Type: "upsert", Kind: KindPersistentVolume, Obj: model.PersistentVolume{Name: "pv-2"}}})
+	if len(d) != 0 {
+		t.Errorf("PV transmis sans droit : %+v", d)
 	}
 }

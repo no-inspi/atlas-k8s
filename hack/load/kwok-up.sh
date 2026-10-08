@@ -3,11 +3,14 @@
 # gérés par kwok et PODS pods « pause » qui y tournent, sans consommer de CPU.
 set -eu
 CTX="${CTX:-kind-atlas}"
+"$(dirname "$0")/../kind-guard.sh" "$CTX"
 NODES="${NODES:-100}"
 PODS="${PODS:-3000}"
 KWOK="${KWOK:-v0.8.0}"
 SERVICES_PER_DEPLOY="${SERVICES_PER_DEPLOY:-4}"
 PVCS="${PVCS:-150}"
+GATEWAYS="${GATEWAYS:-10}"
+PVS="${PVS:-30}"
 k() { kubectl --context "$CTX" "$@"; }
 
 k apply -f "https://github.com/kubernetes-sigs/kwok/releases/download/$KWOK/kwok.yaml"
@@ -102,6 +105,62 @@ YAML
     v=$((v + 1))
   done
 } | k apply -f - >/dev/null
+# Gateway API (si ses CRD sont installées, par make scenarios) : GATEWAYS
+# Gateways et une HTTPRoute 90/10 par Deployment, réparties sur eux.
+if k get crd httproutes.gateway.networking.k8s.io >/dev/null 2>&1; then
+  {
+    g=1
+    while [ "$g" -le "$GATEWAYS" ]; do
+      cat <<YAML
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata: { name: load-gw-$(printf %02d "$g"), namespace: load-test }
+spec:
+  gatewayClassName: atlas-scenarios
+  listeners: [{ name: http, protocol: HTTP, port: 80 }]
+YAML
+      g=$((g + 1))
+    done
+    d=1
+    while [ "$d" -le "$DEPLOYS" ]; do
+      cat <<YAML
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: load-$(printf %03d "$d"), namespace: load-test }
+spec:
+  parentRefs: [{ name: load-gw-$(printf %02d $(( (d - 1) % GATEWAYS + 1 ))) }]
+  hostnames: [load-$(printf %03d "$d").localtest.me]
+  rules:
+    - backendRefs:
+        - { name: load-$(printf %03d "$d")-1, port: 80, weight: 90 }
+        - { name: load-$(printf %03d "$d")-2, port: 80, weight: 10 }
+YAML
+      d=$((d + 1))
+    done
+  } | k apply -f - >/dev/null
+  echo "$GATEWAYS Gateways et $DEPLOYS HTTPRoutes créés dans load-test"
+fi
+# PV sans PVC (Available) : des citernes vides dans les entrepôts.
+p=1
+{
+  while [ "$p" -le "$PVS" ]; do
+    cat <<YAML
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata: { name: load-pv-$(printf %03d "$p"), labels: { atlas-load: "true" } }
+spec:
+  capacity: { storage: 1Gi }
+  accessModes: [ReadWriteOnce]
+  storageClassName: load-orphans
+  hostPath: { path: /tmp/load-pv-$(printf %03d "$p") }
+YAML
+    p=$((p + 1))
+  done
+} | k apply -f - >/dev/null
+echo "$PVS PV orphelins créés"
 echo "$((DEPLOYS * SERVICES_PER_DEPLOY)) Services et $PVCS PVC créés dans load-test"
 echo "$((DEPLOYS * 30)) pods demandés dans load-test ($DEPLOYS Deployments) ; attente…"
 until [ "$(k -n load-test get pods --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l | tr -d ' ')" -ge "$PODS" ]; do sleep 5; done

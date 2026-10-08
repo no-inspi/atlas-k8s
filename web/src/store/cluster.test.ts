@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useCluster } from './cluster'
-import { node, pod, route, service, volume, workload } from './fixtures'
+import { gateway, node, pod, pv, route, service, volume, workload } from './fixtures'
 
 const s = () => useCluster.getState()
 
@@ -118,5 +118,34 @@ describe('réseau et stockage', () => {
   it('retient l’objet réseau survolé', () => {
     s().setHoverNet('service:production/api')
     expect(s().hoverNet).toBe('service:production/api')
+  })
+
+  it('suit Gateways et PersistentVolumes', () => {
+    s().applyMessages([{ type: 'snapshot', rev: 1, gateways: [gateway()], persistentVolumes: [pv()] }])
+    expect([...s().gateways.keys()]).toEqual(['infra/public'])
+    expect([...s().persistentVolumes.keys()]).toEqual(['pv-1'])
+    s().applyMessages([
+      { type: 'upsert', kind: 'gateway', rev: 2, obj: gateway({ name: 'internal', programmed: 'false' }) },
+      { type: 'delete', kind: 'persistentVolume', rev: 3, obj: pv() },
+    ])
+    expect([...s().gateways.keys()].sort()).toEqual(['infra/internal', 'infra/public'])
+    expect(s().gateways.get('infra/internal')?.programmed).toBe('false')
+    expect(s().persistentVolumes.size).toBe(0)
+    expect(s().rev).toBe(3)
+  })
+
+  it('sélectionne un Gateway ou un PV', () => {
+    s().applyMessages([{ type: 'snapshot', rev: 1, gateways: [gateway()], persistentVolumes: [pv()] }])
+    s().select({ type: 'gateway', key: 'infra/public' })
+    expect(s().selection).toEqual({ type: 'gateway', key: 'infra/public', name: 'public' })
+    s().select({ type: 'pv', key: 'pv-1' })
+    expect(s().selection?.name).toBe('pv-1')
+    s().select({ type: 'pv', key: 'disparu' })
+    expect(s().selection?.name).toBe('disparu')
+  })
+
+  it('donne des portes à une route même sans gates explicites (fixture)', () => {
+    expect(route({ gate: 'traefik' }).gates).toEqual(['traefik'])
+    expect(route({ gate: 'infra/public', gates: ['infra/public', 'infra/internal'] }).gates).toHaveLength(2)
   })
 })
