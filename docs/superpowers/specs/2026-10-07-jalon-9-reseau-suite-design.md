@@ -74,12 +74,12 @@ Le kind `route` gagne deux sources, `HTTPRoute` et `GRPCRoute` (groupe `gateway.
   - `mirroring` : le service principal est une feuille normale ; chaque `mirrors[]` devient une feuille avec `mirror: true` et son `percent`.
   - Chaque feuille porte `via: "<ns>/<TraefikService racine>"`.
   - Un TraefikService introuvable, un cycle ou plus de 8 niveaux : une seule règle `missing` avec `kind: TraefikService`.
-  - L'état `indirect` n'est plus produit (conservé dans le modèle pour la compatibilité).
+  - Une référence à un autre provider Traefik (`api@internal`, `foo@file`…) donne une règle `indirect` (référence externe, ni ligne ni alerte) ; `nom@kubernetescrd` désigne le TraefikService `nom` du cluster et se résout normalement.
 - **Index** : TraefikService par Service et par TraefikService visés ; une modification d'un TraefikService ou d'un Service feuille recalcule les routes qui l'atteignent (remontée transitive par l'index, bornée à 8 niveaux).
 
 ### Modèle commun des règles
 
-Champs ajoutés à `Backend`, tous optionnels : `weight` (int, part du trafic en pour mille, même unité pour Gateway API et Traefik), `mirror` (bool), `percent` (int, miroir), `via` (string). État : `ok`, `missing`, `refused`, `indirect` (hérité). Le front du jalon 8 reste valide sans changement.
+Champs ajoutés à `Backend`, tous optionnels : `weight` (int, part du trafic en pour mille, même unité pour Gateway API et Traefik), `mirror` (bool), `percent` (int, miroir), `via` (string). État : `ok`, `missing`, `refused`, `indirect` (référence Traefik externe). Le front du jalon 8 reste valide sans changement.
 
 ## Lot 4 — PersistentVolumes sans PVC
 

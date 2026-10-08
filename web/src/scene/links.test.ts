@@ -229,6 +229,16 @@ describe('Gateway API et Traefik complet', () => {
     expect(of('main').some((l) => l.keys.includes(`route:${routeKey(legacy)}`))).toBe(false)
   })
 
+  it('une référence Traefik externe (indirect) : ni ligne, ni panneau', () => {
+    const ext = route({ source: 'IngressRoute', group: 'traefik.io', name: 'dashboard', gate: 'traefik', rules: [
+      { match: 'Host(`d`)', backend: { namespace: 'production', service: 'api@internal', kind: 'TraefikService', state: 'indirect' } },
+    ] })
+    const xs = buildLinks({ city, net: gnet, services: [api, db], routes: [ext], volumes: [],
+      pods: new Map(pods.map((p) => [p.uid, p])), targets })
+    expect(xs.filter((l) => l.keys.includes(`route:${routeKey(ext)}`))).toEqual([])
+    expect(xs.some((l) => l.sign)).toBe(false)
+  })
+
   it('signale aussi un TraefikService introuvable', () => {
     expect(of('broken').map((l) => l.keys)).toEqual([['gate:traefik', `route:${routeKey(lost)}`]])
   })

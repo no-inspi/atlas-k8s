@@ -54,7 +54,7 @@ const (
 	BackendOK       = "ok"
 	BackendMissing  = "missing"  // Service introuvable
 	BackendRefused  = "refused"  // route refusée par toutes ses Gateways (Accepted=False)
-	BackendIndirect = "indirect" // TraefikService non résolu (jalon 8 ; plus produit, gardé pour la compatibilité)
+	BackendIndirect = "indirect" // référence Traefik à un autre provider (api@internal, foo@file…), hors du cluster
 )
 
 // Sources d'une route.

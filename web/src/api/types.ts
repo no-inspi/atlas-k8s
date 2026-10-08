@@ -137,6 +137,7 @@ export interface Backend {
   service: string
   port?: string
   kind: string // Service | TraefikService | autre kind Gateway API
+  /** indirect : référence Traefik à un autre provider (api@internal, foo@file…), hors du cluster. */
   state: 'ok' | 'missing' | 'refused' | 'indirect'
   /** Part du trafic de la règle, en pour mille (seulement si la règle a plusieurs backends). */
   weight?: number

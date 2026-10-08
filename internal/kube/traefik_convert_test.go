@@ -246,3 +246,45 @@ func TestConvertTraefikRouteTCPContainous(t *testing.T) {
 		t.Errorf("TCP containo.us = %+v", r)
 	}
 }
+
+// Références Traefik vers un autre provider (api@internal, foo@file…) : hors du
+// cluster, donc indirect et non missing ; @kubernetescrd désigne le provider
+// CRD, donc un TraefikService du cluster, résolu sans son suffixe.
+func TestTraefikProviderReferences(t *testing.T) {
+	split := traefikService("prod", "split", map[string]any{"weighted": map[string]any{"services": []any{
+		map[string]any{"name": "api", "port": int64(80)},
+		toTS("noop@internal"),
+	}}})
+	r := ConvertTraefikRoute(checkoutRoute(
+		toTS("api@internal"),
+		map[string]any{"name": "foo@file", "kind": "TraefikService", "namespace": "ailleurs"},
+		toTS("split@kubernetescrd"),
+	), model.SourceIngressRoute, nil, lookupOf(split))
+	want := []model.Backend{
+		{Namespace: "prod", Service: "api@internal", Kind: "TraefikService", State: model.BackendIndirect, Weight: model.Weight(333)},
+		{Namespace: "prod", Service: "foo@file", Kind: "TraefikService", State: model.BackendIndirect, Weight: model.Weight(333)},
+		{Namespace: "prod", Service: "api", Port: "80", Kind: "Service", State: model.BackendOK, Weight: model.Weight(167), Via: "prod/split"},
+		{Namespace: "prod", Service: "noop@internal", Kind: "TraefikService", State: model.BackendIndirect, Weight: model.Weight(167), Via: "prod/split"},
+	}
+	if len(r.Rules) != len(want) {
+		t.Fatalf("règles = %+v", r.Rules)
+	}
+	for i, w := range want {
+		if !reflect.DeepEqual(r.Rules[i].Backend, w) {
+			t.Errorf("règle %d = %+v, attendu %+v", i, r.Rules[i].Backend, w)
+		}
+	}
+	if got := routeBackends(r); len(got) != 1 || got[0] != "prod/api" {
+		t.Errorf("Services atteints = %v", got)
+	}
+	// @kubernetescrd introuvable : missing, sous son nom sans suffixe.
+	r = ConvertTraefikRoute(checkoutRoute(toTS("absent@kubernetescrd")), model.SourceIngressRoute, nil, lookupOf())
+	if b := r.Rules[0].Backend; b.Service != "absent" || b.State != model.BackendMissing {
+		t.Errorf("absent@kubernetescrd = %+v", b)
+	}
+	// Index : les références externes ne sont pas des TraefikService du cluster.
+	_, ts := traefikRefs(checkoutRoute(toTS("api@internal"), toTS("split@kubernetescrd")))
+	if len(ts) != 1 || ts[0] != "prod/split" {
+		t.Errorf("TraefikService indexés = %v", ts)
+	}
+}

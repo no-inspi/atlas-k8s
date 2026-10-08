@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { gatewayKey } from '../api/types'
+import { gateSignal } from '../scene/health'
 import { gateway, route, service, volume } from './fixtures'
 import { gatesOf, gatesOfRoute, isGatewayGate, readyCount, routeBroken, routeRefused, routesTo, servicesOfPod, volumesOfPod } from './net'
 
@@ -47,6 +48,16 @@ describe('portes Gateway API', () => {
     const old = { ...route(), gates: [] as string[] }
     expect(gatesOfRoute(old)).toEqual(['nginx'])
     expect(gatesOf([old]).map((g) => g.name)).toEqual(['nginx'])
+  })
+
+  it('une référence Traefik externe (indirect) ne casse ni la route ni la porte', () => {
+    const ext = route({ source: 'IngressRoute', group: 'traefik.io', name: 'dashboard', gate: 'traefik', rules: [
+      { match: 'Host(`d`)', backend: { namespace: 'production', service: 'api@internal', kind: 'TraefikService', state: 'indirect' } },
+    ] })
+    expect(routeBroken(ext)).toBe(false)
+    expect(routeRefused(ext)).toBe(false)
+    const gate = gatesOf([ext]).find((g) => g.name === 'traefik')!
+    expect([gate.broken, gate.refused, gateSignal(gate)]).toEqual([0, 0, 'ok'])
   })
 
   it('distingue refus et backend introuvable, et les portes Gateway', () => {

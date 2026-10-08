@@ -19,7 +19,7 @@ const goGate = (name: string) => () => {
 }
 
 const STATE: Record<string, [string, string]> = {
-  ok: ['', ''], missing: ['s-err', 'Service introuvable'], refused: ['s-err', 'Refusée'], indirect: ['s-mute', 'TraefikService'],
+  ok: ['', ''], missing: ['s-err', 'Service introuvable'], refused: ['s-err', 'Refusée'], indirect: ['s-mute', 'externe'],
 }
 
 const TRI: Record<Tri, [string, string]> = { true: ['s-ok', 'oui'], false: ['s-err', 'non'], unknown: ['s-mute', 'inconnu'] }

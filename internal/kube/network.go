@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -188,22 +189,38 @@ func ConvertIngressRoute(u *unstructured.Unstructured, exists ServiceExists) mod
 	return ConvertTraefikRoute(u, model.SourceIngressRoute, exists, nil)
 }
 
+// traefikCRDProvider : suffixe d'un TraefikService désigné avec son provider
+// (« nom@kubernetescrd ») ; il vise le même objet que « nom ».
+const traefikCRDProvider = "@kubernetescrd"
+
 // traefikRef lit une référence de service Traefik (routes[].services[],
-// weighted.services[], mirroring et ses mirrors[]).
+// weighted.services[], mirroring et ses mirrors[]). Un TraefikService
+// « nom@kubernetescrd » est ramené à « nom » ; un autre suffixe (api@internal,
+// foo@file…) vise un service d'un autre provider, hors du cluster : son nom est
+// gardé tel quel et l'espace de noms explicite ignoré, comme le fait Traefik.
 func traefikRef(ns string, m map[string]any) (refNS, name, kind, port string) {
 	refNS = ns
 	name, _ = m["name"].(string)
-	if n, _ := m["namespace"].(string); n != "" {
-		refNS = n
-	}
 	kind, _ = m["kind"].(string)
 	if kind == "" {
 		kind = "Service"
+	}
+	if kind == "TraefikService" {
+		name = strings.TrimSuffix(name, traefikCRDProvider)
+	}
+	if n, _ := m["namespace"].(string); n != "" && !traefikExternal(kind, name) {
+		refNS = n
 	}
 	if p, ok := m["port"]; ok && p != nil {
 		port = fmt.Sprint(p)
 	}
 	return refNS, name, kind, port
+}
+
+// traefikExternal : la référence vise un service d'un autre provider Traefik
+// que le provider CRD (api@internal, foo@file…), non résoluble dans le cluster.
+func traefikExternal(kind, name string) bool {
+	return kind == "TraefikService" && strings.Contains(name, "@")
 }
 
 // weightOf : poids Traefik d'une référence, 1 par défaut, négatif ramené à 0.
@@ -287,8 +304,12 @@ func (t *traefikResolver) resolve(ns, name string, depth int) (resolvedTS, bool)
 	// déjà miroir garde le sien).
 	child := func(m map[string]any, share float64, mirror bool, percent int) bool {
 		rns, rname, kind, port := traefikRef(ns, m)
-		if kind != "TraefikService" {
-			acc.add(leaf{b: model.Backend{Namespace: rns, Service: rname, Port: port, Kind: kind, Mirror: mirror, Percent: percent}, share: share})
+		if kind != "TraefikService" || traefikExternal(kind, rname) {
+			b := model.Backend{Namespace: rns, Service: rname, Port: port, Kind: kind, Mirror: mirror, Percent: percent}
+			if kind == "TraefikService" {
+				b.State = model.BackendIndirect
+			}
+			acc.add(leaf{b: b, share: share})
 			return true
 		}
 		sub, ok := t.resolve(rns, rname, depth+1)
@@ -367,7 +388,8 @@ func resolveTraefik(lookup TraefikLookup, ns, name string) ([]leaf, bool) {
 // ConvertTraefikRoute lit une IngressRoute, IngressRouteTCP ou IngressRouteUDP
 // (traefik.io ou traefik.containo.us). Chaque service de chaque routes[] donne
 // une règle ; un TraefikService est remplacé par ses Services (via : son nom),
-// ou par une seule règle missing s'il ne se résout pas. Les poids, en pour
+// ou par une seule règle missing s'il ne se résout pas ; une référence à un
+// autre provider (api@internal, foo@file…) donne une règle indirect. Les poids, en pour
 // mille de la règle source (plus fort reste : somme de 1000), ne sont publiés
 // que s'il y a plusieurs backends non miroirs.
 func ConvertTraefikRoute(u *unstructured.Unstructured, source string, exists ServiceExists, lookup TraefikLookup) model.Route {
@@ -409,6 +431,10 @@ func ConvertTraefikRoute(u *unstructured.Unstructured, source string, exists Ser
 				share = weightOf(sm) / total
 			}
 			ns, name, kind, port := traefikRef(r.Namespace, sm)
+			if traefikExternal(kind, name) {
+				leaves = append(leaves, leaf{b: model.Backend{Namespace: ns, Service: name, Kind: kind, State: model.BackendIndirect}, share: share})
+				continue
+			}
 			if kind != "TraefikService" {
 				leaves = append(leaves, leaf{b: model.Backend{Namespace: ns, Service: name, Port: port, Kind: kind}, share: share})
 				continue
@@ -461,7 +487,7 @@ func traefikRefs(u *unstructured.Unstructured) (services, tservices []string) {
 		}
 		rns, name, kind, _ := traefikRef(ns, m)
 		k := kind + ":" + rns + "/" + name
-		if name == "" || seen[k] {
+		if name == "" || seen[k] || traefikExternal(kind, name) {
 			return
 		}
 		seen[k] = true
