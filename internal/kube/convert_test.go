@@ -28,6 +28,10 @@ func node(labels map[string]string) *corev1.Node {
 		ObjectMeta: metav1.ObjectMeta{Name: "gke-prod-default-pool-abcd-1234", Labels: labels},
 		Spec:       corev1.NodeSpec{Unschedulable: true, Taints: []corev1.Taint{{Key: "nvidia.com/gpu", Value: "present", Effect: corev1.TaintEffectNoSchedule}}},
 		Status: corev1.NodeStatus{
+			Capacity: corev1.ResourceList{
+				corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("16Gi"),
+				corev1.ResourcePods: resource.MustParse("110"),
+			},
 			Allocatable: corev1.ResourceList{
 				corev1.ResourceCPU: resource.MustParse("3920m"), corev1.ResourceMemory: resource.MustParse("13000Mi"),
 				corev1.ResourcePods: resource.MustParse("110"), "nvidia.com/gpu": resource.MustParse("1"),
@@ -52,6 +56,9 @@ func TestConvertNode(t *testing.T) {
 	}
 	if n.Allocatable.CPU != 3920 || n.Allocatable.Memory != 13000<<20 || n.Allocatable.Pods != 110 || n.Requested.CPU != 500 {
 		t.Errorf("ressources = %+v / %+v", n.Allocatable, n.Requested)
+	}
+	if n.Capacity.CPU != 4000 || n.Capacity.Memory != 16<<30 || n.Capacity.Pods != 110 {
+		t.Errorf("capacity = %+v", n.Capacity)
 	}
 	if !n.Unschedulable || len(n.Taints) != 1 || n.Taints[0].Key != "nvidia.com/gpu" || n.KubeletVersion != "v1.35.0" {
 		t.Errorf("spec = %+v", n)
