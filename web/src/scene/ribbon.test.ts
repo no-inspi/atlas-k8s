@@ -3,6 +3,13 @@ import { linkAlpha, ribbon, writeAlpha } from './GroundLinks'
 import type { Link } from './links'
 
 describe('ribbon', () => {
+  it('relève chaque segment selon la hauteur à son milieu', () => {
+    const lift = (x: number) => (x > 2 ? 0.35 : 0)
+    const r = ribbon([{ points: [[0, 0], [2, 0], [4, 0]], alpha: 1, live: true }], 0.2, 0.03, lift)
+    const ys = [...r.position].filter((_, i) => i % 3 === 1).map((y) => Math.round(y * 100) / 100)
+    expect(ys).toEqual([0.03, 0.03, 0.03, 0.03, 0.38, 0.38, 0.38, 0.38])
+  })
+
   it('quatre sommets et deux triangles par segment, abscisse curviligne continue', () => {
     const r = ribbon([{ points: [[0, 0], [2, 0], [2, 3]], alpha: 0.5, live: true }], 0.2, 0.03)
     expect(r.position.length).toBe(2 * 4 * 3)
