@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { routeKey, serviceKey, volumeKey, type Pod } from '../api/types'
 import { node, pod, route, service, volume } from '../store/fixtures'
 import { layoutCity, plotGeometry } from './layout'
-import { buildLinks, isLit, PathMemo, pathOf, podUidsOf, sameTopology, type Link } from './links'
+import { buildLinks, inDistrict, isLit, PathMemo, pathOf, podUidsOf, sameTopology, splitAtDistricts, type Link } from './links'
 import { layoutNetwork, TANK_PITCH } from './netLayout'
 
 const nodes = [node({ name: 'n1', pool: 'p' }), node({ name: 'n2', pool: 'p' })]
@@ -276,5 +276,28 @@ describe('Gateway API et Traefik complet', () => {
     expect([...pathOf('pv:pv-1', ls)]).toEqual(['pv:pv-1'])
     expect([...pathOf('service:production/db', ls)]).toEqual(expect.arrayContaining(['gate:traefik', 'gate:infra/public', 'gate:infra/internal']))
     expect([...pathOf('pod:db', ls)]).toEqual(expect.arrayContaining(['service:production/db', 'gate:traefik']))
+  })
+})
+
+describe('quartiers et liens', () => {
+  const d = city.districts[0]
+  const west = d.x - d.width / 2, south = d.z + d.depth / 2
+
+  it('inDistrict : intérieur et bords compris, extérieur exclu', () => {
+    expect(inDistrict(city, d.x, d.z)).toBe(true)
+    expect(inDistrict(city, west, d.z)).toBe(true)
+    expect(inDistrict(city, west - 0.01, d.z)).toBe(false)
+  })
+
+  it('splitAtDistricts : un point au bord quand le segment entre dans un quartier', () => {
+    const pts = splitAtDistricts(city, [[d.x, south + 2], [d.x, d.z]])
+    expect(pts).toHaveLength(3)
+    expect(pts[1][0]).toBeCloseTo(d.x)
+    expect(pts[1][1]).toBeCloseTo(south)
+  })
+
+  it('splitAtDistricts : rien à couper hors des quartiers ou dedans', () => {
+    expect(splitAtDistricts(city, [[west - 5, south + 1], [west - 1, south + 1]])).toHaveLength(2)
+    expect(splitAtDistricts(city, [[d.x - 0.5, d.z], [d.x + 0.5, d.z]])).toHaveLength(2)
   })
 })

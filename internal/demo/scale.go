@@ -47,9 +47,9 @@ func catalogFor(sc Scale) catalog {
 	spot := sc.Nodes * 3 / 10
 	std := sc.Nodes - gpu - spot
 	c := catalog{pools: []poolDef{
-		{Name: "default-pool", Machine: "e2-standard-8", CPU: 7910, Mem: 27000 * mi, Count: std},
-		{Name: "spot-pool", Machine: "e2-standard-8", CPU: 7910, Mem: 27000 * mi, Spot: true, Count: spot},
-		{Name: "gpu-pool", Machine: "g2-standard-8", CPU: 7910, Mem: 27000 * mi, GPU: 1, Count: gpu},
+		{Name: "default-pool", Machine: "e2-standard-8", CPU: 7910, Mem: 27000 * mi, CapCPU: 8000, CapMem: 32 * gi, Count: std},
+		{Name: "spot-pool", Machine: "e2-standard-8", CPU: 7910, Mem: 27000 * mi, CapCPU: 8000, CapMem: 32 * gi, Spot: true, Count: spot},
+		{Name: "gpu-pool", Machine: "g2-standard-8", CPU: 7910, Mem: 27000 * mi, CapCPU: 8000, CapMem: 32 * gi, GPU: 1, Count: gpu},
 	}}
 	c.workloads = append(c.workloads, workloads...)
 	c.services = append(c.services, services...)

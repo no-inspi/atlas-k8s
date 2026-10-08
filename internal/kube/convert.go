@@ -29,6 +29,7 @@ var nodeConditions = []corev1.NodeConditionType{corev1.NodeReady, corev1.NodeMem
 // ConvertNode traduit un node ; requested est la somme des requests de ses pods.
 func ConvertNode(n *corev1.Node, requested model.Resources, opts NodeOptions) model.Node {
 	alloc := n.Status.Allocatable
+	capa := n.Status.Capacity
 	gpu := alloc[gpuResource]
 	m := model.Node{
 		Name:         n.Name,
@@ -37,6 +38,9 @@ func ConvertNode(n *corev1.Node, requested model.Resources, opts NodeOptions) mo
 		Zone:         n.Labels[corev1.LabelTopologyZone],
 		Spot:         isSpot(n.Labels),
 		GPU:          int(gpu.Value()),
+		Capacity: model.Resources{
+			CPU: capa.Cpu().MilliValue(), Memory: capa.Memory().Value(), Pods: capa.Pods().Value(),
+		},
 		Allocatable: model.Resources{
 			CPU: alloc.Cpu().MilliValue(), Memory: alloc.Memory().Value(), Pods: alloc.Pods().Value(),
 		},

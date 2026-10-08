@@ -3,6 +3,29 @@ import { linkAlpha, ribbon, writeAlpha } from './GroundLinks'
 import type { Link } from './links'
 
 describe('ribbon', () => {
+  it('relève chaque segment selon la hauteur à son milieu', () => {
+    const lift = (x: number) => (x > 2 ? 0.35 : 0)
+    const r = ribbon([{ points: [[0, 0], [2, 0], [4, 0]], alpha: 1, live: true }], 0.2, 0.03, lift)
+    const ys = [...r.position].filter((_, i) => i % 3 === 1).map((y) => Math.round(y * 100) / 100)
+    expect(ys).toEqual([0.03, 0.03, 0.03, 0.03, 0.38, 0.38, 0.38, 0.38])
+  })
+
+  it('ne déborde pas à un changement de hauteur, mais ferme les coudes de même hauteur', () => {
+    const lift = (x: number) => (x > 2 ? 0.35 : 0)
+    const r = ribbon([{ points: [[0, 0], [2, 0], [4, 0]], alpha: 1, live: true }], 0.2, 0, lift)
+    // Sommets 2 et 3 : fin du premier segment ; sommets 4 et 5 : début du second.
+    expect(r.position[6]).toBe(2)
+    expect(r.position[9]).toBe(2)
+    expect(r.position[12]).toBe(2)
+    expect(r.position[15]).toBe(2)
+    // Extrémités de polyligne : débord conservé.
+    expect(r.position[0]).toBeCloseTo(-0.1)
+    expect(r.position[18]).toBeCloseTo(4.1)
+    const flat = ribbon([{ points: [[0, 0], [2, 0], [4, 0]], alpha: 1, live: true }], 0.2, 0)
+    expect(flat.position[6]).toBeCloseTo(2.1)
+    expect(flat.position[12]).toBeCloseTo(1.9)
+  })
+
   it('quatre sommets et deux triangles par segment, abscisse curviligne continue', () => {
     const r = ribbon([{ points: [[0, 0], [2, 0], [2, 3]], alpha: 0.5, live: true }], 0.2, 0.03)
     expect(r.position.length).toBe(2 * 4 * 3)

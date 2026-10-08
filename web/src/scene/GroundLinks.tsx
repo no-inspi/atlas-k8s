@@ -2,7 +2,8 @@ import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { useCluster } from '../store/cluster'
-import { isLit, type Family, type Link, type Pt } from './links'
+import { SOCLE_H } from './layout'
+import { inDistrict, isLit, splitAtDistricts, type Family, type Link, type Pt } from './links'
 import { LOD_PX, questionTexture } from './Pods'
 import type { Theme } from './theme'
 import { tick } from './tick'
@@ -39,8 +40,11 @@ export interface Ribbon {
 
 export interface RibbonItem { points: readonly Pt[]; alpha: number; live: boolean }
 
-/** Rubans de largeur w le long des polylignes ; dist : abscisse curviligne (motif continu aux coudes). */
-export function ribbon(items: readonly RibbonItem[], w: number, y: number): Ribbon {
+/**
+ * Rubans de largeur w le long des polylignes ; dist : abscisse curviligne (motif
+ * continu aux coudes). lift : surélévation d'un segment selon son milieu (socles).
+ */
+export function ribbon(items: readonly RibbonItem[], w: number, y: number, lift?: (x: number, z: number) => number): Ribbon {
   let segs = 0
   for (const it of items) segs += Math.max(0, it.points.length - 1)
   const position = new Float32Array(segs * 12), dist = new Float32Array(segs * 4)
@@ -50,19 +54,24 @@ export function ribbon(items: readonly RibbonItem[], w: number, y: number): Ribb
   for (const it of items) {
     const a = it.alpha, on = it.live ? 1 : 0
     let d = 0
+    const heightOf = (i: number) => y + (lift ? lift((it.points[i][0] + it.points[i + 1][0]) / 2, (it.points[i][1] + it.points[i + 1][1]) / 2) : 0)
     for (let i = 0; i + 1 < it.points.length; i++) {
       const p0 = it.points[i], p1 = it.points[i + 1]
       const x0 = p0[0], z0 = p0[1], x1 = p1[0], z1 = p1[1]
       const len = Math.hypot(x1 - x0, z1 - z0) || 1e-6
       const ux = (x1 - x0) / len, uz = (z1 - z0) / len
       const nx = -uz * h, nz = ux * h
-      // Chaque segment déborde d'une demi-largeur : les coudes restent fermés.
-      const ex = ux * h, ez = uz * h
+      // Chaque segment déborde d'une demi-largeur : les coudes restent fermés, sauf
+      // là où la hauteur change (bord de socle) : le ruban ne dépasse pas le bord.
+      const sy = heightOf(i)
+      const f0 = i > 0 && heightOf(i - 1) !== sy ? 0 : h
+      const f1 = i + 2 < it.points.length && heightOf(i + 1) !== sy ? 0 : h
+      const sx0 = ux * f0, sz0 = uz * f0, sx1 = ux * f1, sz1 = uz * f1
       let o = v * 3
-      position[o++] = x0 - ex + nx; position[o++] = y; position[o++] = z0 - ez + nz
-      position[o++] = x0 - ex - nx; position[o++] = y; position[o++] = z0 - ez - nz
-      position[o++] = x1 + ex + nx; position[o++] = y; position[o++] = z1 + ez + nz
-      position[o++] = x1 + ex - nx; position[o++] = y; position[o] = z1 + ez - nz
+      position[o++] = x0 - sx0 + nx; position[o++] = sy; position[o++] = z0 - sz0 + nz
+      position[o++] = x0 - sx0 - nx; position[o++] = sy; position[o++] = z0 - sz0 - nz
+      position[o++] = x1 + sx1 + nx; position[o++] = sy; position[o++] = z1 + sz1 + nz
+      position[o++] = x1 + sx1 - nx; position[o++] = sy; position[o] = z1 + sz1 - nz
       dist[v] = dist[v + 1] = d
       dist[v + 2] = dist[v + 3] = d + len
       alpha.fill(a, v, v + 4)
@@ -194,8 +203,8 @@ export function Links({ theme, reducedMotion }: { theme: Theme; reducedMotion: b
    * le niveau de détail change (elles n'existent que sur le chemin) ; sinon on
    * ne réécrit que l'opacité.
    */
-  const built = useRef<{ links: Link[] | null; meshes: unknown; fibreKey: string; alphaKey: string; drawn: Map<Family, Link[]>; fibres: Link[] }>({
-    links: null, meshes: null, fibreKey: '', alphaKey: '', drawn: new Map(), fibres: [],
+  const built = useRef<{ links: Link[] | null; meshes: unknown; fibreKey: string; alphaKey: string; drawn: Map<Family, Link[]>; points: Map<Family, Pt[][]>; fibres: Link[] }>({
+    links: null, meshes: null, fibreKey: '', alphaKey: '', drawn: new Map(), points: new Map(), fibres: [],
   })
   const question = useMemo(questionTexture, [])
   const refused = useMemo(refusedTexture, [])
@@ -211,10 +220,15 @@ export function Links({ theme, reducedMotion }: { theme: Theme; reducedMotion: b
     const fibreKey = `${focusKey}|${far}`
     const alphaKey = `${focusKey}|${nsFilter}`
     const alphaOf = (l: Link) => linkAlpha(l, nsFilter, focus)
+    const city = world.layout
+    const lift = (x: number, z: number) => (city && inDistrict(city, x, z) ? SOCLE_H : 0)
     const setGeometry = (f: Family, ls: Link[]) => {
       const mesh = meshes.get(f)!
+      // Coupés aux bords des quartiers : chaque segment est sur un socle ou au sol.
+      const pts = ls.map((l) => (city ? splitAtDistricts(city, l.points) : [...l.points]))
+      built.current.points.set(f, pts)
       mesh.geometry.dispose()
-      mesh.geometry = geometryOf(ribbon(ls.map((l) => ({ points: l.points, alpha: alphaOf(l), live: DASHED.has(l.family) || l.live })), WIDTH[f], Y[f]))
+      mesh.geometry = geometryOf(ribbon(ls.map((l, i) => ({ points: pts[i], alpha: alphaOf(l), live: DASHED.has(l.family) || l.live })), WIDTH[f], Y[f], lift))
     }
     const b = built.current
     const topology = world.links !== b.links || meshes !== b.meshes
@@ -242,7 +256,9 @@ export function Links({ theme, reducedMotion }: { theme: Theme; reducedMotion: b
         if (rebuilt.has(f)) continue
         const ls = b.drawn.get(f)!
         const attr = meshes.get(f)!.geometry.getAttribute('aAlpha') as THREE.BufferAttribute | undefined
-        if (attr && writeAlpha(attr.array as Float32Array, ls, (i) => alphaOf(ls[i]))) attr.needsUpdate = true
+        // Mêmes polylignes (coupées) que lors de la construction du ruban.
+        const pts = b.points.get(f)
+        if (attr && pts && writeAlpha(attr.array as Float32Array, pts.map((points) => ({ points })), (i) => alphaOf(ls[i]))) attr.needsUpdate = true
       }
     }
     if (!reducedMotion && !document.hidden && !far && world.links.length) {

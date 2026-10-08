@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import * as THREE from 'three'
 import { useCluster } from '../store/cluster'
 import { shortNode } from '../store/feed'
-import type { CityLayout, DistrictStyle } from './layout'
+import { SOCLE_H, captionStrip, type CityLayout, type District, type DistrictStyle } from './layout'
 import type { Theme } from './theme'
 import { world } from './world'
 
@@ -11,35 +11,45 @@ import { world } from './world'
 
 const textures = new Map<string, THREE.CanvasTexture>()
 
-function labelTexture(text: string, w: number, h: number, align: CanvasTextAlign, size: number, theme: Theme) {
-  const key = [text, w, h, align, size, theme.muted, theme.font].join('|')
+function labelTexture(lines: readonly string[], w: number, h: number, align: CanvasTextAlign, size: number, theme: Theme) {
+  const key = [lines.join('\n'), w, h, align, size, theme.muted, theme.font].join('|')
   let tex = textures.get(key)
   if (tex) return tex
   const c = document.createElement('canvas')
   c.width = Math.round(w * 64)
   c.height = Math.round(h * 64)
   const g = c.getContext('2d')!
-  // Réduit la police si le texte déborde de la bande.
-  let px = size
-  g.font = `600 ${px}px ${theme.font}`
-  while (px > 12 && g.measureText(text).width > c.width - 16) g.font = `600 ${(px -= 2)}px ${theme.font}`
+  const rows = lines.filter(Boolean)
   g.fillStyle = theme.muted
   g.textBaseline = 'middle'
   g.textAlign = align
-  g.fillText(text, align === 'left' ? 8 : c.width / 2, c.height / 2)
+  rows.forEach((text, i) => {
+    // Première ligne en gras, les suivantes plus petites ; police réduite si le texte déborde.
+    const weight = i === 0 ? 600 : 500
+    let px = i === 0 ? size : Math.round(size * 0.72)
+    // Plusieurs lignes : chaque ligne doit tenir dans sa rangée du canvas.
+    if (rows.length > 1) px = Math.min(px, Math.floor((c.height / rows.length) * 0.85))
+    g.font = `${weight} ${px}px ${theme.font}`
+    while (px > 12 && g.measureText(text).width > c.width - 16) g.font = `${weight} ${(px -= 2)}px ${theme.font}`
+    g.fillText(text, align === 'left' ? 8 : c.width / 2, (c.height * (i + 0.5)) / rows.length)
+  })
   tex = new THREE.CanvasTexture(c)
   tex.colorSpace = THREE.SRGBColorSpace
   tex.anisotropy = 4
-  if (textures.size > 400) textures.clear()
+  if (textures.size > 400) {
+    // Libère la mémoire GPU ; three.js ré-envoie une texture disposée si un matériau l'utilise encore.
+    textures.forEach((t) => t.dispose())
+    textures.clear()
+  }
   textures.set(key, tex)
   return tex
 }
 
-function GroundLabel(props: { text: string; w: number; h: number; x: number; z: number; align?: CanvasTextAlign; size?: number; theme: Theme }) {
-  const { text, w, h, x, z, align = 'left', size = 56, theme } = props
-  const map = labelTexture(text, w, h, align, size, theme)
+function GroundLabel(props: { text: string | readonly string[]; w: number; h: number; x: number; z: number; y?: number; align?: CanvasTextAlign; size?: number; theme: Theme }) {
+  const { text, w, h, x, z, y = 0.03, align = 'left', size = 56, theme } = props
+  const map = labelTexture(typeof text === 'string' ? [text] : text, w, h, align, size, theme)
   return (
-    <mesh rotation-x={-Math.PI / 2} position={[x, 0.03, z]} raycast={() => null}>
+    <mesh rotation-x={-Math.PI / 2} position={[x, y, z]} raycast={() => null}>
       <planeGeometry args={[w, h]} />
       <meshBasicMaterial map={map} transparent depthWrite={false} />
     </mesh>
@@ -51,6 +61,20 @@ function Plane({ w, d, x, z, y, color }: { w: number; d: number; x: number; z: n
     <mesh rotation-x={-Math.PI / 2} position={[x, y, z]} receiveShadow raycast={() => null}>
       <planeGeometry args={[w, d]} />
       <meshStandardMaterial color={color} roughness={0.95} />
+    </mesh>
+  )
+}
+
+/** Socle d'un quartier : dessus de la couleur de zone, tranches assombries. */
+function Socle({ d, color }: { d: District; color: string }) {
+  const side = useMemo(() => '#' + new THREE.Color(color).multiplyScalar(0.75).getHexString(), [color])
+  return (
+    <mesh position={[d.x, SOCLE_H / 2, d.z]} castShadow receiveShadow raycast={() => null}>
+      <boxGeometry args={[d.width, SOCLE_H, d.depth]} />
+      {/* Faces de la boîte : +x, -x, +y (dessus), -y, +z, -z. */}
+      {[0, 1, 2, 3, 4, 5].map((i) => (
+        <meshStandardMaterial key={i} attach={`material-${i}`} color={i === 2 ? color : side} roughness={0.95} />
+      ))}
     </mesh>
   )
 }
@@ -92,14 +116,18 @@ export function City({ theme }: { theme: Theme }) {
     <group>
       <Plane w={600} d={600} x={0} z={0} y={0} color={theme.ground} />
       <Plane w={bounds.width + 5} d={bounds.depth + 4} x={bounds.x} z={bounds.z} y={0.005} color={theme.road} />
-      {layout.districts.map((d) => (
-        <group key={d.pool}>
-          <Plane w={d.width} d={d.depth} x={d.x} z={d.z} y={0.01} color={zone[d.style]} />
-          <GroundLabel text={d.label} w={Math.min(d.width - 0.4, 12)} h={1} x={d.x - d.width / 2 + 0.2 + Math.min(d.width - 0.4, 12) / 2} z={d.z + d.depth / 2 - 0.55} theme={theme} />
-        </group>
-      ))}
+      {layout.districts.map((d) => {
+        const w = Math.min(d.width - 0.4, 14)
+        const strip = captionStrip(d.caption.length)
+        return (
+          <group key={d.pool}>
+            <Socle d={d} color={zone[d.style]} />
+            <GroundLabel text={d.caption} w={w} h={strip - 0.2} x={d.x - d.width / 2 + 0.2 + w / 2} z={d.z + d.depth / 2 - strip / 2} y={SOCLE_H + 0.02} theme={theme} />
+          </group>
+        )
+      })}
       {[...layout.plots.entries()].map(([name, p]) => (
-        <GroundLabel key={name} text={shortNode(name) + (cordoned.has(name) ? ' · cordon' : '')} w={g.width} h={0.7} x={p.x} z={p.z + g.depth / 2 + 0.45} align="center" size={34} theme={theme} />
+        <GroundLabel key={name} text={shortNode(name) + (cordoned.has(name) ? ' · cordon' : '')} w={g.width} h={0.7} x={p.x} z={p.z + g.depth / 2 + 0.45} align="center" size={34} y={SOCLE_H + 0.03} theme={theme} />
       ))}
       {layout.avenues.map((a, i) => (
         <Plane key={`avenue-${i}`} w={a.width} d={a.depth} x={a.x} z={a.z} y={0.012} color={theme.avenue} />

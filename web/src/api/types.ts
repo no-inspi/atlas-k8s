@@ -27,6 +27,8 @@ export interface Node {
   zone: string
   spot: boolean
   gpu: number
+  /** Capacité nominale de la machine (status.capacity). */
+  capacity: Resources
   allocatable: Resources
   requested: Resources
   conditions: Condition[]

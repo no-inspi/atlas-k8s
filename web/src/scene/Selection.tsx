@@ -3,6 +3,7 @@ import { useMemo } from 'react'
 import * as THREE from 'three'
 import { useCluster } from '../store/cluster'
 import { LOD_PX } from './Pods'
+import { SOCLE_H } from './layout'
 import type { Theme } from './theme'
 import { tick } from './tick'
 import { podPositions, world } from './world'
@@ -61,7 +62,7 @@ export function Selection({ theme, reducedMotion }: { theme: Theme; reducedMotio
       const p = world.layout?.plots.get(sel.key)
       if (p && world.layout) {
         marker.visible = true
-        marker.position.set(p.x, 3.4 + bob, p.z - world.layout.geometry.depth / 2 + 0.5)
+        marker.position.set(p.x, SOCLE_H + 3.4 + bob, p.z - world.layout.geometry.depth / 2 + 0.5)
       }
     } else if (sel) {
       const at = world.positionOf(sel.type, sel.key)

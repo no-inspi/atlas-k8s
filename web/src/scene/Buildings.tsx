@@ -4,7 +4,7 @@ import * as THREE from 'three'
 import type { Node } from '../api/types'
 import { useCluster } from '../store/cluster'
 import { Part, opacityMaterial } from './instanced'
-import { nodeStyle, type PlotGeometry } from './layout'
+import { nodeStyle, SOCLE_H, type PlotGeometry } from './layout'
 import { pickables } from './pick'
 import { LOD_PX } from './Pods'
 import type { Theme } from './theme'
@@ -201,5 +201,6 @@ export function Buildings({ theme }: { theme: Theme }) {
     if (closeUp && nodes.length && !document.hidden) invalidate()
   })
 
-  return <group ref={group} />
+  // Bâtiments posés sur le socle de leur quartier ; le picking suit la matrice du groupe.
+  return <group ref={group} position-y={SOCLE_H} />
 }

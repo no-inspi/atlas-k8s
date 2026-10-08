@@ -32,6 +32,7 @@ type Node struct {
 	Zone           string      `json:"zone"`
 	Spot           bool        `json:"spot"`
 	GPU            int         `json:"gpu"`
+	Capacity       Resources   `json:"capacity"`
 	Allocatable    Resources   `json:"allocatable"`
 	Requested      Resources   `json:"requested"`
 	Conditions     []Condition `json:"conditions"`

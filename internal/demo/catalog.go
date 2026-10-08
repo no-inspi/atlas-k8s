@@ -12,15 +12,17 @@ type poolDef struct {
 	Name, Machine string
 	CPU           int64 // allocatable, millicores
 	Mem           int64 // allocatable, octets
+	CapCPU        int64 // capacité nominale, millicores
+	CapMem        int64 // capacité nominale, octets
 	Spot          bool
 	GPU           int
 	Count         int
 }
 
 var pools = []poolDef{
-	{Name: "default-pool", Machine: "e2-standard-4", CPU: 3920, Mem: 13000 * mi, Count: 3},
-	{Name: "spot-pool", Machine: "e2-standard-8", CPU: 7910, Mem: 27000 * mi, Spot: true, Count: 2},
-	{Name: "gpu-pool", Machine: "g2-standard-8", CPU: 7910, Mem: 27000 * mi, GPU: 1, Count: 1},
+	{Name: "default-pool", Machine: "e2-standard-4", CPU: 3920, Mem: 13000 * mi, CapCPU: 4000, CapMem: 16 * gi, Count: 3},
+	{Name: "spot-pool", Machine: "e2-standard-8", CPU: 7910, Mem: 27000 * mi, CapCPU: 8000, CapMem: 32 * gi, Spot: true, Count: 2},
+	{Name: "gpu-pool", Machine: "g2-standard-8", CPU: 7910, Mem: 27000 * mi, CapCPU: 8000, CapMem: 32 * gi, GPU: 1, Count: 1},
 }
 
 var zones = []string{"europe-west1-b", "europe-west1-c", "europe-west1-d"}
