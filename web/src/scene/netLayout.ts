@@ -38,7 +38,7 @@ export interface RelayGroup { key: string; ns: string; x: number; z: number; ave
 export interface Segment { ns: string; avenue: number; x0: number; x1: number }
 export interface GateSlot { name: string; x: number; z: number }
 export interface Island { storageClass: string; x: number; z: number; width: number; depth: number }
-export interface TankSlot { key: string; x: number; z: number; r: number }
+export interface TankSlot { key: string; x: number; z: number; r: number; h: number }
 /** Repères d'une avenue (z) : bord nord, voies des lignes principales, des fibres et des conduites, noms des tronçons. */
 export interface Lanes { north: number; main: number; fibre: number; data: number; label: number }
 
@@ -63,8 +63,12 @@ export function lanesOf(a: Avenue): Lanes {
   return { north: a.z - a.depth / 2, main: a.z - 0.05, fibre: a.z + 0.45, data: a.z + 0.95, label: a.z + 1.45 }
 }
 
-/** Rayon d'une citerne : logarithme de la capacité demandée, entre 0,35 et 0,8. */
-export const tankRadius = (bytes: number) => Math.min(0.8, Math.max(0.35, 0.35 + 0.1 * Math.log2(Math.max(1, bytes / GiB))))
+/** Position d'une capacité sur l'échelle logarithmique 256 Mi → 1 Ti, entre 0 et 1. */
+const tankScale = (bytes: number) => Math.min(1, Math.max(0, (Math.log2(Math.max(1, bytes) / GiB) + 2) / 12))
+/** Rayon d'une citerne : 0,25 (≤ 256 Mi) à 0,8 (≥ 1 Ti), sans déborder du pas. */
+export const tankRadius = (bytes: number) => 0.25 + 0.55 * tankScale(bytes)
+/** Hauteur d'une citerne : 0,4 (≤ 256 Mi) à 3,6 (≥ 1 Ti) ; 1 Gi, 15 Gi et 120 Gi restent bien distincts. */
+export const tankHeight = (bytes: number) => 0.4 + 3.2 * tankScale(bytes)
 
 function union(a: Rect, b: Rect | null): Rect {
   if (!b) return a
@@ -230,6 +234,7 @@ export function layoutNetwork(city: CityLayout, relays: RelayInput[], gates: str
       x: wx + 0.4 + TANK_PITCH * ((k % cols) + 0.5),
       z: z + ISLAND_LABEL + TANK_PITCH * (Math.floor(k / cols) + 0.5),
       r: tankRadius(bytes),
+      h: tankHeight(bytes),
     })
     ts.forEach((t, k) => tankSlots.set(t.key, slot(k, t.key, t.requested)))
     os.forEach((o, j) => orphanSlots.push(slot(ts.length + j, o.key, o.capacity)))

@@ -39,7 +39,6 @@ const GLOW: ReadonlySet<PartName> = new Set(['beacon', 'tankCap'])
 /** Pièces en fil de fer (citernes vides). */
 const WIRE: ReadonlySet<PartName> = new Set(['orphanBody'])
 const PICKABLE: PartName[] = ['relayRing', 'relayBase', 'signPanel', 'gatePost', 'gateLintel', 'tankBody', 'orphanBody']
-const TANK_H = 1.4
 const GATE_SPAN = 1.9 // écart entre les piliers d'une porte, le long de z
 const WHITE = new THREE.Color('#ffffff')
 
@@ -227,8 +226,8 @@ export function Network({ theme, reducedMotion }: { theme: Theme; reducedMotion:
         const sig = volumeSignal(v)
         const a = alpha(key, v.namespace)
         const body = key === selKey ? colors.accent : sig === 'ok' ? colors.tank : colors.signal[sig]
-        put('tankBody', slot.x, 0, slot.z, slot.r, TANK_H, slot.r, body, sig === 'warn' ? a * 0.45 : a, key)
-        put('tankCap', slot.x, TANK_H, slot.z, slot.r, 1, slot.r, colors.signal[sig], a)
+        put('tankBody', slot.x, 0, slot.z, slot.r, slot.h, slot.r, body, sig === 'warn' ? a * 0.45 : a, key)
+        put('tankCap', slot.x, slot.h, slot.z, slot.r, 1, slot.r, colors.signal[sig], a)
       }
 
       // Citernes vides (PV sans PVC) : fil de fer gris, rouge si Failed ;
@@ -240,7 +239,7 @@ export function Network({ theme, reducedMotion }: { theme: Theme; reducedMotion:
         const key = `pv:${o.key}`
         const a = alpha(key, pv.claimRef?.split('/')[0])
         const color = key === selKey ? colors.accent : pvSignal(pv) === 'err' ? colors.signal.err : colors.muted
-        put('orphanBody', o.x, 0, o.z, o.r, TANK_H, o.r, color, a, key)
+        put('orphanBody', o.x, 0, o.z, o.r, o.h, o.r, color, a, key)
         if (pv.phase === 'Released') {
           const z = o.z + o.r + 0.25
           put('signPost', o.x, 0, z, 1, 1, 1, colors.muted, a)

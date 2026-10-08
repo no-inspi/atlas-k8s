@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { node } from '../store/fixtures'
 import { GATE_ZONE, layoutCity, plotGeometry } from './layout'
-import { layoutNetwork, RELAY_PITCH, RELAY_PITCH_MIN, tankRadius, type OrphanInput, type RelayInput, type TankInput } from './netLayout'
+import { layoutNetwork, RELAY_PITCH, RELAY_PITCH_MIN, tankHeight, tankRadius, type OrphanInput, type RelayInput, type TankInput } from './netLayout'
 
 const city = layoutCity([node({ name: 'a-1', pool: 'p' }), node({ name: 'a-2', pool: 'p' }), node({ name: 'a-3', pool: 'p' })], plotGeometry(12))
 const relay = (ns: string, name: string): RelayInput => ({ key: `${ns}/${name}`, namespace: ns, name })
@@ -171,9 +171,18 @@ describe('entrepôts', () => {
   })
 
   it('dimensionne les citernes selon la capacité, entre deux bornes', () => {
-    expect(tankRadius(1 * GiB)).toBeCloseTo(0.35)
-    expect(tankRadius(8 * GiB)).toBeGreaterThan(tankRadius(1 * GiB))
-    expect(tankRadius(10_000 * GiB)).toBe(0.8)
+    expect(tankRadius(1)).toBeCloseTo(0.25)
+    expect(tankRadius(10_000 * GiB)).toBeCloseTo(0.8)
+    expect(tankHeight(1)).toBeCloseTo(0.4)
+    expect(tankHeight(10_000 * GiB)).toBeCloseTo(3.6)
+  })
+
+  it('distingue nettement 1 Gi, 15 Gi et 120 Gi', () => {
+    const vol = (gib: number) => tankRadius(gib * GiB) ** 2 * tankHeight(gib * GiB)
+    expect(vol(15) / vol(1)).toBeGreaterThan(3)
+    expect(vol(120) / vol(15)).toBeGreaterThan(2)
+    expect(tankHeight(120 * GiB) - tankHeight(15 * GiB)).toBeGreaterThan(0.7)
+    expect(tankRadius(120 * GiB) - tankRadius(15 * GiB)).toBeGreaterThan(0.12)
   })
 })
 
